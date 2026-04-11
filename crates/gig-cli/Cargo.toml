@@ -1,0 +1,17 @@
+[package]
+name = "gig-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "gig"
+path = "src/main.rs"
+
+[dependencies]
+gig-core = { path = "../gig-core" }
+clap = { workspace = true }
+comfy-table = { workspace = true }
+owo-colors = { workspace = true }
+time = { workspace = true }
