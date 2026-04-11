@@ -15,3 +15,4 @@ clap = { workspace = true }
 comfy-table = { workspace = true }
 owo-colors = { workspace = true }
 time = { workspace = true }
+rusqlite = { workspace = true }
