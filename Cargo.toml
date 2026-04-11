@@ -1,0 +1,28 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/gig-core",
+    "crates/gig-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+license = "MIT"
+authors = ["jc"]
+repository = "https://github.com/jc/gig"
+
+[workspace.dependencies]
+# Shared versions pinned here
+rusqlite = { version = "0.31", features = ["bundled", "time"] }
+refinery = { version = "0.8", features = ["rusqlite"] }
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+time = { version = "0.3", features = ["serde", "formatting", "parsing", "macros"] }
+thiserror = "1"
+directories = "5"
+clap = { version = "4", features = ["derive"] }
+comfy-table = "7"
+owo-colors = "4"
+tempfile = "3"
