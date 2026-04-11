@@ -1,0 +1,13 @@
+//! gig-core: pure business logic for the gig CLI.
+//!
+//! This crate owns the SQLite schema, models, repositories, and services.
+//! It must not depend on any CLI or UI layer.
+
+pub mod config;
+pub mod db;
+pub mod error;
+pub mod models;
+pub mod repo;
+pub mod services;
+
+pub use error::{Error, Result};
