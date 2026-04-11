@@ -16,3 +16,6 @@ Cargo.lock.bak
 *.sqlite
 *.sqlite-wal
 *.sqlite-shm
+
+# OMC agent state (not project artifacts)
+.omc/

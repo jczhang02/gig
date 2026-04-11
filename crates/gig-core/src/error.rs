@@ -61,6 +61,9 @@ mod tests {
             from: "lead".into(),
             to: "delivered".into(),
         };
-        assert_eq!(err.to_string(), "invalid status transition: lead → delivered");
+        assert_eq!(
+            err.to_string(),
+            "invalid status transition: lead → delivered"
+        );
     }
 }

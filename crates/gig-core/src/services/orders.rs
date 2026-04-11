@@ -37,12 +37,7 @@ fn timestamp_col_for(to: OrderStatus) -> Option<&'static str> {
 
 /// Transition an order's status, updating the corresponding timestamp.
 /// All transitions flow through this function.
-pub fn transition(
-    conn: &Connection,
-    id: i64,
-    to: OrderStatus,
-    now: i64,
-) -> Result<Order> {
+pub fn transition(conn: &Connection, id: i64, to: OrderStatus, now: i64) -> Result<Order> {
     let current = repo::find_by_id(conn, id)?;
     if current.status == to {
         return Ok(current); // idempotent
@@ -74,13 +69,13 @@ pub struct CreateOrderInput<'a> {
 
 /// Create an order. If `as_lead` is true, the order starts in `Lead`;
 /// otherwise it starts in `Accepted` with `accepted_at = now`.
-pub fn create_order(
-    conn: &Connection,
-    input: &CreateOrderInput<'_>,
-    now: i64,
-) -> Result<Order> {
+pub fn create_order(conn: &Connection, input: &CreateOrderInput<'_>, now: i64) -> Result<Order> {
     validate_create_input(input)?;
-    let status = if input.as_lead { OrderStatus::Lead } else { OrderStatus::Accepted };
+    let status = if input.as_lead {
+        OrderStatus::Lead
+    } else {
+        OrderStatus::Accepted
+    };
     let accepted_at = (!input.as_lead).then_some(now);
     let new = repo::NewOrder {
         slug: input.slug,
@@ -152,7 +147,9 @@ mod tests {
     #[test]
     fn any_nonarchived_can_cancel() {
         for &s in OrderStatus::ALL {
-            if matches!(s, OrderStatus::Cancelled | OrderStatus::Archived) { continue; }
+            if matches!(s, OrderStatus::Cancelled | OrderStatus::Archived) {
+                continue;
+            }
             assert!(
                 can_transition(s, OrderStatus::Cancelled),
                 "{s:?} should be cancellable"
@@ -163,7 +160,10 @@ mod tests {
     #[test]
     fn archived_cannot_transition_further() {
         assert!(!can_transition(OrderStatus::Archived, OrderStatus::Paid));
-        assert!(!can_transition(OrderStatus::Archived, OrderStatus::Cancelled));
+        assert!(!can_transition(
+            OrderStatus::Archived,
+            OrderStatus::Cancelled
+        ));
     }
 
     #[test]

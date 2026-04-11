@@ -31,14 +31,14 @@ impl OrderStatus {
 
     pub fn as_str(&self) -> &'static str {
         match self {
-            OrderStatus::Lead        => "lead",
+            OrderStatus::Lead => "lead",
             OrderStatus::Negotiating => "negotiating",
-            OrderStatus::Accepted    => "accepted",
-            OrderStatus::InProgress  => "in_progress",
-            OrderStatus::Delivered   => "delivered",
-            OrderStatus::Paid        => "paid",
-            OrderStatus::Archived    => "archived",
-            OrderStatus::Cancelled   => "cancelled",
+            OrderStatus::Accepted => "accepted",
+            OrderStatus::InProgress => "in_progress",
+            OrderStatus::Delivered => "delivered",
+            OrderStatus::Paid => "paid",
+            OrderStatus::Archived => "archived",
+            OrderStatus::Cancelled => "cancelled",
         }
     }
 }
@@ -53,14 +53,14 @@ impl FromStr for OrderStatus {
     type Err = Error;
     fn from_str(s: &str) -> Result<Self> {
         Ok(match s {
-            "lead"        => OrderStatus::Lead,
+            "lead" => OrderStatus::Lead,
             "negotiating" => OrderStatus::Negotiating,
-            "accepted"    => OrderStatus::Accepted,
+            "accepted" => OrderStatus::Accepted,
             "in_progress" => OrderStatus::InProgress,
-            "delivered"   => OrderStatus::Delivered,
-            "paid"        => OrderStatus::Paid,
-            "archived"    => OrderStatus::Archived,
-            "cancelled"   => OrderStatus::Cancelled,
+            "delivered" => OrderStatus::Delivered,
+            "paid" => OrderStatus::Paid,
+            "archived" => OrderStatus::Archived,
+            "cancelled" => OrderStatus::Cancelled,
             other => return Err(Error::Invalid(format!("unknown status: {other}"))),
         })
     }
@@ -119,12 +119,25 @@ mod tests {
     #[test]
     fn my_cut_amount_is_none_when_final_price_missing() {
         let o = Order {
-            id: 1, slug: None, external_id: None, title: "t".into(),
-            client_id: None, source_org: None, status: OrderStatus::Accepted,
-            quoted_price: None, final_price: None, my_cut_ratio: 0.6,
-            currency: "CNY".into(), dev_path: None, archive_path: None,
-            notes: None, created_at: 0, accepted_at: None, delivered_at: None,
-            paid_at: None, archived_at: None,
+            id: 1,
+            slug: None,
+            external_id: None,
+            title: "t".into(),
+            client_id: None,
+            source_org: None,
+            status: OrderStatus::Accepted,
+            quoted_price: None,
+            final_price: None,
+            my_cut_ratio: 0.6,
+            currency: "CNY".into(),
+            dev_path: None,
+            archive_path: None,
+            notes: None,
+            created_at: 0,
+            accepted_at: None,
+            delivered_at: None,
+            paid_at: None,
+            archived_at: None,
         };
         assert_eq!(o.my_cut_amount(), None);
     }
@@ -132,12 +145,25 @@ mod tests {
     #[test]
     fn my_cut_amount_rounds_to_nearest() {
         let o = Order {
-            id: 1, slug: None, external_id: None, title: "t".into(),
-            client_id: None, source_org: None, status: OrderStatus::Accepted,
-            quoted_price: None, final_price: Some(10_000), my_cut_ratio: 0.6,
-            currency: "CNY".into(), dev_path: None, archive_path: None,
-            notes: None, created_at: 0, accepted_at: None, delivered_at: None,
-            paid_at: None, archived_at: None,
+            id: 1,
+            slug: None,
+            external_id: None,
+            title: "t".into(),
+            client_id: None,
+            source_org: None,
+            status: OrderStatus::Accepted,
+            quoted_price: None,
+            final_price: Some(10_000),
+            my_cut_ratio: 0.6,
+            currency: "CNY".into(),
+            dev_path: None,
+            archive_path: None,
+            notes: None,
+            created_at: 0,
+            accepted_at: None,
+            delivered_at: None,
+            paid_at: None,
+            archived_at: None,
         };
         assert_eq!(o.my_cut_amount(), Some(6_000));
     }

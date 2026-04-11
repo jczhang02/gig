@@ -48,7 +48,13 @@ fn fresh_db_round_trip_create_list_show_transition() {
     assert_eq!(all.len(), 2);
 
     // list only leads
-    let leads = list(&conn, &ListFilter { status: Some(OrderStatus::Lead) }).unwrap();
+    let leads = list(
+        &conn,
+        &ListFilter {
+            status: Some(OrderStatus::Lead),
+        },
+    )
+    .unwrap();
     assert_eq!(leads.len(), 1);
     assert_eq!(leads[0].id, lead.id);
 
@@ -59,7 +65,10 @@ fn fresh_db_round_trip_create_list_show_transition() {
     // transition happy path
     let moved = transition(&conn, full.id, OrderStatus::InProgress, 3_000).unwrap();
     assert_eq!(moved.status, OrderStatus::InProgress);
-    assert_eq!(find_by_id(&conn, full.id).unwrap().status, OrderStatus::InProgress);
+    assert_eq!(
+        find_by_id(&conn, full.id).unwrap().status,
+        OrderStatus::InProgress
+    );
 
     // rejects illegal transitions
     let err = transition(&conn, lead.id, OrderStatus::Paid, 4_000).unwrap_err();

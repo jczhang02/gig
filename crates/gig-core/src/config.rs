@@ -9,13 +9,13 @@ use std::path::{Path, PathBuf};
 /// Resolved filesystem paths for gig. Always absolute.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Paths {
-    pub data_dir: PathBuf,     // $XDG_DATA_HOME/gig
-    pub config_dir: PathBuf,   // $XDG_CONFIG_HOME/gig
-    pub state_dir: PathBuf,    // $XDG_STATE_HOME/gig
-    pub db_file: PathBuf,      // data_dir/gig.db
-    pub config_file: PathBuf,  // config_dir/config.toml
+    pub data_dir: PathBuf,      // $XDG_DATA_HOME/gig
+    pub config_dir: PathBuf,    // $XDG_CONFIG_HOME/gig
+    pub state_dir: PathBuf,     // $XDG_STATE_HOME/gig
+    pub db_file: PathBuf,       // data_dir/gig.db
+    pub config_file: PathBuf,   // config_dir/config.toml
     pub templates_dir: PathBuf, // data_dir/templates
-    pub backups_dir: PathBuf,  // state_dir/backups
+    pub backups_dir: PathBuf,   // state_dir/backups
 }
 
 impl Paths {
@@ -23,8 +23,8 @@ impl Paths {
     ///
     /// Uses the XDG Base Directory spec. `$HOME` must be set.
     pub fn from_env() -> Result<Self> {
-        let home = std::env::var_os("HOME")
-            .ok_or_else(|| Error::Config("HOME is not set".into()))?;
+        let home =
+            std::env::var_os("HOME").ok_or_else(|| Error::Config("HOME is not set".into()))?;
         let home = PathBuf::from(home);
 
         let data_dir = xdg_dir("XDG_DATA_HOME", &home, ".local/share").join("gig");
@@ -61,9 +61,14 @@ impl Paths {
 
     /// Ensure all required directories exist.
     pub fn ensure_dirs(&self) -> Result<()> {
-        for dir in [&self.data_dir, &self.config_dir, &self.state_dir, &self.templates_dir, &self.backups_dir] {
-            std::fs::create_dir_all(dir)
-                .map_err(|e| Error::PathUnavailable(dir.clone(), e))?;
+        for dir in [
+            &self.data_dir,
+            &self.config_dir,
+            &self.state_dir,
+            &self.templates_dir,
+            &self.backups_dir,
+        ] {
+            std::fs::create_dir_all(dir).map_err(|e| Error::PathUnavailable(dir.clone(), e))?;
         }
         Ok(())
     }
@@ -77,7 +82,7 @@ fn xdg_dir(env_var: &str, home: &Path, fallback: &str) -> PathBuf {
 }
 
 /// User-facing config loaded from `config_file`.
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Default)]
 #[serde(default)]
 pub struct Config {
     pub general: General,
@@ -94,12 +99,6 @@ pub struct General {
     pub default_cut_ratio: f64,
     /// Default currency code (ISO 4217).
     pub default_currency: String,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self { general: General::default() }
-    }
 }
 
 impl Default for General {
@@ -133,8 +132,7 @@ impl Config {
                 .map_err(|e| Error::PathUnavailable(parent.to_path_buf(), e))?;
         }
         let text = toml::to_string_pretty(self)?;
-        std::fs::write(path, text)
-            .map_err(|e| Error::PathUnavailable(path.to_path_buf(), e))?;
+        std::fs::write(path, text).map_err(|e| Error::PathUnavailable(path.to_path_buf(), e))?;
         Ok(())
     }
 }

@@ -49,16 +49,37 @@ pub fn orders_table(orders: &[Order]) -> Table {
 pub fn order_detail(o: &Order) -> String {
     let mut s = String::new();
     s.push_str(&format!("Order #{}  {}\n", o.id, o.title.bold()));
-    s.push_str(&format!("  slug         : {}\n", o.slug.as_deref().unwrap_or("—")));
+    s.push_str(&format!(
+        "  slug         : {}\n",
+        o.slug.as_deref().unwrap_or("—")
+    ));
     s.push_str(&format!("  status       : {}\n", colour_status(o.status)));
-    s.push_str(&format!("  quoted       : {}\n", format_price(o.quoted_price, &o.currency)));
-    s.push_str(&format!("  final        : {}\n", format_price(o.final_price, &o.currency)));
+    s.push_str(&format!(
+        "  quoted       : {}\n",
+        format_price(o.quoted_price, &o.currency)
+    ));
+    s.push_str(&format!(
+        "  final        : {}\n",
+        format_price(o.final_price, &o.currency)
+    ));
     s.push_str(&format!("  cut ratio    : {:.2}\n", o.my_cut_ratio));
-    s.push_str(&format!("  cut amount   : {}\n", format_price(o.my_cut_amount(), &o.currency)));
+    s.push_str(&format!(
+        "  cut amount   : {}\n",
+        format_price(o.my_cut_amount(), &o.currency)
+    ));
     s.push_str(&format!("  currency     : {}\n", o.currency));
-    s.push_str(&format!("  source_org   : {}\n", o.source_org.as_deref().unwrap_or("—")));
-    s.push_str(&format!("  dev_path     : {}\n", o.dev_path.as_deref().unwrap_or("—")));
-    s.push_str(&format!("  archive_path : {}\n", o.archive_path.as_deref().unwrap_or("—")));
+    s.push_str(&format!(
+        "  source_org   : {}\n",
+        o.source_org.as_deref().unwrap_or("—")
+    ));
+    s.push_str(&format!(
+        "  dev_path     : {}\n",
+        o.dev_path.as_deref().unwrap_or("—")
+    ));
+    s.push_str(&format!(
+        "  archive_path : {}\n",
+        o.archive_path.as_deref().unwrap_or("—")
+    ));
     if let Some(n) = &o.notes {
         s.push_str(&format!("  notes        : {n}\n"));
     }

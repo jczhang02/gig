@@ -60,7 +60,9 @@ mod tests {
     #[test]
     fn foreign_keys_are_enabled() {
         let conn = open_in_memory().unwrap();
-        let fk: i64 = conn.query_row("PRAGMA foreign_keys", [], |r| r.get(0)).unwrap();
+        let fk: i64 = conn
+            .query_row("PRAGMA foreign_keys", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(fk, 1);
     }
 

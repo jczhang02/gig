@@ -24,7 +24,13 @@ pub fn insert(
     conn.execute(
         "INSERT INTO clients (display_name, wechat_contact, source_org, notes, first_seen_at)
          VALUES (?1, ?2, ?3, ?4, ?5)",
-        params![display_name, wechat_contact, source_org, notes, first_seen_at],
+        params![
+            display_name,
+            wechat_contact,
+            source_org,
+            notes,
+            first_seen_at
+        ],
     )?;
     let id = conn.last_insert_rowid();
     find_by_id(conn, id)
@@ -58,7 +64,15 @@ mod tests {
     #[test]
     fn insert_and_find_roundtrip() {
         let conn = open_in_memory().unwrap();
-        let c = insert(&conn, "Acme Corp", Some("acme-wx"), Some("org-1"), None, 1_700_000_000).unwrap();
+        let c = insert(
+            &conn,
+            "Acme Corp",
+            Some("acme-wx"),
+            Some("org-1"),
+            None,
+            1_700_000_000,
+        )
+        .unwrap();
         assert_eq!(c.display_name, "Acme Corp");
         assert_eq!(c.wechat_contact.as_deref(), Some("acme-wx"));
         let again = find_by_id(&conn, c.id).unwrap();

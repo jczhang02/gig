@@ -5,12 +5,16 @@ use std::str::FromStr;
 
 fn map_row(row: &Row<'_>) -> rusqlite::Result<Order> {
     let status_str: String = row.get("status")?;
-    let status = OrderStatus::from_str(&status_str)
-        .map_err(|e| rusqlite::Error::FromSqlConversionFailure(
+    let status = OrderStatus::from_str(&status_str).map_err(|e| {
+        rusqlite::Error::FromSqlConversionFailure(
             0,
             rusqlite::types::Type::Text,
-            Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string())),
-        ))?;
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                e.to_string(),
+            )),
+        )
+    })?;
     Ok(Order {
         id: row.get("id")?,
         slug: row.get("slug")?,
@@ -83,21 +87,19 @@ pub fn insert(conn: &Connection, new: &NewOrder<'_>) -> Result<Order> {
 pub fn find_by_id(conn: &Connection, id: i64) -> Result<Order> {
     let sql = format!("SELECT {ALL_COLS} FROM orders WHERE id = ?1");
     let mut stmt = conn.prepare(&sql)?;
-    stmt.query_row(params![id], map_row)
-        .map_err(|e| match e {
-            rusqlite::Error::QueryReturnedNoRows => Error::OrderNotFound(id.to_string()),
-            other => Error::Db(other),
-        })
+    stmt.query_row(params![id], map_row).map_err(|e| match e {
+        rusqlite::Error::QueryReturnedNoRows => Error::OrderNotFound(id.to_string()),
+        other => Error::Db(other),
+    })
 }
 
 pub fn find_by_slug(conn: &Connection, slug: &str) -> Result<Order> {
     let sql = format!("SELECT {ALL_COLS} FROM orders WHERE slug = ?1");
     let mut stmt = conn.prepare(&sql)?;
-    stmt.query_row(params![slug], map_row)
-        .map_err(|e| match e {
-            rusqlite::Error::QueryReturnedNoRows => Error::OrderNotFound(slug.to_string()),
-            other => Error::Db(other),
-        })
+    stmt.query_row(params![slug], map_row).map_err(|e| match e {
+        rusqlite::Error::QueryReturnedNoRows => Error::OrderNotFound(slug.to_string()),
+        other => Error::Db(other),
+    })
 }
 
 /// Resolve an identifier that may be a numeric id or a slug.
@@ -116,18 +118,18 @@ pub struct ListFilter {
 pub fn list(conn: &Connection, filter: &ListFilter) -> Result<Vec<Order>> {
     let rows = match filter.status {
         Some(s) => {
-            let sql = format!(
-                "SELECT {ALL_COLS} FROM orders WHERE status = ?1 ORDER BY id DESC"
-            );
+            let sql = format!("SELECT {ALL_COLS} FROM orders WHERE status = ?1 ORDER BY id DESC");
             let mut stmt = conn.prepare(&sql)?;
-            let rows = stmt.query_map(params![s.as_str()], map_row)?
+            let rows = stmt
+                .query_map(params![s.as_str()], map_row)?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             rows
         }
         None => {
             let sql = format!("SELECT {ALL_COLS} FROM orders ORDER BY id DESC");
             let mut stmt = conn.prepare(&sql)?;
-            let rows = stmt.query_map([], map_row)?
+            let rows = stmt
+                .query_map([], map_row)?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             rows
         }
@@ -149,7 +151,10 @@ pub fn update_status(
             // Safe because `col` is never user-supplied: it's a hard-coded
             // column name from the service layer. We still validate.
             assert!(
-                matches!(col, "accepted_at" | "delivered_at" | "paid_at" | "archived_at"),
+                matches!(
+                    col,
+                    "accepted_at" | "delivered_at" | "paid_at" | "archived_at"
+                ),
                 "forbidden timestamp col: {col}"
             );
             let sql = format!("UPDATE orders SET status = ?1, {col} = ?2 WHERE id = ?3");
@@ -238,7 +243,13 @@ mod tests {
         insert(&conn, &sample("a", OrderStatus::Lead)).unwrap();
         insert(&conn, &sample("b", OrderStatus::Accepted)).unwrap();
         insert(&conn, &sample("c", OrderStatus::Lead)).unwrap();
-        let leads = list(&conn, &ListFilter { status: Some(OrderStatus::Lead) }).unwrap();
+        let leads = list(
+            &conn,
+            &ListFilter {
+                status: Some(OrderStatus::Lead),
+            },
+        )
+        .unwrap();
         assert_eq!(leads.len(), 2);
         for o in &leads {
             assert_eq!(o.status, OrderStatus::Lead);
@@ -259,7 +270,14 @@ mod tests {
     fn update_status_with_timestamp_sets_both() {
         let conn = open_in_memory().unwrap();
         let o = insert(&conn, &sample("t", OrderStatus::Accepted)).unwrap();
-        update_status(&conn, o.id, OrderStatus::Delivered, Some("delivered_at"), Some(42)).unwrap();
+        update_status(
+            &conn,
+            o.id,
+            OrderStatus::Delivered,
+            Some("delivered_at"),
+            Some(42),
+        )
+        .unwrap();
         let again = find_by_id(&conn, o.id).unwrap();
         assert_eq!(again.status, OrderStatus::Delivered);
         assert_eq!(again.delivered_at, Some(42));
