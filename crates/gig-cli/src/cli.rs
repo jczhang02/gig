@@ -25,7 +25,39 @@ pub enum Command {
 
     /// Show a single order in detail.
     Show(ShowArgs),
+
+    /// Initialise a project folder for an accepted order.
+    Init(InitArgs),
+
+    /// Update the final price of an order.
+    Price(PriceArgs),
+
+    /// Record a requirement change.
+    Change(ChangeArgs),
+
+    /// Append a note to an order.
+    Note(NoteArgs),
+
+    /// Add tags to an order.
+    Tag(TagArgs),
+
+    /// Update the cut ratio for an order.
+    Cut(CutArgs),
+
+    /// Force-set the status of an order.
+    Status(StatusArgs),
+
+    /// Mark an order as paid.
+    Paid(PaidArgs),
+
+    /// Archive an order (move project folder to archive root).
+    Archive(ArchiveArgs),
+
+    /// Lead subcommands (promote / drop / ls).
+    Lead(LeadArgs),
 }
+
+// ─── Existing ─────────────────────────────────────────────────────────────────
 
 #[derive(clap::Args, Debug)]
 pub struct NewArgs {
@@ -75,6 +107,123 @@ pub struct LsArgs {
 
 #[derive(clap::Args, Debug)]
 pub struct ShowArgs {
+    /// Order id or slug.
+    pub id: String,
+}
+
+// ─── New commands ─────────────────────────────────────────────────────────────
+
+#[derive(clap::Args, Debug)]
+pub struct InitArgs {
+    /// Order id or slug.
+    pub id: String,
+
+    /// Override the slug / folder name used for the project directory.
+    #[arg(long)]
+    pub slug: Option<String>,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct PriceArgs {
+    /// Order id or slug.
+    pub id: String,
+
+    /// New final price in minor currency units (cents).
+    pub amount: i64,
+
+    /// Optional reason for the price change.
+    #[arg(long)]
+    pub reason: Option<String>,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct ChangeArgs {
+    /// Order id or slug.
+    pub id: String,
+
+    /// Description of the requirement change.
+    #[arg(long)]
+    pub message: String,
+
+    /// Price delta in minor units (positive = increase, negative = decrease).
+    #[arg(long, default_value = "0")]
+    pub delta: i64,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct NoteArgs {
+    /// Order id or slug.
+    pub id: String,
+
+    /// Text to append to the order's notes.
+    pub text: String,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct TagArgs {
+    /// Order id or slug.
+    pub id: String,
+
+    /// Tags to add (space-separated).
+    pub tags: Vec<String>,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct CutArgs {
+    /// Order id or slug.
+    pub id: String,
+
+    /// New cut ratio (0.0 – 1.0).
+    pub ratio: f64,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct StatusArgs {
+    /// Order id or slug.
+    pub id: String,
+
+    /// Target status (lead, negotiating, accepted, in_progress, delivered, paid, archived, cancelled).
+    pub status: String,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct PaidArgs {
+    /// Order id or slug.
+    pub id: String,
+
+    /// Override the paid date (unix timestamp). Defaults to now.
+    #[arg(long)]
+    pub on: Option<i64>,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct ArchiveArgs {
+    /// Order id or slug.
+    pub id: String,
+}
+
+// ─── Lead subgroup ────────────────────────────────────────────────────────────
+
+#[derive(clap::Args, Debug)]
+pub struct LeadArgs {
+    #[command(subcommand)]
+    pub command: LeadCommand,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum LeadCommand {
+    /// Promote a lead to negotiating.
+    Promote(LeadIdArgs),
+
+    /// Drop a lead (cancel it).
+    Drop(LeadIdArgs),
+
+    /// List all leads.
+    Ls,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct LeadIdArgs {
     /// Order id or slug.
     pub id: String,
 }
