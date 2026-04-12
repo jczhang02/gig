@@ -102,13 +102,15 @@ pub fn order_detail_full(
         format_price(o.my_cut_amount(), &o.currency)
     ));
     s.push_str(&format!("  currency     : {}\n", o.currency));
-    s.push_str(&format!(
-        "  source_org   : {}\n",
-        o.source_org.as_deref().unwrap_or("—")
-    ));
-    if let Some(src) = source_display {
-        s.push_str(&format!("  source       : {src}\n"));
-    }
+    // Merge source_org and source entity into a single "source" line.
+    let source_line = if let Some(src) = source_display {
+        src.to_string()
+    } else if let Some(org) = o.source_org.as_deref() {
+        org.to_string()
+    } else {
+        "—".to_string()
+    };
+    s.push_str(&format!("  source       : {source_line}\n"));
     s.push_str(&format!(
         "  dev_path     : {}\n",
         o.dev_path.as_deref().unwrap_or("—")

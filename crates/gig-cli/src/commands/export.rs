@@ -3,6 +3,8 @@ use gig_core::repo::orders::{list, ListFilter};
 use gig_core::Result;
 use rusqlite::Connection;
 use std::io::Write;
+use time::format_description::well_known::Rfc3339;
+use time::OffsetDateTime;
 
 pub fn run(conn: &Connection, args: ExportArgs) -> Result<()> {
     let orders = list(conn, &ListFilter { status: None })?;
@@ -22,6 +24,20 @@ pub fn run(conn: &Connection, args: ExportArgs) -> Result<()> {
         other => Err(gig_core::Error::Invalid(format!(
             "unknown format {other:?}; use csv or json"
         ))),
+    }
+}
+
+fn unix_to_iso(ts: i64) -> String {
+    OffsetDateTime::from_unix_timestamp(ts)
+        .ok()
+        .and_then(|dt| dt.format(&Rfc3339).ok())
+        .unwrap_or_else(|| ts.to_string())
+}
+
+fn unix_to_iso_opt(ts: Option<i64>) -> String {
+    match ts {
+        None => String::new(),
+        Some(t) => unix_to_iso(t),
     }
 }
 
@@ -53,8 +69,8 @@ fn export_csv(mut w: Box<dyn Write>, orders: &[gig_core::models::Order]) -> Resu
             cents_to_yuan(o.final_price),
             cut,
             o.currency,
-            o.created_at,
-            o.paid_at.map(|v| v.to_string()).unwrap_or_default(),
+            unix_to_iso(o.created_at),
+            unix_to_iso_opt(o.paid_at),
         )
         .map_err(gig_core::Error::Io)?;
     }
@@ -81,6 +97,8 @@ fn export_json(mut w: Box<dyn Write>, orders: &[gig_core::models::Order]) -> Res
     for (i, o) in orders.iter().enumerate() {
         let comma = if i + 1 < orders.len() { "," } else { "" };
         let cut = o.my_cut_amount();
+        let created_iso = unix_to_iso(o.created_at);
+        let paid_iso = o.paid_at.map(unix_to_iso);
         writeln!(
             w,
             "  {{\
@@ -98,8 +116,8 @@ fn export_json(mut w: Box<dyn Write>, orders: &[gig_core::models::Order]) -> Res
             json_opt_yuan(o.final_price),
             json_opt_yuan(cut),
             o.currency,
-            o.created_at,
-            json_opt_i64(o.paid_at),
+            json_str(Some(&created_iso)),
+            json_str(paid_iso.as_deref()),
             comma,
         )
         .map_err(gig_core::Error::Io)?;
