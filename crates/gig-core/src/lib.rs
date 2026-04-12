@@ -6,6 +6,7 @@
 pub mod config;
 pub mod context;
 pub mod db;
+pub mod delivery;
 pub mod error;
 pub mod models;
 pub mod repo;
