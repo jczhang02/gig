@@ -9,13 +9,19 @@ use std::str::FromStr;
 use time::OffsetDateTime;
 
 pub fn run(conn: &Connection, args: StatusArgs) -> Result<()> {
-    let status = OrderStatus::from_str(&args.status).map_err(|_| {
+    // Two positionals: `gig status <id> <status>` or one: `gig status <status>` (context for id)
+    let (id_opt, status_str) = match args.status_if_id {
+        Some(ref s) => (Some(args.id_or_status.clone()), s.as_str()),
+        None => (None, args.id_or_status.as_str()),
+    };
+
+    let status = OrderStatus::from_str(status_str).map_err(|_| {
         Error::Invalid(format!(
             "unknown status {:?}; valid: lead, negotiating, accepted, in_progress, delivered, paid, archived, cancelled",
-            args.status
+            status_str
         ))
     })?;
-    let order = resolve_order(args.id, conn)?;
+    let order = resolve_order(id_opt, conn)?;
     ui::print_banner(&order);
 
     // Destructive status changes require confirmation unless --yes

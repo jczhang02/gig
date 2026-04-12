@@ -186,19 +186,18 @@ pub struct ChangeArgs {
     #[arg(long)]
     pub message: String,
 
-    /// Price delta in minor units (positive = increase, negative = decrease).
-    #[arg(long, default_value = "0")]
-    pub delta: i64,
+    /// Price delta in yuan (positive = increase, negative = decrease). E.g. 300 means ¥300.
+    #[arg(long, default_value = "0", allow_hyphen_values = true)]
+    pub delta: String,
 }
 
 #[derive(clap::Args, Debug)]
 pub struct NoteArgs {
-    /// Order id or slug (omit to use context from current directory).
-    pub id: Option<String>,
+    /// Order id or slug, OR the note text when used alone (context resolves id).
+    pub id_or_text: String,
 
-    /// Text to append to the order's notes.
-    #[arg(long)]
-    pub text: String,
+    /// Note text (when the first positional is the order id).
+    pub text_if_id: Option<String>,
 }
 
 #[derive(clap::Args, Debug)]
@@ -222,12 +221,11 @@ pub struct CutArgs {
 
 #[derive(clap::Args, Debug)]
 pub struct StatusArgs {
-    /// Order id or slug (omit to use context from current directory).
-    pub id: Option<String>,
+    /// Order id or slug, OR target status when used alone (context resolves id).
+    pub id_or_status: String,
 
-    /// Target status (lead, negotiating, accepted, in_progress, delivered, paid, archived, cancelled).
-    #[arg(long)]
-    pub status: String,
+    /// Target status (when the first positional is the order id).
+    pub status_if_id: Option<String>,
 
     /// Skip confirmation prompt.
     #[arg(long)]
@@ -291,9 +289,13 @@ pub struct DeliverArgs {
     #[arg(long)]
     pub resend: bool,
 
-    /// Archive format used when packing: "zip" or "tar.zst".
-    #[arg(long, default_value = "zip")]
-    pub format: String,
+    /// Archive format used when packing: "zip" or "tar.zst" (defaults to config pack.default_format).
+    #[arg(long)]
+    pub format: Option<String>,
+
+    /// Print what would be packed/uploaded without actually doing it.
+    #[arg(long)]
+    pub dry_run: bool,
 }
 
 // ─── Lead subgroup ────────────────────────────────────────────────────────────
