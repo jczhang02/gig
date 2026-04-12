@@ -70,11 +70,20 @@ pub fn init_project(
 ) -> Result<Order> {
     let order = repo::find_by_id(conn, id)?;
 
-    if order.status != OrderStatus::Accepted {
-        return Err(Error::Invalid(format!(
-            "order #{id} must be in 'accepted' state to init (current: {})",
-            order.status
-        )));
+    match order.status {
+        OrderStatus::Accepted | OrderStatus::Negotiating => {
+            // Will transition to in_progress below.
+        }
+        OrderStatus::InProgress => {
+            // Idempotent re-init: update dev_path if needed, skip transition.
+            // Fall through; the transition call is idempotent for InProgress.
+        }
+        _ => {
+            return Err(Error::Invalid(format!(
+                "order #{id} must be in 'accepted', 'negotiating', or 'in_progress' state to init (current: {})",
+                order.status
+            )));
+        }
     }
 
     // Determine slug

@@ -118,7 +118,17 @@ pub fn archive_order(conn: &Connection, id: i64, archive_root: &Path, now: i64) 
         let dest = archive_root.join(slug);
         std::fs::create_dir_all(archive_root)
             .map_err(|e| Error::PathUnavailable(archive_root.to_path_buf(), e))?;
-        std::fs::rename(src, &dest).map_err(|e| Error::PathUnavailable(dest.clone(), e))?;
+        // Try rename first; fall back to recursive copy+delete on cross-device moves.
+        match std::fs::rename(src, &dest) {
+            Ok(()) => {}
+            Err(e) if e.raw_os_error() == Some(18) => {
+                // Error 18 = EXDEV: cross-device link not permitted.
+                copy_dir_recursive(src, &dest)
+                    .map_err(|e2| Error::PathUnavailable(dest.clone(), e2))?;
+                std::fs::remove_dir_all(src).map_err(Error::Io)?;
+            }
+            Err(e) => return Err(Error::PathUnavailable(dest.clone(), e)),
+        }
         let canonical =
             std::fs::canonicalize(&dest).map_err(|e| Error::PathUnavailable(dest.clone(), e))?;
         let archive_path_str = canonical
@@ -129,6 +139,25 @@ pub fn archive_order(conn: &Connection, id: i64, archive_root: &Path, now: i64) 
     }
 
     transition(conn, id, OrderStatus::Archived, now)
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/// Recursively copy a directory tree from `src` to `dst`.
+/// Used as a fallback when `std::fs::rename` fails across filesystems (EXDEV).
+fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let ty = entry.file_type()?;
+        let target = dst.join(entry.file_name());
+        if ty.is_dir() {
+            copy_dir_recursive(&entry.path(), &target)?;
+        } else {
+            std::fs::copy(entry.path(), &target)?;
+        }
+    }
+    Ok(())
 }
 
 // ─── Lead ─────────────────────────────────────────────────────────────────────

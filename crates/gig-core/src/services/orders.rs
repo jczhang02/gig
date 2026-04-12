@@ -44,8 +44,19 @@ pub fn transition(conn: &Connection, id: i64, to: OrderStatus, now: i64) -> Resu
         return Ok(current); // idempotent
     }
     if !can_transition(current.status, to) {
+        // Build a hint about valid next states.
+        let valid_next: Vec<&str> = OrderStatus::ALL
+            .iter()
+            .filter(|&&s| can_transition(current.status, s))
+            .map(|s| s.as_str())
+            .collect();
+        let hint = if valid_next.is_empty() {
+            String::new()
+        } else {
+            format!(" (valid next: {})", valid_next.join(", "))
+        };
         return Err(Error::InvalidTransition {
-            from: current.status.to_string(),
+            from: format!("{}{hint}", current.status),
             to: to.to_string(),
         });
     }
