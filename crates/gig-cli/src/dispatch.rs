@@ -25,5 +25,7 @@ pub fn run(cli: Cli) -> Result<()> {
         Command::Lead(args) => commands::lead::run(&conn, args),
         Command::Cd(args) => commands::cd::run(&conn, args),
         Command::Doctor => commands::doctor::run(&conn),
+        Command::Pack(args) => commands::pack::run(&conn, args),
+        Command::Deliver(args) => commands::deliver::run(&conn, args),
     }
 }

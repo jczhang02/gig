@@ -61,6 +61,12 @@ pub enum Command {
 
     /// Run consistency checks on paths and data.
     Doctor,
+
+    /// Pack a project into an archive (zip or tar.zst).
+    Pack(PackArgs),
+
+    /// Pack, upload, record artifact, and transition order to delivered.
+    Deliver(DeliverArgs),
 }
 
 // ─── Existing ─────────────────────────────────────────────────────────────────
@@ -224,6 +230,42 @@ pub struct ArchiveArgs {
 pub struct CdArgs {
     /// Order id or slug (omit to use context from current directory).
     pub id: Option<String>,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct PackArgs {
+    /// Order id or slug (omit to use context from current directory).
+    pub id: Option<String>,
+
+    /// Archive format: "zip" (default) or "tar.zst".
+    #[arg(long, default_value = "zip")]
+    pub format: String,
+
+    /// Print the file list without creating the archive.
+    #[arg(long)]
+    pub dry_run: bool,
+
+    /// Override the output path (default: $TMPDIR/gig-<slug>.<ext>).
+    #[arg(long)]
+    pub output: Option<std::path::PathBuf>,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct DeliverArgs {
+    /// Order id or slug (omit to use context from current directory).
+    pub id: Option<String>,
+
+    /// Uploader name (overrides config default_uploader).
+    #[arg(long)]
+    pub uploader: Option<String>,
+
+    /// Skip pack step and re-upload the most recent local archive.
+    #[arg(long)]
+    pub resend: bool,
+
+    /// Archive format used when packing: "zip" or "tar.zst".
+    #[arg(long, default_value = "zip")]
+    pub format: String,
 }
 
 // ─── Lead subgroup ────────────────────────────────────────────────────────────
