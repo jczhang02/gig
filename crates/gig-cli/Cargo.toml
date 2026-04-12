@@ -16,3 +16,4 @@ comfy-table = { workspace = true }
 owo-colors = { workspace = true }
 time = { workspace = true }
 rusqlite = { workspace = true }
+arboard = { workspace = true }

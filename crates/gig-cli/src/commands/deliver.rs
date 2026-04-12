@@ -1,0 +1,153 @@
+//! `gig deliver <id>` — pack, upload, record artifact, transition to delivered.
+
+use crate::cli::DeliverArgs;
+use crate::commands::resolve_order;
+use crate::ui;
+use gig_core::config::{Config, Paths};
+use gig_core::delivery::rclone::RcloneUploader;
+use gig_core::delivery::{UploadOpts, Uploader};
+use gig_core::models::OrderStatus;
+use gig_core::repo::delivery_artifacts;
+use gig_core::services::lifecycle::set_status;
+use gig_core::services::pack::{pack_order, PackFormat};
+use gig_core::{Error, Result};
+use rusqlite::Connection;
+use std::path::PathBuf;
+use time::OffsetDateTime;
+
+pub fn run(conn: &Connection, args: DeliverArgs) -> Result<()> {
+    let paths = Paths::from_env()?;
+    let config = Config::load_or_default(&paths.config_file)?;
+
+    let order = resolve_order(args.id, conn)?;
+    ui::print_banner(&order);
+
+    // Determine uploader config (CLI flag > config default).
+    let uploader_name = args
+        .uploader
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .unwrap_or(config.delivery.default_uploader.as_str());
+
+    if uploader_name.is_empty() {
+        return Err(Error::Config(
+            "no uploader configured; set [delivery] default_uploader in config.toml \
+             or pass --uploader"
+                .into(),
+        ));
+    }
+
+    // Determine format.
+    let fmt_str = if args.format != "zip" {
+        args.format.clone()
+    } else {
+        config.pack.default_format.clone()
+    };
+    let format = PackFormat::parse(&fmt_str).unwrap_or(PackFormat::Zip);
+
+    // Resolve archive path.
+    let archive_path = if args.resend {
+        // --resend: use most-recent artifact's local_path, or error.
+        let artifact = delivery_artifacts::latest_for_order(conn, order.id)?.ok_or_else(|| {
+            Error::Invalid(format!(
+                "no previous delivery artifact for order #{} — cannot --resend",
+                order.id
+            ))
+        })?;
+        let local = artifact
+            .local_path
+            .ok_or_else(|| Error::Invalid("previous artifact has no local_path stored".into()))?;
+        let p = PathBuf::from(&local);
+        if !p.exists() {
+            return Err(Error::Invalid(format!(
+                "previous archive not found on disk: {local}"
+            )));
+        }
+        p
+    } else {
+        // Normal path: pack the project.
+        let dev_path = order.dev_path.as_deref().ok_or_else(|| {
+            Error::Invalid(format!(
+                "order #{} has no dev_path; run `gig init {}` first",
+                order.id, order.id
+            ))
+        })?;
+        let project_dir = PathBuf::from(dev_path);
+        let id_str = order.id.to_string();
+        let slug = order.slug.as_deref().unwrap_or(&id_str);
+        let tmp = std::env::temp_dir();
+        let output = tmp.join(format!("gig-{}.{}", slug, format.extension()));
+
+        eprint!("packing...");
+        let result = pack_order(
+            &project_dir,
+            &output,
+            &format,
+            &config.pack.extra_ignore,
+            false,
+        )?;
+        eprintln!(" {} file(s)", result.files_count);
+        result.archive_path
+    };
+
+    // Build the uploader.
+    // v0.1: only rclone is supported. The uploader_name is expected to be
+    // in the form "rclone:<remote>" (e.g. "rclone:r2:gig-delivery").
+    // Strip the "rclone:" prefix to get the rclone remote path.
+    let uploader: Box<dyn Uploader> = build_uploader(uploader_name)?;
+
+    eprint!("uploading to {}...", uploader_name);
+    let upload_result = uploader.upload(
+        &archive_path,
+        &UploadOpts {
+            link_ttl_days: None,
+        },
+    )?;
+    eprintln!(" done");
+
+    let now = OffsetDateTime::now_utc().unix_timestamp();
+
+    // Record delivery artifact.
+    delivery_artifacts::insert(
+        conn,
+        order.id,
+        Some(&archive_path.to_string_lossy()),
+        Some(uploader_name),
+        Some(&upload_result.url),
+        upload_result.expires_at,
+        now,
+    )?;
+
+    // Transition status → delivered.
+    let updated = set_status(conn, order.id, OrderStatus::Delivered, now)?;
+
+    println!("link: {}", upload_result.url);
+    println!("status: {} → {}", order.status, updated.status);
+
+    // Attempt clipboard copy. Gracefully degrade if no display server.
+    match copy_to_clipboard(&upload_result.url) {
+        Ok(()) => eprintln!("(URL copied to clipboard)"),
+        Err(e) => eprintln!("(clipboard unavailable: {e})"),
+    }
+
+    Ok(())
+}
+
+/// Build an `Uploader` from a config name string.
+///
+/// Supported formats:
+/// - `"rclone:<remote>"` → `RcloneUploader { remote: "<remote>" }`
+/// - `"rclone:<bucket>:<path>"` → same, remote = `"<bucket>:<path>"`
+fn build_uploader(name: &str) -> Result<Box<dyn Uploader>> {
+    if let Some(remote) = name.strip_prefix("rclone:") {
+        return Ok(Box::new(RcloneUploader::new(remote)));
+    }
+    // For any unrecognized uploader name in v0.1, treat the whole name as an
+    // rclone remote (so bare "r2:bucket" also works).
+    Ok(Box::new(RcloneUploader::new(name)))
+}
+
+fn copy_to_clipboard(text: &str) -> std::result::Result<(), String> {
+    let mut ctx = arboard::Clipboard::new().map_err(|e| e.to_string())?;
+    ctx.set_text(text).map_err(|e| e.to_string())
+}
