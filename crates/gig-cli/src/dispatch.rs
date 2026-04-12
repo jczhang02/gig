@@ -23,5 +23,7 @@ pub fn run(cli: Cli) -> Result<()> {
         Command::Paid(args) => commands::paid::run(&conn, args),
         Command::Archive(args) => commands::archive::run(&conn, args),
         Command::Lead(args) => commands::lead::run(&conn, args),
+        Command::Cd(args) => commands::cd::run(&conn, args),
+        Command::Doctor => commands::doctor::run(&conn),
     }
 }

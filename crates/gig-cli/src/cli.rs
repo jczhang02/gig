@@ -55,6 +55,12 @@ pub enum Command {
 
     /// Lead subcommands (promote / drop / ls).
     Lead(LeadArgs),
+
+    /// Print the dev_path of an order (for shell `cd`).
+    Cd(CdArgs),
+
+    /// Run consistency checks on paths and data.
+    Doctor,
 }
 
 // ─── Existing ─────────────────────────────────────────────────────────────────
@@ -107,8 +113,8 @@ pub struct LsArgs {
 
 #[derive(clap::Args, Debug)]
 pub struct ShowArgs {
-    /// Order id or slug.
-    pub id: String,
+    /// Order id or slug (omit to use context from current directory).
+    pub id: Option<String>,
 }
 
 // ─── New commands ─────────────────────────────────────────────────────────────
@@ -125,10 +131,11 @@ pub struct InitArgs {
 
 #[derive(clap::Args, Debug)]
 pub struct PriceArgs {
-    /// Order id or slug.
-    pub id: String,
+    /// Order id or slug (omit to use context from current directory).
+    pub id: Option<String>,
 
     /// New final price in minor currency units (cents).
+    #[arg(long)]
     pub amount: i64,
 
     /// Optional reason for the price change.
@@ -138,8 +145,8 @@ pub struct PriceArgs {
 
 #[derive(clap::Args, Debug)]
 pub struct ChangeArgs {
-    /// Order id or slug.
-    pub id: String,
+    /// Order id or slug (omit to use context from current directory).
+    pub id: Option<String>,
 
     /// Description of the requirement change.
     #[arg(long)]
@@ -152,17 +159,18 @@ pub struct ChangeArgs {
 
 #[derive(clap::Args, Debug)]
 pub struct NoteArgs {
-    /// Order id or slug.
-    pub id: String,
+    /// Order id or slug (omit to use context from current directory).
+    pub id: Option<String>,
 
     /// Text to append to the order's notes.
+    #[arg(long)]
     pub text: String,
 }
 
 #[derive(clap::Args, Debug)]
 pub struct TagArgs {
-    /// Order id or slug.
-    pub id: String,
+    /// Order id or slug (omit to use context from current directory).
+    pub id: Option<String>,
 
     /// Tags to add (space-separated).
     pub tags: Vec<String>,
@@ -170,26 +178,32 @@ pub struct TagArgs {
 
 #[derive(clap::Args, Debug)]
 pub struct CutArgs {
-    /// Order id or slug.
-    pub id: String,
+    /// Order id or slug (omit to use context from current directory).
+    pub id: Option<String>,
 
     /// New cut ratio (0.0 – 1.0).
+    #[arg(long)]
     pub ratio: f64,
 }
 
 #[derive(clap::Args, Debug)]
 pub struct StatusArgs {
-    /// Order id or slug.
-    pub id: String,
+    /// Order id or slug (omit to use context from current directory).
+    pub id: Option<String>,
 
     /// Target status (lead, negotiating, accepted, in_progress, delivered, paid, archived, cancelled).
+    #[arg(long)]
     pub status: String,
+
+    /// Skip confirmation prompt.
+    #[arg(long)]
+    pub yes: bool,
 }
 
 #[derive(clap::Args, Debug)]
 pub struct PaidArgs {
-    /// Order id or slug.
-    pub id: String,
+    /// Order id or slug (omit to use context from current directory).
+    pub id: Option<String>,
 
     /// Override the paid date (unix timestamp). Defaults to now.
     #[arg(long)]
@@ -198,8 +212,18 @@ pub struct PaidArgs {
 
 #[derive(clap::Args, Debug)]
 pub struct ArchiveArgs {
-    /// Order id or slug.
-    pub id: String,
+    /// Order id or slug (omit to use context from current directory).
+    pub id: Option<String>,
+
+    /// Skip confirmation prompt.
+    #[arg(long)]
+    pub yes: bool,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct CdArgs {
+    /// Order id or slug (omit to use context from current directory).
+    pub id: Option<String>,
 }
 
 // ─── Lead subgroup ────────────────────────────────────────────────────────────
