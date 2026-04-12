@@ -8,6 +8,33 @@ use crate::Error;
 use crate::Result;
 use minijinja::{context, Environment};
 
+/// Embedded default templates: (name, content) pairs.
+/// Name is without the `.j2` extension, matching the template subcommand.
+pub const EMBEDDED_TEMPLATES: &[(&str, &str)] = &[
+    ("project-readme", DEFAULT_PROJECT_README),
+    ("quote-reply", DEFAULT_QUOTE_REPLY),
+    ("delivery-checklist", DEFAULT_DELIVERY_CHECKLIST),
+];
+
+const DEFAULT_QUOTE_REPLY: &str = r#"您好,
+
+针对您提到的需求,报价如下:
+
+- 项目:{{ title }}
+- 报价:{{ quoted_price }} {{ currency }}
+- 交付周期:待定
+
+如有疑问欢迎沟通。
+"#;
+
+const DEFAULT_DELIVERY_CHECKLIST: &str = r#"# 交付检查清单 — {{ title }}
+
+- [ ] 代码已测试
+- [ ] 文档已更新
+- [ ] 交付包已生成
+- [ ] 链接已发送给客户
+"#;
+
 /// Default project README template embedded in the binary.
 const DEFAULT_PROJECT_README: &str = r#"# {{ title }}
 
