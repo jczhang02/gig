@@ -25,6 +25,13 @@ pub fn run(conn: &Connection, args: ExportArgs) -> Result<()> {
     }
 }
 
+fn cents_to_yuan(cents: Option<i64>) -> String {
+    match cents {
+        None => String::new(),
+        Some(c) => format!("{:.2}", c as f64 / 100.0),
+    }
+}
+
 fn export_csv(mut w: Box<dyn Write>, orders: &[gig_core::models::Order]) -> Result<()> {
     writeln!(
         w,
@@ -33,7 +40,7 @@ fn export_csv(mut w: Box<dyn Write>, orders: &[gig_core::models::Order]) -> Resu
     .map_err(gig_core::Error::Io)?;
 
     for o in orders {
-        let cut = o.my_cut_amount().map(|v| v.to_string()).unwrap_or_default();
+        let cut = cents_to_yuan(o.my_cut_amount());
         writeln!(
             w,
             "{},{},{},{},{},{},{},{},{},{},{}",
@@ -42,8 +49,8 @@ fn export_csv(mut w: Box<dyn Write>, orders: &[gig_core::models::Order]) -> Resu
             csv_field(&o.title),
             o.client_id.map(|v| v.to_string()).unwrap_or_default(),
             o.status.as_str(),
-            o.quoted_price.map(|v| v.to_string()).unwrap_or_default(),
-            o.final_price.map(|v| v.to_string()).unwrap_or_default(),
+            cents_to_yuan(o.quoted_price),
+            cents_to_yuan(o.final_price),
             cut,
             o.currency,
             o.created_at,
@@ -59,6 +66,13 @@ fn csv_field(s: &str) -> String {
         format!("\"{}\"", s.replace('"', "\"\""))
     } else {
         s.to_string()
+    }
+}
+
+fn json_opt_yuan(v: Option<i64>) -> String {
+    match v {
+        None => "null".into(),
+        Some(n) => format!("{:.2}", n as f64 / 100.0),
     }
 }
 
@@ -80,9 +94,9 @@ fn export_json(mut w: Box<dyn Write>, orders: &[gig_core::models::Order]) -> Res
             json_str(Some(o.title.as_str())),
             json_opt_i64(o.client_id),
             o.status.as_str(),
-            json_opt_i64(o.quoted_price),
-            json_opt_i64(o.final_price),
-            json_opt_i64(cut),
+            json_opt_yuan(o.quoted_price),
+            json_opt_yuan(o.final_price),
+            json_opt_yuan(cut),
             o.currency,
             o.created_at,
             json_opt_i64(o.paid_at),

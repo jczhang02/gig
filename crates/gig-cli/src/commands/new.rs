@@ -1,5 +1,5 @@
 use crate::cli::NewArgs;
-use crate::ui;
+use crate::ui::{self, parse_yuan};
 use gig_core::config::Config;
 use gig_core::config::Paths;
 use gig_core::repo::sources;
@@ -38,14 +38,25 @@ pub fn run(conn: &Connection, args: NewArgs) -> Result<()> {
         .or(source_cut_ratio)
         .unwrap_or(config.general.default_cut_ratio);
 
+    let quoted_price = args
+        .quoted_price
+        .as_deref()
+        .map(parse_yuan)
+        .transpose()?;
+    let final_price = args
+        .final_price
+        .as_deref()
+        .map(parse_yuan)
+        .transpose()?;
+
     let input = CreateOrderInput {
         title: &args.title,
         slug: args.slug.as_deref(),
         client_id: None,
         source_org: args.source_org.as_deref(),
         source_id,
-        quoted_price: args.quoted_price,
-        final_price: args.final_price,
+        quoted_price,
+        final_price,
         my_cut_ratio: cut_ratio,
         currency: &currency,
         notes: args.notes.as_deref(),

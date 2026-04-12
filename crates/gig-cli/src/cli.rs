@@ -105,13 +105,13 @@ pub struct NewArgs {
     #[arg(long)]
     pub slug: Option<String>,
 
-    /// Quoted price in minor units (e.g. cents). Optional at create time.
+    /// Quoted price in yuan (e.g. 1200 or 1200.50). Optional at create time.
     #[arg(long)]
-    pub quoted_price: Option<i64>,
+    pub quoted_price: Option<String>,
 
-    /// Final price in minor units.
+    /// Final price in yuan (e.g. 1200 or 1200.50).
     #[arg(long)]
-    pub final_price: Option<i64>,
+    pub final_price: Option<String>,
 
     /// Override default cut ratio (e.g. 0.6).
     #[arg(long)]
@@ -168,9 +168,9 @@ pub struct PriceArgs {
     /// Order id or slug (omit to use context from current directory).
     pub id: Option<String>,
 
-    /// New final price in minor currency units (cents).
+    /// New final price in yuan (e.g. 1200 or 1200.50).
     #[arg(long)]
-    pub amount: i64,
+    pub amount: String,
 
     /// Optional reason for the price change.
     #[arg(long)]
