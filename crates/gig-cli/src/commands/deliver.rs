@@ -38,13 +38,44 @@ pub fn run(conn: &Connection, args: DeliverArgs) -> Result<()> {
         ));
     }
 
-    // Determine format.
-    let fmt_str = if args.format != "zip" {
-        args.format.clone()
-    } else {
-        config.pack.default_format.clone()
-    };
-    let format = PackFormat::parse(&fmt_str).unwrap_or(PackFormat::Zip);
+    // Determine format: CLI flag > config default > "zip".
+    let fmt_str = args
+        .format
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .unwrap_or(&config.pack.default_format);
+    let format = PackFormat::parse(fmt_str).unwrap_or(PackFormat::Zip);
+
+    // --dry-run: pack with dry_run=true, print what would be uploaded, then stop.
+    if args.dry_run {
+        let dev_path = order.dev_path.as_deref().ok_or_else(|| {
+            Error::Invalid(format!(
+                "order #{} has no dev_path; run `gig init {}` first",
+                order.id, order.id
+            ))
+        })?;
+        let project_dir = PathBuf::from(dev_path);
+        let id_str = order.id.to_string();
+        let slug = order.slug.as_deref().unwrap_or(&id_str);
+        let tmp = std::env::temp_dir();
+        let output = tmp.join(format!("gig-{}.{}", slug, format.extension()));
+
+        println!("(dry-run) would pack: {}", project_dir.display());
+        println!("(dry-run) would write: {}", output.display());
+        println!("(dry-run) would upload to: {uploader_name}");
+        let result = pack_order(
+            &project_dir,
+            &output,
+            &format,
+            &config.pack.extra_ignore,
+            true,
+        )?;
+        println!(
+            "(dry-run) files that would be included: {}",
+            result.files_count
+        );
+        return Ok(());
+    }
 
     // Resolve archive path.
     let archive_path = if args.resend {
