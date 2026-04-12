@@ -326,12 +326,11 @@ pub fn import_project(
     };
 
     // 11. Compute timestamps
+    // accepted_at = created_at (reasonable assumption for imported orders).
+    // All other status timestamps (delivered_at, paid_at, archived_at) stay NULL
+    // because we don't know when those events actually occurred.
     let accepted_at = Some(created_at);
-    let archived_at = if status == OrderStatus::Archived {
-        Some(created_at)
-    } else {
-        None
-    };
+    // archived_at stays NULL — we don't know the actual archive date.
 
     // 12. Insert order
     let new_order = order_repo::NewOrder {
@@ -365,14 +364,6 @@ pub fn import_project(
             rusqlite::params![ap, order.id],
         )?;
     }
-    // Set archived_at if needed
-    if let Some(at) = archived_at {
-        conn.execute(
-            "UPDATE orders SET archived_at = ?1 WHERE id = ?2",
-            rusqlite::params![at, order.id],
-        )?;
-    }
-
     // 14. Attach tags
     if !input.tags.is_empty() {
         let tag_refs: Vec<&str> = input.tags.iter().map(|s| s.as_str()).collect();
