@@ -511,6 +511,7 @@ dependencies = [
  "ignore",
  "minijinja",
  "refinery",
+ "regex",
  "rusqlite",
  "serde",
  "tempfile",
