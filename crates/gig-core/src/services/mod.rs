@@ -4,3 +4,4 @@
 pub mod init;
 pub mod lifecycle;
 pub mod orders;
+pub mod pack;

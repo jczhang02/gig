@@ -86,6 +86,33 @@ fn xdg_dir(env_var: &str, home: &Path, fallback: &str) -> PathBuf {
 #[serde(default)]
 pub struct Config {
     pub general: General,
+    pub pack: PackConfig,
+    pub delivery: DeliveryConfig,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(default)]
+pub struct PackConfig {
+    /// Default archive format: "zip" or "tar.zst".
+    pub default_format: String,
+    /// Extra ignore patterns applied to all projects (gitignore syntax).
+    pub extra_ignore: Vec<String>,
+}
+
+impl Default for PackConfig {
+    fn default() -> Self {
+        Self {
+            default_format: "zip".into(),
+            extra_ignore: vec![],
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Default)]
+#[serde(default)]
+pub struct DeliveryConfig {
+    /// Name of the default uploader (e.g. "rclone:r2").
+    pub default_uploader: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
