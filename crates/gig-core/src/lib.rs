@@ -9,5 +9,6 @@ pub mod error;
 pub mod models;
 pub mod repo;
 pub mod services;
+pub mod templates;
 
 pub use error::{Error, Result};
