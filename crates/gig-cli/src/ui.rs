@@ -1,7 +1,7 @@
 //! Output formatting helpers.
 
 use comfy_table::{presets::UTF8_FULL, Cell, ContentArrangement, Table};
-use gig_core::models::{Order, OrderStatus};
+use gig_core::models::{Order, OrderStatus, PriceHistoryEntry, RequirementChange, Tag};
 use owo_colors::OwoColorize;
 
 pub fn format_price(minor: Option<i64>, currency: &str) -> String {
@@ -47,6 +47,15 @@ pub fn orders_table(orders: &[Order]) -> Table {
 }
 
 pub fn order_detail(o: &Order) -> String {
+    order_detail_full(o, &[], &[], &[])
+}
+
+pub fn order_detail_full(
+    o: &Order,
+    tags: &[Tag],
+    price_history: &[PriceHistoryEntry],
+    req_changes: &[RequirementChange],
+) -> String {
     let mut s = String::new();
     s.push_str(&format!("Order #{}  {}\n", o.id, o.title.bold()));
     s.push_str(&format!(
@@ -83,5 +92,45 @@ pub fn order_detail(o: &Order) -> String {
     if let Some(n) = &o.notes {
         s.push_str(&format!("  notes        : {n}\n"));
     }
+
+    // Tags
+    if !tags.is_empty() {
+        let tag_names: Vec<&str> = tags.iter().map(|t| t.name.as_str()).collect();
+        s.push_str(&format!("  tags         : {}\n", tag_names.join(", ")));
+    }
+
+    // Price history
+    if !price_history.is_empty() {
+        s.push_str("  price history:\n");
+        for entry in price_history {
+            s.push_str(&format!(
+                "    #{}: {} → {}",
+                entry.id,
+                format_price(entry.old_price, &o.currency),
+                format_price(entry.new_price, &o.currency),
+            ));
+            if let Some(ref r) = entry.reason {
+                s.push_str(&format!("  [{r}]"));
+            }
+            s.push('\n');
+        }
+    }
+
+    // Requirement changes
+    if !req_changes.is_empty() {
+        s.push_str("  req changes  :\n");
+        for rc in req_changes {
+            let delta_str = if rc.price_delta >= 0 {
+                format!("+{}", format_price(Some(rc.price_delta), &o.currency))
+            } else {
+                format!("-{}", format_price(Some(-rc.price_delta), &o.currency))
+            };
+            s.push_str(&format!(
+                "    #{}: {}  ({})\n",
+                rc.id, rc.description, delta_str
+            ));
+        }
+    }
+
     s
 }
