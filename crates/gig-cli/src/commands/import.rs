@@ -3,6 +3,7 @@
 use crate::cli::ImportArgs;
 use gig_core::config::{Config, Paths};
 use gig_core::models::OrderStatus;
+use gig_core::repo::sources;
 use gig_core::services::import::{
     import_project, infer_created_at, infer_status, parse_date_prefix, relocate_project, slugify,
     ImportInput, ImportResult,
@@ -172,12 +173,14 @@ fn process_one(
         final_price: None,
         client_name: None,
         source_org: None,
+        source_id: None,
         notes: None,
         tags: vec![],
     };
 
     if args.interactive {
         interactive_prompt(
+            conn,
             &canonical,
             &base_slug,
             &inferred_title,
@@ -263,6 +266,7 @@ fn validate_current_dir(cwd: &Path, config: &Config, interactive: bool) -> Resul
 
 /// Prompt the user for each metadata field, keeping inferred values on empty input.
 fn interactive_prompt(
+    conn: &Connection,
     path: &Path,
     base_slug: &str,
     inferred_title: &str,
@@ -288,32 +292,64 @@ fn interactive_prompt(
         input.title_override = Some(title);
     }
 
-    let status_str = prompt_field("status", inferred_status.as_str())?;
-    if !status_str.is_empty() {
-        match OrderStatus::from_str(&status_str) {
-            Ok(s) => input.status_override = Some(s),
-            Err(_) => eprintln!("  unknown status '{status_str}', keeping inferred"),
-        }
+    // Numbered status selection
+    let all_statuses = OrderStatus::ALL;
+    let default_idx = all_statuses
+        .iter()
+        .position(|s| *s == inferred_status)
+        .unwrap_or(0);
+    if let Some(idx) = select_from_list("status", all_statuses, Some(default_idx))? {
+        input.status_override = Some(all_statuses[idx]);
     }
 
-    let qp = prompt_field("quoted_price", "—")?;
+    let qp = prompt_field("quoted_price (yuan, — to skip)", "—")?;
     if !qp.is_empty() && qp != "—" {
-        input.quoted_price = qp.parse::<i64>().ok();
+        input.quoted_price = crate::ui::parse_yuan(&qp).ok();
     }
 
-    let fp = prompt_field("final_price", "—")?;
+    let fp = prompt_field("final_price  (yuan, — to skip)", "—")?;
     if !fp.is_empty() && fp != "—" {
-        input.final_price = fp.parse::<i64>().ok();
+        input.final_price = crate::ui::parse_yuan(&fp).ok();
     }
 
-    let client = prompt_field("client", "—")?;
-    if !client.is_empty() && client != "—" {
-        input.client_name = Some(client);
-    }
-
-    let src_org = prompt_field("source_org", "—")?;
-    if !src_org.is_empty() && src_org != "—" {
-        input.source_org = Some(src_org);
+    // Source selection from DB
+    let existing_sources = sources::list(conn).unwrap_or_default();
+    if existing_sources.is_empty() {
+        let src_org = prompt_field("source_org", "—")?;
+        if !src_org.is_empty() && src_org != "—" {
+            input.source_org = Some(src_org);
+        }
+    } else {
+        println!("  source       select (0 = none, or type a new name):");
+        println!("    0) —");
+        for (i, s) in existing_sources.iter().enumerate() {
+            println!("    {}) {} ({:.0}%)", i + 1, s.name, s.cut_ratio * 100.0);
+        }
+        print!("  source       [0]: ");
+        io::stdout().flush().map_err(Error::Io)?;
+        let mut line = String::new();
+        io::stdin()
+            .lock()
+            .read_line(&mut line)
+            .map_err(Error::Io)?;
+        let choice = line.trim();
+        if choice.is_empty() || choice == "0" {
+            // no source
+        } else if let Ok(n) = choice.parse::<usize>() {
+            if n >= 1 && n <= existing_sources.len() {
+                let s = &existing_sources[n - 1];
+                input.source_id = Some(s.id);
+                input.source_org = Some(s.name.clone());
+            }
+        } else {
+            // Treat as new source name; prompt for cut_ratio
+            let new_name = choice.to_string();
+            let ratio_str = prompt_field("  cut_ratio for new source (e.g. 0.6)", "0.6")?;
+            let ratio: f64 = ratio_str.parse().unwrap_or(0.6);
+            let new_src = sources::find_or_create(conn, &new_name, ratio, None)?;
+            input.source_id = Some(new_src.id);
+            input.source_org = Some(new_src.name.clone());
+        }
     }
 
     let notes = prompt_field("notes", "—")?;
@@ -331,6 +367,44 @@ fn interactive_prompt(
     }
 
     Ok(())
+}
+
+/// Show a numbered list and let the user pick by index (1-based).
+/// Returns the 0-based index of the chosen item, or None if user pressed Enter on default.
+/// If the user presses Enter, returns Some(default_index) if provided.
+fn select_from_list<T: std::fmt::Display>(
+    prompt: &str,
+    options: &[T],
+    default_index: Option<usize>,
+) -> Result<Option<usize>> {
+    let default_display = default_index
+        .map(|i| (i + 1).to_string())
+        .unwrap_or_else(|| "—".to_string());
+
+    println!("  {prompt:<12} [{}]:", options.get(default_index.unwrap_or(0)).map(|v| v.to_string()).unwrap_or_default());
+    for (i, opt) in options.iter().enumerate() {
+        let marker = if Some(i) == default_index { " ←" } else { "" };
+        println!("    {}) {}{}", i + 1, opt, marker);
+    }
+    print!("  select [{}]: ", default_display);
+    io::stdout().flush().map_err(Error::Io)?;
+
+    let mut line = String::new();
+    io::stdin()
+        .lock()
+        .read_line(&mut line)
+        .map_err(Error::Io)?;
+    let trimmed = line.trim();
+
+    if trimmed.is_empty() {
+        return Ok(default_index);
+    }
+    if let Ok(n) = trimmed.parse::<usize>() {
+        if n >= 1 && n <= options.len() {
+            return Ok(Some(n - 1));
+        }
+    }
+    Ok(default_index)
 }
 
 fn prompt_field(name: &str, default: &str) -> Result<String> {

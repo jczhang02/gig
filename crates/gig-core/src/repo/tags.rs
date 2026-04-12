@@ -80,6 +80,7 @@ mod tests {
                 title: "test",
                 client_id: None,
                 source_org: None,
+                source_id: None,
                 status: OrderStatus::Accepted,
                 quoted_price: None,
                 final_price: None,

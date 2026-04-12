@@ -26,6 +26,7 @@ fn accepted_input<'a>(title: &'a str, slug: &'a str) -> CreateOrderInput<'a> {
         slug: Some(slug),
         client_id: None,
         source_org: Some("Acme Corp"),
+        source_id: None,
         quoted_price: Some(50_000),
         final_price: Some(50_000),
         my_cut_ratio: 0.6,

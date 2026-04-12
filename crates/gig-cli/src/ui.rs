@@ -2,8 +2,31 @@
 
 use comfy_table::{presets::UTF8_FULL, Cell, ContentArrangement, Table};
 use gig_core::models::{Order, OrderStatus, PriceHistoryEntry, RequirementChange, Tag};
+use gig_core::{Error, Result};
 use owo_colors::OwoColorize;
 use std::io::{self, BufRead, Write};
+
+/// Parse a user-input price string in yuan to minor units (cents).
+/// "1200" → 120000, "1200.50" → 120050, "1200.5" → 120050
+pub fn parse_yuan(s: &str) -> Result<i64> {
+    let s = s.trim();
+    if let Some((integer_part, frac_part)) = s.split_once('.') {
+        let integer: i64 = integer_part
+            .parse()
+            .map_err(|_| Error::Invalid(format!("invalid price: {s}")))?;
+        // Pad or truncate fractional part to exactly 2 digits
+        let frac_str = format!("{:0<2}", &frac_part[..frac_part.len().min(2)]);
+        let frac: i64 = frac_str
+            .parse()
+            .map_err(|_| Error::Invalid(format!("invalid price: {s}")))?;
+        Ok(integer * 100 + frac)
+    } else {
+        let integer: i64 = s
+            .parse()
+            .map_err(|_| Error::Invalid(format!("invalid price: {s}")))?;
+        Ok(integer * 100)
+    }
+}
 
 pub fn format_price(minor: Option<i64>, currency: &str) -> String {
     match minor {
@@ -48,7 +71,7 @@ pub fn orders_table(orders: &[Order]) -> Table {
 }
 
 pub fn order_detail(o: &Order) -> String {
-    order_detail_full(o, &[], &[], &[])
+    order_detail_full(o, &[], &[], &[], None)
 }
 
 pub fn order_detail_full(
@@ -56,6 +79,7 @@ pub fn order_detail_full(
     tags: &[Tag],
     price_history: &[PriceHistoryEntry],
     req_changes: &[RequirementChange],
+    source_display: Option<&str>,
 ) -> String {
     let mut s = String::new();
     s.push_str(&format!("Order #{}  {}\n", o.id, o.title.bold()));
@@ -82,6 +106,9 @@ pub fn order_detail_full(
         "  source_org   : {}\n",
         o.source_org.as_deref().unwrap_or("—")
     ));
+    if let Some(src) = source_display {
+        s.push_str(&format!("  source       : {src}\n"));
+    }
     s.push_str(&format!(
         "  dev_path     : {}\n",
         o.dev_path.as_deref().unwrap_or("—")

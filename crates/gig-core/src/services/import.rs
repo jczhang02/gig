@@ -212,8 +212,10 @@ pub struct ImportInput {
     pub final_price: Option<i64>,
     /// Optional client display_name (find_or_create).
     pub client_name: Option<String>,
-    /// Optional source org.
+    /// Optional source org name (display only).
     pub source_org: Option<String>,
+    /// Optional source entity id (references sources table).
+    pub source_id: Option<i64>,
     /// Optional notes.
     pub notes: Option<String>,
     /// Tags to attach (comma-separated or pre-split).
@@ -336,6 +338,7 @@ pub fn import_project(
         title: &title,
         client_id,
         source_org: input.source_org.as_deref(),
+        source_id: input.source_id,
         status,
         quoted_price: input.quoted_price,
         final_price: input.final_price,
@@ -555,6 +558,7 @@ mod tests {
             title: "My Project",
             client_id: None,
             source_org: None,
+            source_id: None,
             status: OrderStatus::Accepted,
             quoted_price: None,
             final_price: None,
@@ -591,6 +595,7 @@ mod tests {
             final_price: None,
             client_name: None,
             source_org: None,
+            source_id: None,
             notes: None,
             tags: vec![],
         };
@@ -624,6 +629,7 @@ mod tests {
             final_price: None,
             client_name: None,
             source_org: None,
+            source_id: None,
             notes: None,
             tags: vec![],
         };

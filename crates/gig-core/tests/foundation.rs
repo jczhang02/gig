@@ -15,6 +15,7 @@ fn new_input<'a>(title: &'a str, slug: Option<&'a str>, lead: bool) -> CreateOrd
         slug,
         client_id: None,
         source_org: None,
+        source_id: None,
         quoted_price: Some(100_000),
         final_price: None,
         my_cut_ratio: 0.6,

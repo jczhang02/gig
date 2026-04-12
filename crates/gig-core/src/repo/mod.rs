@@ -6,4 +6,5 @@ pub mod delivery_artifacts;
 pub mod orders;
 pub mod price_history;
 pub mod requirement_changes;
+pub mod sources;
 pub mod tags;

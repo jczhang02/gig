@@ -75,6 +75,7 @@ pub struct Order {
     pub title: String,
     pub client_id: Option<i64>,
     pub source_org: Option<String>,
+    pub source_id: Option<i64>,
     pub status: OrderStatus,
     pub quoted_price: Option<i64>,
     pub final_price: Option<i64>,

@@ -88,6 +88,9 @@ pub enum Command {
 
     /// Snapshot the database to the backups directory.
     Backup,
+
+    /// Source subcommands (add / ls).
+    Source(SourceArgs),
 }
 
 // ─── Existing ─────────────────────────────────────────────────────────────────
@@ -121,6 +124,10 @@ pub struct NewArgs {
     /// Source group / org identifier.
     #[arg(long)]
     pub source_org: Option<String>,
+
+    /// Source name (looks up existing source entity, auto-fills cut ratio).
+    #[arg(long)]
+    pub source: Option<String>,
 
     /// Notes.
     #[arg(long)]
@@ -411,6 +418,38 @@ pub struct ImportArgs {
     /// Print what would happen without writing to the database.
     #[arg(long)]
     pub dry_run: bool,
+}
+
+// ─── Source subgroup ──────────────────────────────────────────────────────────
+
+#[derive(clap::Args, Debug)]
+pub struct SourceArgs {
+    #[command(subcommand)]
+    pub command: SourceCommand,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum SourceCommand {
+    /// Add a new source.
+    Add(SourceAddArgs),
+
+    /// List all sources.
+    Ls,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct SourceAddArgs {
+    /// Source name (e.g. "平台A").
+    #[arg(long)]
+    pub name: String,
+
+    /// Commission cut ratio (0.0–1.0, e.g. 0.6 means 60% goes to you).
+    #[arg(long)]
+    pub cut_ratio: f64,
+
+    /// Optional notes.
+    #[arg(long)]
+    pub notes: Option<String>,
 }
 
 // ─── Config subgroup ──────────────────────────────────────────────────────────

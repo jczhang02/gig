@@ -22,6 +22,7 @@ fn map_row(row: &Row<'_>) -> rusqlite::Result<Order> {
         title: row.get("title")?,
         client_id: row.get("client_id")?,
         source_org: row.get("source_org")?,
+        source_id: row.get("source_id")?,
         status,
         quoted_price: row.get("quoted_price")?,
         final_price: row.get("final_price")?,
@@ -38,7 +39,7 @@ fn map_row(row: &Row<'_>) -> rusqlite::Result<Order> {
     })
 }
 
-const ALL_COLS: &str = "id, slug, external_id, title, client_id, source_org, status, \
+const ALL_COLS: &str = "id, slug, external_id, title, client_id, source_org, source_id, status, \
      quoted_price, final_price, my_cut_ratio, currency, dev_path, archive_path, \
      notes, created_at, accepted_at, delivered_at, paid_at, archived_at";
 
@@ -49,6 +50,7 @@ pub struct NewOrder<'a> {
     pub title: &'a str,
     pub client_id: Option<i64>,
     pub source_org: Option<&'a str>,
+    pub source_id: Option<i64>,
     pub status: OrderStatus,
     pub quoted_price: Option<i64>,
     pub final_price: Option<i64>,
@@ -61,16 +63,17 @@ pub struct NewOrder<'a> {
 
 pub fn insert(conn: &Connection, new: &NewOrder<'_>) -> Result<Order> {
     conn.execute(
-        "INSERT INTO orders (slug, external_id, title, client_id, source_org, status,
+        "INSERT INTO orders (slug, external_id, title, client_id, source_org, source_id, status,
                              quoted_price, final_price, my_cut_ratio, currency,
                              notes, created_at, accepted_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
         params![
             new.slug,
             new.external_id,
             new.title,
             new.client_id,
             new.source_org,
+            new.source_id,
             new.status.as_str(),
             new.quoted_price,
             new.final_price,
@@ -222,6 +225,7 @@ mod tests {
             title,
             client_id: None,
             source_org: None,
+            source_id: None,
             status,
             quoted_price: Some(10_000),
             final_price: None,

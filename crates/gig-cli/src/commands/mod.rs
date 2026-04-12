@@ -18,6 +18,7 @@ pub mod pack;
 pub mod paid;
 pub mod price;
 pub mod show;
+pub mod source;
 pub mod stats;
 pub mod status;
 pub mod tag;

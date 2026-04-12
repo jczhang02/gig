@@ -234,6 +234,7 @@ mod tests {
             title: "t",
             client_id: None,
             source_org: None,
+            source_id: None,
             status: OrderStatus::Paid,
             quoted_price: Some(cut),
             final_price: Some(cut),

@@ -224,6 +224,7 @@ mod tests {
             title: "test",
             client_id: None,
             source_org: None,
+            source_id: None,
             status,
             quoted_price: Some(10_000),
             final_price: Some(10_000),

@@ -34,5 +34,6 @@ pub fn run(cli: Cli) -> Result<()> {
         Command::Config(args) => commands::config::run(&conn, args),
         Command::Import(args) => commands::import::run(&conn, args),
         Command::Backup => commands::backup::run(&conn),
+        Command::Source(args) => commands::source::run(&conn, args),
     }
 }
