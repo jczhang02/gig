@@ -31,21 +31,27 @@ pub fn run(conn: &Connection, args: ImportArgs) -> Result<()> {
 
     let mut imported = 0usize;
     let mut skipped = 0usize;
+    let multi = import_paths.len() > 1;
 
-    for raw_path in import_paths {
-        match process_one(conn, &raw_path, &args, &config, now)? {
+    for (i, raw_path) in import_paths.iter().enumerate() {
+        if multi && i > 0 {
+            println!("{}", "─".repeat(60).dimmed());
+        }
+        match process_one(conn, raw_path, &args, &config, now)? {
             OneResult::Skipped(existing_id) => {
                 println!(
-                    "skipped  {}  already imported as #{}",
-                    raw_path.display(),
-                    existing_id
+                    "{} {}  already imported as {}",
+                    "skipped".dimmed(),
+                    raw_path.display().to_string().dimmed(),
+                    format!("#{existing_id}").dimmed()
                 );
                 skipped += 1;
             }
             OneResult::DryRun { slug, title, path } => {
                 println!(
-                    "[dry-run] would import  {:<32}  {:<12}  {}",
-                    slug,
+                    "{} would import  {:<32}  {:<12}  {}",
+                    "[dry-run]".dimmed(),
+                    slug.cyan().bold().to_string(),
                     title,
                     path.display()
                 );
@@ -53,11 +59,11 @@ pub fn run(conn: &Connection, args: ImportArgs) -> Result<()> {
             }
             OneResult::Done(res) => {
                 println!(
-                    "imported #{:<4}  {:<32}  {:<12}  {}",
-                    res.order_id,
-                    res.slug,
-                    res.title,
-                    res.path.display()
+                    "{} {}  {}  ({})",
+                    "→".green().bold(),
+                    format!("imported #{}", res.order_id).green(),
+                    res.slug.cyan().bold(),
+                    res.title
                 );
                 imported += 1;
             }
@@ -281,7 +287,12 @@ fn interactive_prompt(
     _inferred_created_at: i64,
     input: &mut ImportInput,
 ) -> Result<()> {
-    println!("importing: {}", path.display());
+    println!(
+        "\n{} {}",
+        "━━ importing:".bold(),
+        path.display().to_string().green().bold()
+    );
+    println!();
 
     let slug = prompt_field("slug", base_slug)?;
     if !slug.is_empty() {
@@ -327,12 +338,22 @@ fn interactive_prompt(
             input.source_org = Some(src_org);
         }
     } else {
-        println!("  source       select (0 = none, or type a new name):");
-        println!("    0) —");
+        println!(
+            "  {}  {} {}",
+            "source".cyan().bold(),
+            "select".dimmed(),
+            "(0 = none, or type a new name):".dimmed()
+        );
+        println!("    {}) {}", "0".dimmed(), "—".dimmed());
         for (i, s) in existing_sources.iter().enumerate() {
-            println!("    {}) {} ({:.0}%)", i + 1, s.name, s.cut_ratio * 100.0);
+            println!(
+                "    {}) {} {}",
+                format!("{}", i + 1).dimmed(),
+                s.name,
+                format!("({:.0}%)", s.cut_ratio * 100.0).dimmed()
+            );
         }
-        print!("  source       [0]: ");
+        print!("  {}  {}: ", "source".cyan().bold(), "[0]".dimmed());
         io::stdout().flush().map_err(Error::Io)?;
         let mut line = String::new();
         io::stdin().lock().read_line(&mut line).map_err(Error::Io)?;
@@ -348,7 +369,7 @@ fn interactive_prompt(
         } else {
             // Treat as new source name; prompt for cut_ratio
             let new_name = choice.to_string();
-            let ratio_str = prompt_field("  cut_ratio for new source (e.g. 0.6)", "0.6")?;
+            let ratio_str = prompt_field("cut_ratio", "0.6")?;
             let ratio: f64 = ratio_str.parse().unwrap_or(0.6);
             let new_src = sources::find_or_create(conn, &new_name, ratio, None)?;
             input.source_id = Some(new_src.id);
@@ -385,18 +406,33 @@ fn select_from_list<T: std::fmt::Display>(
         .map(|i| (i + 1).to_string())
         .unwrap_or_else(|| "—".to_string());
 
+    let default_val = options
+        .get(default_index.unwrap_or(0))
+        .map(|v| v.to_string())
+        .unwrap_or_default();
+
     println!(
-        "  {prompt:<12} [{}]:",
-        options
-            .get(default_index.unwrap_or(0))
-            .map(|v| v.to_string())
-            .unwrap_or_default()
+        "  {} {}:",
+        format!("{prompt:<12}").cyan().bold(),
+        format!("[{default_val}]").dimmed()
     );
     for (i, opt) in options.iter().enumerate() {
-        let marker = if Some(i) == default_index { " ←" } else { "" };
-        println!("    {}) {}{}", i + 1, opt, marker);
+        if Some(i) == default_index {
+            println!(
+                "    {}) {}  {}",
+                format!("{}", i + 1).dimmed(),
+                format!("{opt}").bold(),
+                "←".green()
+            );
+        } else {
+            println!("    {}) {}", format!("{}", i + 1).dimmed(), opt);
+        }
     }
-    print!("  select [{}]: ", default_display);
+    print!(
+        "  {} {}: ",
+        "select".dimmed(),
+        format!("[{default_display}]").dimmed()
+    );
     io::stdout().flush().map_err(Error::Io)?;
 
     let mut line = String::new();
@@ -415,7 +451,11 @@ fn select_from_list<T: std::fmt::Display>(
 }
 
 fn prompt_field(name: &str, default: &str) -> Result<String> {
-    print!("  {name:<12} [{default}]: ");
+    print!(
+        "  {} {}: ",
+        format!("{name:<12}").cyan().bold(),
+        format!("[{default}]").dimmed()
+    );
     io::stdout().flush().map_err(Error::Io)?;
     let mut line = String::new();
     io::stdin().lock().read_line(&mut line).map_err(Error::Io)?;
