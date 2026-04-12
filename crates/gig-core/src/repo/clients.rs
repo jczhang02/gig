@@ -45,6 +45,25 @@ pub fn find_by_id(conn: &Connection, id: i64) -> Result<Client> {
     Ok(client)
 }
 
+pub fn find_by_name(conn: &Connection, name: &str) -> Result<Option<Client>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, display_name, wechat_contact, source_org, notes, first_seen_at
+         FROM clients WHERE display_name = ?1 LIMIT 1",
+    )?;
+    let mut rows = stmt.query_map(params![name], map_row)?;
+    match rows.next() {
+        Some(row) => Ok(Some(row?)),
+        None => Ok(None),
+    }
+}
+
+pub fn find_or_create(conn: &Connection, display_name: &str, now: i64) -> Result<Client> {
+    if let Some(existing) = find_by_name(conn, display_name)? {
+        return Ok(existing);
+    }
+    insert(conn, display_name, None, None, None, now)
+}
+
 pub fn list(conn: &Connection) -> Result<Vec<Client>> {
     let mut stmt = conn.prepare(
         "SELECT id, display_name, wechat_contact, source_org, notes, first_seen_at
