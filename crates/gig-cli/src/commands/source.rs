@@ -13,7 +13,12 @@ pub fn run(conn: &Connection, args: SourceArgs) -> Result<()> {
 
 fn cmd_add(conn: &Connection, args: SourceAddArgs) -> Result<()> {
     let source = sources::insert(conn, &args.name, args.cut_ratio, args.notes.as_deref())?;
-    println!("created source #{}: {} (cut {:.0}%)", source.id, source.name, source.cut_ratio * 100.0);
+    println!(
+        "created source #{}: {} (cut {:.0}%)",
+        source.id,
+        source.name,
+        source.cut_ratio * 100.0
+    );
     Ok(())
 }
 

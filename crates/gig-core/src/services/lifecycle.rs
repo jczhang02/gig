@@ -176,6 +176,7 @@ mod tests {
                 slug: Some("test-order"),
                 client_id: None,
                 source_org: None,
+                source_id: None,
                 quoted_price: Some(10_000),
                 final_price: Some(10_000),
                 my_cut_ratio: 0.6,

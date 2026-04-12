@@ -335,10 +335,7 @@ fn interactive_prompt(
         print!("  source       [0]: ");
         io::stdout().flush().map_err(Error::Io)?;
         let mut line = String::new();
-        io::stdin()
-            .lock()
-            .read_line(&mut line)
-            .map_err(Error::Io)?;
+        io::stdin().lock().read_line(&mut line).map_err(Error::Io)?;
         let choice = line.trim();
         if choice.is_empty() || choice == "0" {
             // no source
@@ -388,7 +385,13 @@ fn select_from_list<T: std::fmt::Display>(
         .map(|i| (i + 1).to_string())
         .unwrap_or_else(|| "—".to_string());
 
-    println!("  {prompt:<12} [{}]:", options.get(default_index.unwrap_or(0)).map(|v| v.to_string()).unwrap_or_default());
+    println!(
+        "  {prompt:<12} [{}]:",
+        options
+            .get(default_index.unwrap_or(0))
+            .map(|v| v.to_string())
+            .unwrap_or_default()
+    );
     for (i, opt) in options.iter().enumerate() {
         let marker = if Some(i) == default_index { " ←" } else { "" };
         println!("    {}) {}{}", i + 1, opt, marker);
@@ -397,10 +400,7 @@ fn select_from_list<T: std::fmt::Display>(
     io::stdout().flush().map_err(Error::Io)?;
 
     let mut line = String::new();
-    io::stdin()
-        .lock()
-        .read_line(&mut line)
-        .map_err(Error::Io)?;
+    io::stdin().lock().read_line(&mut line).map_err(Error::Io)?;
     let trimmed = line.trim();
 
     if trimmed.is_empty() {

@@ -25,7 +25,10 @@ pub fn run(conn: &Connection, args: NewArgs) -> Result<()> {
                 (Some(s.id), Some(ratio))
             }
             None => {
-                eprintln!("warning: source {:?} not found; ignoring --source flag", name);
+                eprintln!(
+                    "warning: source {:?} not found; ignoring --source flag",
+                    name
+                );
                 (None, None)
             }
         },
@@ -38,16 +41,8 @@ pub fn run(conn: &Connection, args: NewArgs) -> Result<()> {
         .or(source_cut_ratio)
         .unwrap_or(config.general.default_cut_ratio);
 
-    let quoted_price = args
-        .quoted_price
-        .as_deref()
-        .map(parse_yuan)
-        .transpose()?;
-    let final_price = args
-        .final_price
-        .as_deref()
-        .map(parse_yuan)
-        .transpose()?;
+    let quoted_price = args.quoted_price.as_deref().map(parse_yuan).transpose()?;
+    let final_price = args.final_price.as_deref().map(parse_yuan).transpose()?;
 
     let input = CreateOrderInput {
         title: &args.title,

@@ -185,3 +185,38 @@ pub fn confirm(prompt: &str) -> bool {
     }
     matches!(line.trim(), "y" | "Y")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_yuan_integer() {
+        assert_eq!(parse_yuan("1200").unwrap(), 120000);
+    }
+
+    #[test]
+    fn parse_yuan_two_decimal_places() {
+        assert_eq!(parse_yuan("1200.50").unwrap(), 120050);
+    }
+
+    #[test]
+    fn parse_yuan_one_decimal_place() {
+        assert_eq!(parse_yuan("1200.5").unwrap(), 120050);
+    }
+
+    #[test]
+    fn parse_yuan_one_cent() {
+        assert_eq!(parse_yuan("0.01").unwrap(), 1);
+    }
+
+    #[test]
+    fn parse_yuan_zero() {
+        assert_eq!(parse_yuan("0").unwrap(), 0);
+    }
+
+    #[test]
+    fn parse_yuan_invalid_returns_error() {
+        assert!(parse_yuan("abc").is_err());
+    }
+}

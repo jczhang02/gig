@@ -82,6 +82,7 @@ mod tests {
             title: "Acme Scraper".into(),
             client_id: None,
             source_org: Some("Acme Corp".into()),
+            source_id: None,
             status: OrderStatus::Accepted,
             quoted_price: Some(50_000),
             final_price: None,

@@ -25,8 +25,7 @@ pub fn insert(
 }
 
 pub fn find_by_id(conn: &Connection, id: i64) -> Result<Source> {
-    let mut stmt =
-        conn.prepare("SELECT id, name, cut_ratio, notes FROM sources WHERE id = ?1")?;
+    let mut stmt = conn.prepare("SELECT id, name, cut_ratio, notes FROM sources WHERE id = ?1")?;
     let source = stmt.query_row(params![id], map_row)?;
     Ok(source)
 }
@@ -42,8 +41,7 @@ pub fn find_by_name(conn: &Connection, name: &str) -> Result<Option<Source>> {
 }
 
 pub fn list(conn: &Connection) -> Result<Vec<Source>> {
-    let mut stmt =
-        conn.prepare("SELECT id, name, cut_ratio, notes FROM sources ORDER BY name")?;
+    let mut stmt = conn.prepare("SELECT id, name, cut_ratio, notes FROM sources ORDER BY name")?;
     let rows: Vec<Source> = stmt
         .query_map([], map_row)?
         .collect::<rusqlite::Result<Vec<_>>>()?;
