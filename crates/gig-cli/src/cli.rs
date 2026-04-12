@@ -83,6 +83,9 @@ pub enum Command {
     /// Config subcommands (get / set / edit).
     Config(ConfigArgs),
 
+    /// Import existing project directories into the database.
+    Import(ImportArgs),
+
     /// Snapshot the database to the backups directory.
     Backup,
 }
@@ -384,6 +387,30 @@ pub enum TemplateCommand {
 pub struct TemplateNameArgs {
     /// Template name (without extension), e.g. "project-readme".
     pub name: String,
+}
+
+// ─── Import ───────────────────────────────────────────────────────────────────
+
+#[derive(clap::Args, Debug)]
+pub struct ImportArgs {
+    /// Directories to import (defaults to current directory if omitted).
+    pub paths: Vec<std::path::PathBuf>,
+
+    /// Prompt to confirm/override each inferred field.
+    #[arg(long, short = 'i')]
+    pub interactive: bool,
+
+    /// Force a specific status for all imported projects (e.g. archived, in_progress).
+    #[arg(long)]
+    pub status: Option<String>,
+
+    /// Move the directory to dev_root or archive_root after import (by status).
+    #[arg(long)]
+    pub relocate: bool,
+
+    /// Print what would happen without writing to the database.
+    #[arg(long)]
+    pub dry_run: bool,
 }
 
 // ─── Config subgroup ──────────────────────────────────────────────────────────
