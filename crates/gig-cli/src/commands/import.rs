@@ -9,6 +9,7 @@ use gig_core::services::import::{
     ImportInput, ImportResult,
 };
 use gig_core::{Error, Result};
+use owo_colors::OwoColorize;
 use rusqlite::Connection;
 use std::io::{self, BufRead, Write as IoWrite};
 use std::path::{Path, PathBuf};
@@ -35,34 +36,33 @@ pub fn run(conn: &Connection, args: ImportArgs) -> Result<()> {
         match process_one(conn, &raw_path, &args, &config, now)? {
             OneResult::Skipped(existing_id) => {
                 println!(
-                    "skipped: {} already imported as #{}",
+                    "skipped  {}  already imported as #{}",
                     raw_path.display(),
                     existing_id
                 );
                 skipped += 1;
             }
-            OneResult::DryRun { slug, status, path } => {
+            OneResult::DryRun { slug, title, path } => {
                 println!(
-                    "[dry-run] would import  {}  ({})  {}",
+                    "[dry-run] would import  {:<32}  {:<12}  {}",
                     slug,
-                    status,
+                    title,
                     path.display()
                 );
                 imported += 1;
             }
             OneResult::Done(res) => {
                 println!(
-                    "imported #{}  {}  ({})  {}",
+                    "imported #{:<4}  {:<32}  {:<12}  {}",
                     res.order_id,
                     res.slug,
-                    res.status,
+                    res.title,
                     res.path.display()
                 );
                 imported += 1;
             }
             OneResult::Error(msg) => {
-                eprintln!("error: {msg}");
-                // continue to next path
+                eprintln!("{} {}", "⚠".yellow(), msg.dimmed());
             }
         }
     }
@@ -79,7 +79,7 @@ enum OneResult {
     Skipped(i64),
     DryRun {
         slug: String,
-        status: OrderStatus,
+        title: String,
         path: PathBuf,
     },
     Done(ImportResult),
@@ -110,8 +110,9 @@ fn process_one(
     // Warn if not git root
     if !raw_path.join(".git").exists() {
         eprintln!(
-            "warning: {} is not a git repository root",
-            raw_path.display()
+            "{} {}: not a git repository",
+            "⚠".yellow(),
+            raw_path.display().to_string().dimmed()
         );
     }
 
@@ -192,11 +193,17 @@ fn process_one(
 
     if args.dry_run {
         // Compute what the slug would be
-        let slug_preview = input.slug_override.clone().unwrap_or(base_slug);
+        let slug_preview = input.slug_override.clone().unwrap_or(base_slug.clone());
+        let effective_slug = slug_preview.clone();
+        let title_preview = input
+            .title_override
+            .clone()
+            .unwrap_or_else(|| slug_to_title(&effective_slug));
         let status_preview = input.status_override.unwrap_or(inferred_status);
+        let _ = status_preview;
         return Ok(OneResult::DryRun {
             slug: slug_preview,
-            status: status_preview,
+            title: title_preview,
             path: canonical,
         });
     }

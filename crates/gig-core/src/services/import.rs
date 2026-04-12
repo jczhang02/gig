@@ -226,6 +226,7 @@ pub struct ImportInput {
 pub struct ImportResult {
     pub order_id: i64,
     pub slug: String,
+    pub title: String,
     pub status: OrderStatus,
     pub path: PathBuf,
     /// If `Some`, the import was skipped (already imported as this order_id).
@@ -265,6 +266,7 @@ pub fn import_project(
         return Ok(ImportResult {
             order_id: existing_id,
             slug: String::new(),
+            title: String::new(),
             status: OrderStatus::InProgress,
             path: canonical,
             skipped_as: Some(existing_id),
@@ -380,6 +382,7 @@ pub fn import_project(
     Ok(ImportResult {
         order_id: order.id,
         slug,
+        title,
         status,
         path: canonical,
         skipped_as: None,
