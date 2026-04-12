@@ -141,7 +141,63 @@ pub fn doctor_path_checks(conn: &Connection) -> Result<Vec<String>> {
         }
     }
 
+    // Check timestamp consistency: status=delivered but delivered_at is NULL.
+    doctor_timestamp_checks(conn, &mut diagnostics)?;
+
+    // Check for orphan client_ids.
+    doctor_orphan_clients(conn, &mut diagnostics)?;
+
     Ok(diagnostics)
+}
+
+/// Check for orders where status implies a timestamp but the timestamp is NULL.
+fn doctor_timestamp_checks(conn: &Connection, diagnostics: &mut Vec<String>) -> Result<()> {
+    let checks: &[(&str, &str)] = &[
+        ("delivered", "delivered_at"),
+        ("paid", "paid_at"),
+        ("archived", "archived_at"),
+    ];
+    for (status, col) in checks {
+        let sql =
+            format!("SELECT id, slug FROM orders WHERE status = '{status}' AND {col} IS NULL");
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map([], |r| {
+            Ok((r.get::<_, i64>(0)?, r.get::<_, Option<String>>(1)?))
+        })?;
+        for row in rows {
+            let (id, slug) = row?;
+            let label = slug.unwrap_or_else(|| format!("#{id}"));
+            diagnostics.push(format!(
+                "timestamp: order #{id} ({label}) has status={status} but {col} is NULL"
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Check for orders whose client_id points to a non-existent client.
+fn doctor_orphan_clients(conn: &Connection, diagnostics: &mut Vec<String>) -> Result<()> {
+    let mut stmt = conn.prepare(
+        "SELECT o.id, o.slug, o.client_id
+         FROM orders o
+         WHERE o.client_id IS NOT NULL
+           AND NOT EXISTS (SELECT 1 FROM clients c WHERE c.id = o.client_id)",
+    )?;
+    let rows = stmt.query_map([], |r| {
+        Ok((
+            r.get::<_, i64>(0)?,
+            r.get::<_, Option<String>>(1)?,
+            r.get::<_, i64>(2)?,
+        ))
+    })?;
+    for row in rows {
+        let (id, slug, client_id) = row?;
+        let label = slug.unwrap_or_else(|| format!("#{id}"));
+        diagnostics.push(format!(
+            "orphan: order #{id} ({label}) references missing client_id={client_id}"
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
