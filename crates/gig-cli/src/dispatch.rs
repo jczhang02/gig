@@ -27,5 +27,11 @@ pub fn run(cli: Cli) -> Result<()> {
         Command::Doctor => commands::doctor::run(&conn),
         Command::Pack(args) => commands::pack::run(&conn, args),
         Command::Deliver(args) => commands::deliver::run(&conn, args),
+        Command::Stats(args) => commands::stats::run(&conn, args),
+        Command::Export(args) => commands::export::run(&conn, args),
+        Command::Client(args) => commands::client::run(&conn, args),
+        Command::Template(args) => commands::template::run(&conn, args),
+        Command::Config(args) => commands::config::run(&conn, args),
+        Command::Backup => commands::backup::run(&conn),
     }
 }

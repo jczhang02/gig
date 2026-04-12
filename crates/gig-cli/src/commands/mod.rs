@@ -1,9 +1,13 @@
 pub mod archive;
+pub mod backup;
 pub mod cd;
 pub mod change;
+pub mod client;
+pub mod config;
 pub mod cut;
 pub mod deliver;
 pub mod doctor;
+pub mod export;
 pub mod init;
 pub mod lead;
 pub mod ls;
@@ -13,8 +17,10 @@ pub mod pack;
 pub mod paid;
 pub mod price;
 pub mod show;
+pub mod stats;
 pub mod status;
 pub mod tag;
+pub mod template;
 
 use gig_core::context::resolve_context;
 use gig_core::models::Order;

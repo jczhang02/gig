@@ -67,6 +67,24 @@ pub enum Command {
 
     /// Pack, upload, record artifact, and transition order to delivered.
     Deliver(DeliverArgs),
+
+    /// Show income statistics.
+    Stats(StatsArgs),
+
+    /// Export orders to CSV or JSON.
+    Export(ExportArgs),
+
+    /// Client subcommands (ls / show).
+    Client(ClientArgs),
+
+    /// Template subcommands (ls / show / edit).
+    Template(TemplateArgs),
+
+    /// Config subcommands (get / set / edit).
+    Config(ConfigArgs),
+
+    /// Snapshot the database to the backups directory.
+    Backup,
 }
 
 // ─── Existing ─────────────────────────────────────────────────────────────────
@@ -292,4 +310,112 @@ pub enum LeadCommand {
 pub struct LeadIdArgs {
     /// Order id or slug.
     pub id: String,
+}
+
+// ─── Stats ────────────────────────────────────────────────────────────────────
+
+#[derive(clap::Args, Debug)]
+pub struct StatsArgs {
+    /// Date range as YYYY-MM..YYYY-MM (defaults to current month).
+    #[arg(long)]
+    pub range: Option<String>,
+
+    /// Group breakdown by "tag" or "client".
+    #[arg(long, value_name = "tag|client")]
+    pub by: Option<String>,
+}
+
+// ─── Export ───────────────────────────────────────────────────────────────────
+
+#[derive(clap::Args, Debug)]
+pub struct ExportArgs {
+    /// Format: csv or json.
+    pub format: String,
+
+    /// Output file path (defaults to stdout).
+    #[arg(long)]
+    pub output: Option<std::path::PathBuf>,
+}
+
+// ─── Client subgroup ──────────────────────────────────────────────────────────
+
+#[derive(clap::Args, Debug)]
+pub struct ClientArgs {
+    #[command(subcommand)]
+    pub command: ClientCommand,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ClientCommand {
+    /// List all clients.
+    Ls,
+
+    /// Show a client's details and their orders.
+    Show(ClientIdArgs),
+}
+
+#[derive(clap::Args, Debug)]
+pub struct ClientIdArgs {
+    /// Client id.
+    pub id: i64,
+}
+
+// ─── Template subgroup ────────────────────────────────────────────────────────
+
+#[derive(clap::Args, Debug)]
+pub struct TemplateArgs {
+    #[command(subcommand)]
+    pub command: TemplateCommand,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum TemplateCommand {
+    /// List available templates.
+    Ls,
+
+    /// Print template content to stdout.
+    Show(TemplateNameArgs),
+
+    /// Open template in $EDITOR (copies embedded default if not in user dir yet).
+    Edit(TemplateNameArgs),
+}
+
+#[derive(clap::Args, Debug)]
+pub struct TemplateNameArgs {
+    /// Template name (without extension), e.g. "project-readme".
+    pub name: String,
+}
+
+// ─── Config subgroup ──────────────────────────────────────────────────────────
+
+#[derive(clap::Args, Debug)]
+pub struct ConfigArgs {
+    #[command(subcommand)]
+    pub command: ConfigCommand,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ConfigCommand {
+    /// Print a config value (dot-notation key).
+    Get(ConfigGetArgs),
+
+    /// Set a config value and save.
+    Set(ConfigSetArgs),
+
+    /// Open config.toml in $EDITOR.
+    Edit,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct ConfigGetArgs {
+    /// Key in dot-notation, e.g. "general.dev_root".
+    pub key: String,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct ConfigSetArgs {
+    /// Key in dot-notation.
+    pub key: String,
+    /// Value to set.
+    pub value: String,
 }
