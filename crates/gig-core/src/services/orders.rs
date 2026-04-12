@@ -19,6 +19,7 @@ pub fn can_transition(from: OrderStatus, to: OrderStatus) -> bool {
             | (InProgress, InProgress) // change loop: allowed no-op
             | (InProgress, Delivered)
             | (Delivered, Paid)
+            | (Delivered, Archived)    // skip payment tracking
             | (Paid, Archived)
     )
 }
@@ -182,6 +183,14 @@ mod tests {
         for (from, to) in path {
             assert!(can_transition(*from, *to), "{from:?} → {to:?}");
         }
+    }
+
+    #[test]
+    fn delivered_to_archived_allowed() {
+        assert!(can_transition(
+            OrderStatus::Delivered,
+            OrderStatus::Archived
+        ));
     }
 
     #[test]
