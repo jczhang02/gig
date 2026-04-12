@@ -16,23 +16,23 @@ pub const EMBEDDED_TEMPLATES: &[(&str, &str)] = &[
     ("delivery-checklist", DEFAULT_DELIVERY_CHECKLIST),
 ];
 
-const DEFAULT_QUOTE_REPLY: &str = r#"您好,
+const DEFAULT_QUOTE_REPLY: &str = r#"Hello,
 
-针对您提到的需求,报价如下:
+Here is my quote for the project you described:
 
-- 项目:{{ title }}
-- 报价:{{ quoted_price }} {{ currency }}
-- 交付周期:待定
+- Project: {{ title }}
+- Quote: {{ quoted_price }} {{ currency }}
+- Delivery timeline: TBD
 
-如有疑问欢迎沟通。
+Feel free to reach out with any questions.
 "#;
 
-const DEFAULT_DELIVERY_CHECKLIST: &str = r#"# 交付检查清单 — {{ title }}
+const DEFAULT_DELIVERY_CHECKLIST: &str = r#"# Delivery Checklist — {{ title }}
 
-- [ ] 代码已测试
-- [ ] 文档已更新
-- [ ] 交付包已生成
-- [ ] 链接已发送给客户
+- [ ] Code tested
+- [ ] Documentation updated
+- [ ] Delivery package generated
+- [ ] Link sent to client
 "#;
 
 /// Default project README template embedded in the binary.

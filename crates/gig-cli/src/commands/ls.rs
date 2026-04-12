@@ -32,7 +32,7 @@ pub fn run(conn: &Connection, args: LsArgs) -> Result<()> {
         let now = now_unix();
         let dashboard = build_dashboard(conn, now)?;
 
-        println!("{}", "今日应关注".bold());
+        println!("{}", "Today's focus".bold());
         println!("{}", "─".repeat(60));
 
         if dashboard.focus_items.is_empty() {
@@ -59,7 +59,7 @@ pub fn run(conn: &Connection, args: LsArgs) -> Result<()> {
         println!();
         let s = &dashboard.summary;
         println!(
-            "  本月到手: {}  |  活跃: {}  |  待收款: {}",
+            "  This month income: {}  |  Active: {}  |  Unpaid: {}",
             ui::format_price(Some(s.this_month_income), "CNY"),
             s.orders_count,
             s.pending_count,

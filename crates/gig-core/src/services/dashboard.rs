@@ -122,7 +122,7 @@ fn compute_alert(order: &Order, conn: &Connection, now: i64) -> Result<Option<St
                     .map(days_since)
                     .unwrap_or(days_since(order.created_at));
                 if since >= DELIVERED_UNPAID_DAYS {
-                    return Ok(Some(format!("已交付 {} 天未收款", since)));
+                    return Ok(Some(format!("delivered {} days ago, unpaid", since)));
                 }
             }
         }
@@ -132,14 +132,14 @@ fn compute_alert(order: &Order, conn: &Connection, now: i64) -> Result<Option<St
             let base_ts = last_activity.unwrap_or(order.created_at);
             let since = days_since(base_ts);
             if since >= IN_PROGRESS_STALE_DAYS {
-                return Ok(Some(format!("已 {} 天无更新", since)));
+                return Ok(Some(format!("no updates for {} days", since)));
             }
         }
         OrderStatus::Lead => {
             // lead sitting for 2+ days.
             let since = days_since(order.created_at);
             if since >= LEAD_STALE_DAYS {
-                return Ok(Some(format!("已登记 {} 天无进展", since)));
+                return Ok(Some(format!("lead sitting for {} days", since)));
             }
         }
         _ => {}
@@ -263,7 +263,7 @@ mod tests {
         )
         .unwrap();
         assert!(alert.is_some());
-        assert!(alert.unwrap().contains("未收款"));
+        assert!(alert.unwrap().contains("unpaid"));
     }
 
     #[test]
@@ -274,7 +274,7 @@ mod tests {
 
         let alert = compute_alert(&o, &conn, NOW).unwrap();
         assert!(alert.is_some());
-        assert!(alert.unwrap().contains("无更新"));
+        assert!(alert.unwrap().contains("no updates"));
     }
 
     #[test]
@@ -285,7 +285,7 @@ mod tests {
 
         let alert = compute_alert(&o, &conn, NOW).unwrap();
         assert!(alert.is_some());
-        assert!(alert.unwrap().contains("无进展"));
+        assert!(alert.unwrap().contains("lead sitting"));
     }
 
     #[test]

@@ -164,7 +164,7 @@ pub struct General {
     pub dev_root: PathBuf,
     /// Root directory where `gig archive` moves finished projects.
     pub archive_root: PathBuf,
-    /// Default "到手" ratio applied to new orders.
+    /// Default take-home ratio applied to new orders.
     pub default_cut_ratio: f64,
     /// Default currency code (ISO 4217).
     pub default_currency: String,

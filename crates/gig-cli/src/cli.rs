@@ -439,7 +439,7 @@ pub enum SourceCommand {
 
 #[derive(clap::Args, Debug)]
 pub struct SourceAddArgs {
-    /// Source name (e.g. "平台A").
+    /// Source name (e.g. "PlatformA").
     #[arg(long)]
     pub name: String,
 
