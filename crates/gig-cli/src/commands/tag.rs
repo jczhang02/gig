@@ -1,11 +1,13 @@
 use crate::cli::TagArgs;
-use gig_core::repo::orders::find_by_id_or_slug;
+use crate::commands::resolve_order;
+use crate::ui;
 use gig_core::services::lifecycle::add_tags;
 use gig_core::Result;
 use rusqlite::Connection;
 
 pub fn run(conn: &Connection, args: TagArgs) -> Result<()> {
-    let order = find_by_id_or_slug(conn, &args.id)?;
+    let order = resolve_order(args.id, conn)?;
+    ui::print_banner(&order);
     let tag_refs: Vec<&str> = args.tags.iter().map(|s| s.as_str()).collect();
     let tags = add_tags(conn, order.id, &tag_refs)?;
     println!(

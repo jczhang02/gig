@@ -3,6 +3,7 @@
 use comfy_table::{presets::UTF8_FULL, Cell, ContentArrangement, Table};
 use gig_core::models::{Order, OrderStatus, PriceHistoryEntry, RequirementChange, Tag};
 use owo_colors::OwoColorize;
+use std::io::{self, BufRead, Write};
 
 pub fn format_price(minor: Option<i64>, currency: &str) -> String {
     match minor {
@@ -133,4 +134,27 @@ pub fn order_detail_full(
     }
 
     s
+}
+
+/// Print a one-line banner identifying the order being operated on.
+pub fn print_banner(o: &Order) {
+    let price = format_price(o.final_price.or(o.quoted_price), &o.currency);
+    eprintln!(
+        "\u{2192} order #{}  {}  ({}, {})",
+        o.id,
+        o.slug.as_deref().unwrap_or(&o.title),
+        colour_status(o.status),
+        price,
+    );
+}
+
+/// Prompt the user for y/N confirmation. Returns true if user typed 'y' or 'Y'.
+pub fn confirm(prompt: &str) -> bool {
+    eprint!("{prompt} [y/N] ");
+    io::stderr().flush().ok();
+    let mut line = String::new();
+    if io::stdin().lock().read_line(&mut line).is_err() {
+        return false;
+    }
+    matches!(line.trim(), "y" | "Y")
 }

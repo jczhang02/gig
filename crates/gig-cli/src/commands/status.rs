@@ -1,7 +1,7 @@
 use crate::cli::StatusArgs;
+use crate::commands::resolve_order;
 use crate::ui;
 use gig_core::models::OrderStatus;
-use gig_core::repo::orders::find_by_id_or_slug;
 use gig_core::services::lifecycle::set_status;
 use gig_core::{Error, Result};
 use rusqlite::Connection;
@@ -15,7 +15,22 @@ pub fn run(conn: &Connection, args: StatusArgs) -> Result<()> {
             args.status
         ))
     })?;
-    let order = find_by_id_or_slug(conn, &args.id)?;
+    let order = resolve_order(args.id, conn)?;
+    ui::print_banner(&order);
+
+    // Destructive status changes require confirmation unless --yes
+    if !args.yes {
+        let prompt = format!(
+            "set status {} \u{2192} {}?",
+            order.status.as_str(),
+            status.as_str()
+        );
+        if !ui::confirm(&prompt) {
+            eprintln!("aborted.");
+            return Ok(());
+        }
+    }
+
     let now = OffsetDateTime::now_utc().unix_timestamp();
     let updated = set_status(conn, order.id, status, now)?;
     println!("status updated for order #{}", updated.id);
