@@ -4,6 +4,9 @@
 //! Backends live in submodules; the rclone backend is the v0.1 MVP.
 
 pub mod rclone;
+pub mod s3;
+
+pub use s3::S3Uploader;
 
 use crate::Result;
 use std::path::Path;

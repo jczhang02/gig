@@ -4,6 +4,7 @@
 
 use crate::{Error, Result};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 /// Resolved filesystem paths for gig. Always absolute.
@@ -111,8 +112,49 @@ impl Default for PackConfig {
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Default)]
 #[serde(default)]
 pub struct DeliveryConfig {
-    /// Name of the default uploader (e.g. "rclone:r2").
+    /// Name of the default uploader (e.g. "rclone:r2" or "s3:aliyun-hk").
     pub default_uploader: String,
+    /// Named S3-compatible uploader configurations.
+    ///
+    /// Keys are short names used after the `s3:` prefix in `default_uploader`.
+    /// Example config.toml:
+    /// ```toml
+    /// [delivery.s3.aliyun-hk]
+    /// bucket = "gig-delivery"
+    /// region = "oss-cn-hongkong"
+    /// endpoint = "https://oss-cn-hongkong.aliyuncs.com"
+    /// access_key = "LTAI5t..."
+    /// secret_key = "..."
+    /// link_ttl_seconds = 604800
+    /// ```
+    #[serde(default)]
+    pub s3: HashMap<String, S3UploaderConfig>,
+}
+
+/// Configuration for a single S3-compatible uploader.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+pub struct S3UploaderConfig {
+    /// Bucket name (e.g. `"gig-delivery"`).
+    pub bucket: String,
+    /// Region identifier (e.g. `"oss-cn-hongkong"` or `"us-east-1"`).
+    pub region: String,
+    /// Base endpoint URL without trailing slash
+    /// (e.g. `"https://oss-cn-hongkong.aliyuncs.com"`).
+    pub endpoint: String,
+    /// AWS / OSS access key ID.
+    pub access_key: String,
+    /// AWS / OSS secret access key.
+    pub secret_key: String,
+    /// How long presigned GET links remain valid (seconds). Default: 604800 (7 days).
+    #[serde(default = "default_link_ttl")]
+    pub link_ttl_seconds: u32,
+    /// Use path-style URLs. Required for MinIO; set false for OSS/AWS.
+    #[serde(default)]
+    pub path_style: bool,
+}
+
+fn default_link_ttl() -> u32 {
+    604_800
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
