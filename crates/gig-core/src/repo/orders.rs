@@ -186,6 +186,30 @@ pub fn update_notes(conn: &Connection, id: i64, notes: Option<&str>) -> Result<(
     Ok(())
 }
 
+pub fn update_cut_ratio(conn: &Connection, id: i64, ratio: f64) -> Result<()> {
+    conn.execute(
+        "UPDATE orders SET my_cut_ratio = ?1 WHERE id = ?2",
+        params![ratio, id],
+    )?;
+    Ok(())
+}
+
+pub fn update_dev_path(conn: &Connection, id: i64, dev_path: Option<&str>) -> Result<()> {
+    conn.execute(
+        "UPDATE orders SET dev_path = ?1 WHERE id = ?2",
+        params![dev_path, id],
+    )?;
+    Ok(())
+}
+
+pub fn update_archive_path(conn: &Connection, id: i64, archive_path: Option<&str>) -> Result<()> {
+    conn.execute(
+        "UPDATE orders SET archive_path = ?1, dev_path = NULL WHERE id = ?2",
+        params![archive_path, id],
+    )?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
