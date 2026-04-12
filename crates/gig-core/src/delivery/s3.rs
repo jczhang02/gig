@@ -142,12 +142,14 @@ impl S3Uploader {
     }
 
     /// Generate a presigned PUT URL for uploading `content`.
-    fn presign_put(&self, key: &str, content: &[u8], now: OffsetDateTime) -> Result<String> {
-        let content_sha256 = hex_sha256(content);
+    fn presign_put(&self, key: &str, _content: &[u8], now: OffsetDateTime) -> Result<String> {
+        // For presigned URLs, do NOT include x-amz-content-sha256 as a signed header.
+        // The server validates that all signed headers are present in the actual request,
+        // and presigned URL requests don't carry custom headers — only query params.
         self.presign(
             "PUT",
             key,
-            &[("x-amz-content-sha256", content_sha256.as_str())],
+            &[],
             3600, // 1 hour is plenty for the upload window
             now,
         )
