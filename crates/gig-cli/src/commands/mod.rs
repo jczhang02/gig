@@ -5,6 +5,7 @@ pub mod change;
 pub mod client;
 pub mod config;
 pub mod cut;
+pub mod delete;
 pub mod deliver;
 pub mod doctor;
 pub mod export;

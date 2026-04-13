@@ -330,7 +330,6 @@ pub fn import_project(
     // All other status timestamps (delivered_at, paid_at, archived_at) stay NULL
     // because we don't know when those events actually occurred.
     let accepted_at = Some(created_at);
-    // archived_at stays NULL — we don't know the actual archive date.
 
     // 12. Insert order
     let new_order = order_repo::NewOrder {

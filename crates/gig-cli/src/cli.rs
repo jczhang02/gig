@@ -86,6 +86,9 @@ pub enum Command {
     /// Import existing project directories into the database.
     Import(ImportArgs),
 
+    /// Delete an order from the database.
+    Delete(DeleteArgs),
+
     /// Snapshot the database to the backups directory.
     Backup,
 
@@ -155,12 +158,28 @@ pub struct ShowArgs {
 
 #[derive(clap::Args, Debug)]
 pub struct InitArgs {
-    /// Order id or slug.
-    pub id: String,
+    /// Order id or slug. Omit to create a new order for the current directory.
+    pub id: Option<String>,
 
     /// Override the slug / folder name used for the project directory.
     #[arg(long)]
     pub slug: Option<String>,
+
+    /// Order title (used when creating a new order without an id).
+    #[arg(long)]
+    pub title: Option<String>,
+
+    /// Quoted price in yuan (used when creating a new order).
+    #[arg(long)]
+    pub quoted_price: Option<String>,
+
+    /// Source name (used when creating a new order).
+    #[arg(long)]
+    pub source: Option<String>,
+
+    /// Interactive mode: prompt for order details.
+    #[arg(long, short = 'i')]
+    pub interactive: bool,
 }
 
 #[derive(clap::Args, Debug)]
@@ -420,6 +439,22 @@ pub struct ImportArgs {
     /// Print what would happen without writing to the database.
     #[arg(long)]
     pub dry_run: bool,
+
+    /// Re-import even if the path is already in the database (deletes the old entry first).
+    #[arg(long)]
+    pub force: bool,
+}
+
+// ─── Delete ─────────────────────────────────────────────────────────────────
+
+#[derive(clap::Args, Debug)]
+pub struct DeleteArgs {
+    /// Order id or slug.
+    pub id: String,
+
+    /// Skip confirmation prompt.
+    #[arg(long)]
+    pub yes: bool,
 }
 
 // ─── Source subgroup ──────────────────────────────────────────────────────────

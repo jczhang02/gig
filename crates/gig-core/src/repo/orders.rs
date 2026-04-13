@@ -197,6 +197,12 @@ pub fn update_cut_ratio(conn: &Connection, id: i64, ratio: f64) -> Result<()> {
     Ok(())
 }
 
+pub fn delete(conn: &Connection, id: i64) -> Result<()> {
+    // CASCADE deletes price_history, requirement_changes, delivery_artifacts, order_tags
+    conn.execute("DELETE FROM orders WHERE id = ?1", params![id])?;
+    Ok(())
+}
+
 pub fn update_dev_path(conn: &Connection, id: i64, dev_path: Option<&str>) -> Result<()> {
     conn.execute(
         "UPDATE orders SET dev_path = ?1 WHERE id = ?2",

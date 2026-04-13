@@ -138,7 +138,12 @@ fn process_one(
     if let Some(existing_id) =
         gig_core::services::import::is_already_imported(conn, &canonical_str)?
     {
-        return Ok(OneResult::Skipped(existing_id));
+        if args.force {
+            // --force: delete old entry, then re-import
+            gig_core::repo::orders::delete(conn, existing_id)?;
+        } else {
+            return Ok(OneResult::Skipped(existing_id));
+        }
     }
 
     // Infer metadata
