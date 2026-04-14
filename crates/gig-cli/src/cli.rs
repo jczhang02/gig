@@ -60,7 +60,7 @@ pub enum Command {
     Cd(CdArgs),
 
     /// Run consistency checks on paths and data.
-    Doctor,
+    Doctor(DoctorArgs),
 
     /// Pack a project into an archive (zip or tar.zst).
     Pack(PackArgs),
@@ -88,6 +88,9 @@ pub enum Command {
 
     /// Delete an order from the database.
     Delete(DeleteArgs),
+
+    /// Upload arbitrary files to the configured cloud storage.
+    Upload(UploadArgs),
 
     /// Snapshot the database to the backups directory.
     Backup,
@@ -146,6 +149,10 @@ pub struct LsArgs {
     /// Filter by status (e.g. lead, accepted, in_progress).
     #[arg(long)]
     pub status: Option<String>,
+
+    /// Show all orders including archived and cancelled.
+    #[arg(long, short)]
+    pub all: bool,
 }
 
 #[derive(clap::Args, Debug)]
@@ -269,6 +276,10 @@ pub struct ArchiveArgs {
     /// Skip confirmation prompt.
     #[arg(long)]
     pub yes: bool,
+
+    /// Delete local files instead of moving them to archive_root.
+    #[arg(long)]
+    pub purge: bool,
 }
 
 #[derive(clap::Args, Debug)]
@@ -443,6 +454,28 @@ pub struct ImportArgs {
     /// Re-import even if the path is already in the database (deletes the old entry first).
     #[arg(long)]
     pub force: bool,
+}
+
+// ─── Doctor ─────────────────────────────────────────────────────────────────
+
+#[derive(clap::Args, Debug)]
+pub struct DoctorArgs {
+    /// Attempt to fix broken paths by searching dev_root and archive_root.
+    #[arg(long)]
+    pub fix: bool,
+}
+
+// ─── Upload ─────────────────────────────────────────────────────────────────
+
+#[derive(clap::Args, Debug)]
+pub struct UploadArgs {
+    /// Files to upload.
+    #[arg(required = true)]
+    pub files: Vec<std::path::PathBuf>,
+
+    /// Override the uploader (e.g. s3:aliyun-hk, rclone:r2).
+    #[arg(long)]
+    pub uploader: Option<String>,
 }
 
 // ─── Delete ─────────────────────────────────────────────────────────────────

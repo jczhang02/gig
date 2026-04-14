@@ -8,11 +8,9 @@ pub fn run(conn: &Connection, args: DeleteArgs) -> Result<()> {
     let order = find_by_id_or_slug(conn, &args.id)?;
     ui::print_banner(&order);
 
-    if !args.yes {
-        if !ui::confirm("delete this order permanently?") {
-            eprintln!("aborted.");
-            return Ok(());
-        }
+    if !args.yes && !ui::confirm("delete this order permanently?") {
+        eprintln!("aborted.");
+        return Ok(());
     }
 
     orders::delete(conn, order.id)?;

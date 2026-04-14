@@ -1,9 +1,8 @@
 //! Delivery trait and uploader backends.
 //!
 //! The `Uploader` trait is the only interface that `gig deliver` calls.
-//! Backends live in submodules; the rclone backend is the v0.1 MVP.
+//! Backends live in submodules.
 
-pub mod rclone;
 pub mod s3;
 
 pub use s3::S3Uploader;

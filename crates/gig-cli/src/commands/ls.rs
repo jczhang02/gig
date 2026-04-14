@@ -10,6 +10,17 @@ use rusqlite::Connection;
 use std::str::FromStr;
 
 pub fn run(conn: &Connection, args: LsArgs) -> Result<()> {
+    if args.all {
+        // Show every order as a flat table.
+        let orders = list(conn, &ListFilter { status: None })?;
+        if orders.is_empty() {
+            println!("no orders");
+        } else {
+            println!("{}", ui::orders_table(&orders));
+        }
+        return Ok(());
+    }
+
     if let Some(ref s) = args.status {
         // Filtered mode: plain table (original behaviour).
         let status = OrderStatus::from_str(s).map_err(|_| {

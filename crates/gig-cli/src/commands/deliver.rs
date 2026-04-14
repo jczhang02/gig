@@ -4,7 +4,6 @@ use crate::cli::DeliverArgs;
 use crate::commands::resolve_order;
 use crate::ui;
 use gig_core::config::{Config, Paths};
-use gig_core::delivery::rclone::RcloneUploader;
 use gig_core::delivery::s3::S3Uploader;
 use gig_core::delivery::{UploadOpts, Uploader};
 use gig_core::models::OrderStatus;
@@ -122,10 +121,6 @@ pub fn run(conn: &Connection, args: DeliverArgs) -> Result<()> {
         result.archive_path
     };
 
-    // Build the uploader.
-    // v0.1: only rclone is supported. The uploader_name is expected to be
-    // in the form "rclone:<remote>" (e.g. "rclone:r2:gig-delivery").
-    // Strip the "rclone:" prefix to get the rclone remote path.
     let uploader: Box<dyn Uploader> = build_uploader(uploader_name, &config)?;
 
     eprint!("uploading to {}...", uploader_name);
@@ -169,34 +164,18 @@ pub fn run(conn: &Connection, args: DeliverArgs) -> Result<()> {
 ///
 /// Supported formats:
 /// - `"s3:<name>"` → look up `[delivery.s3.<name>]` and construct `S3Uploader`
-/// - `"rclone:<remote>"` → `RcloneUploader { remote: "<remote>" }`
-/// - bare `"<remote>"` → treated as an rclone remote for backwards compat
 fn build_uploader(name: &str, config: &Config) -> Result<Box<dyn Uploader>> {
-    if let Some(s3_name) = name.strip_prefix("s3:") {
-        let s3_cfg = config.delivery.s3.get(s3_name).ok_or_else(|| {
-            Error::Config(format!(
-                "no [delivery.s3.{s3_name}] section found in config.toml; \
-                 add it with your bucket, region, endpoint, access_key, and secret_key"
-            ))
-        })?;
-        return Ok(Box::new(S3Uploader {
-            name: name.to_string(),
-            bucket: s3_cfg.bucket.clone(),
-            region: s3_cfg.region.clone(),
-            endpoint: s3_cfg.endpoint.clone(),
-            access_key: s3_cfg.access_key.clone(),
-            secret_key: s3_cfg.secret_key.clone(),
-            link_ttl_seconds: s3_cfg.link_ttl_seconds,
-            path_style: s3_cfg.path_style,
-        }));
-    }
-
-    if let Some(remote) = name.strip_prefix("rclone:") {
-        return Ok(Box::new(RcloneUploader::new(remote)));
-    }
-
-    // Backwards compat: bare "r2:bucket" treated as rclone remote.
-    Ok(Box::new(RcloneUploader::new(name)))
+    let s3_name = name.strip_prefix("s3:").ok_or_else(|| {
+        Error::Config(format!(
+            "unsupported uploader '{name}'; use 's3:<name>' format"
+        ))
+    })?;
+    let s3_cfg = config.delivery.s3.get(s3_name).ok_or_else(|| {
+        Error::Config(format!(
+            "no [delivery.s3.{s3_name}] section found in config.toml"
+        ))
+    })?;
+    Ok(Box::new(S3Uploader::new(name.to_string(), s3_cfg)?))
 }
 
 fn copy_to_clipboard(text: &str) -> std::result::Result<(), String> {

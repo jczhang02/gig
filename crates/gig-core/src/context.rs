@@ -114,9 +114,8 @@ pub fn doctor_path_checks(conn: &Connection) -> Result<Vec<String>> {
                     }
                     Err(e) => {
                         diagnostics.push(format!(
-                            "missing: order #{id} ({label}) {kind}={} ({})",
-                            p.display(),
-                            e
+                            "missing: order #{id} ({label}) {kind}={} ({e})",
+                            p.display()
                         ));
                     }
                 }
@@ -148,6 +147,89 @@ pub fn doctor_path_checks(conn: &Connection) -> Result<Vec<String>> {
     doctor_orphan_clients(conn, &mut diagnostics)?;
 
     Ok(diagnostics)
+}
+
+/// Attempt to fix broken dev_path / archive_path entries.
+///
+/// For each order with a missing path, look for a directory named after the
+/// order's slug under `dev_root` or `archive_root`. If found, update the DB.
+///
+/// Returns a list of actions taken.
+pub fn doctor_fix_paths(
+    conn: &Connection,
+    dev_root: &Path,
+    archive_root: &Path,
+) -> Result<Vec<String>> {
+    let mut fixes = Vec::new();
+
+    let mut stmt = conn.prepare(
+        "SELECT id, slug, dev_path, archive_path, status FROM orders
+         WHERE dev_path IS NOT NULL OR archive_path IS NOT NULL",
+    )?;
+    let rows = stmt.query_map([], |r| {
+        Ok((
+            r.get::<_, i64>(0)?,
+            r.get::<_, Option<String>>(1)?,
+            r.get::<_, Option<String>>(2)?,
+            r.get::<_, Option<String>>(3)?,
+            r.get::<_, String>(4)?,
+        ))
+    })?;
+
+    let entries: Vec<_> = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+
+    for (id, slug, dev, arch, _status) in entries {
+        let slug_str = match &slug {
+            Some(s) => s.as_str(),
+            None => continue,
+        };
+        let label = slug_str;
+
+        // Check dev_path
+        if let Some(ref stored) = dev {
+            let p = PathBuf::from(stored);
+            if !p.exists() {
+                // Try to find it under dev_root
+                let candidate = dev_root.join(slug_str);
+                if candidate.exists() {
+                    if let Ok(canon) = std::fs::canonicalize(&candidate) {
+                        let canon_str = canon.to_string_lossy().to_string();
+                        conn.execute(
+                            "UPDATE orders SET dev_path = ?1 WHERE id = ?2",
+                            rusqlite::params![canon_str, id],
+                        )?;
+                        fixes.push(format!(
+                            "fixed: order #{id} ({label}) dev_path → {}",
+                            canon.display()
+                        ));
+                    }
+                }
+            }
+        }
+
+        // Check archive_path
+        if let Some(ref stored) = arch {
+            let p = PathBuf::from(stored);
+            if !p.exists() {
+                let candidate = archive_root.join(slug_str);
+                if candidate.exists() {
+                    if let Ok(canon) = std::fs::canonicalize(&candidate) {
+                        let canon_str = canon.to_string_lossy().to_string();
+                        conn.execute(
+                            "UPDATE orders SET archive_path = ?1 WHERE id = ?2",
+                            rusqlite::params![canon_str, id],
+                        )?;
+                        fixes.push(format!(
+                            "fixed: order #{id} ({label}) archive_path → {}",
+                            canon.display()
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(fixes)
 }
 
 /// Check for orders where status implies a timestamp but the timestamp is NULL.

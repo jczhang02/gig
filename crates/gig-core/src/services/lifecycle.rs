@@ -141,6 +141,43 @@ pub fn archive_order(conn: &Connection, id: i64, archive_root: &Path, now: i64) 
     transition(conn, id, OrderStatus::Archived, now)
 }
 
+/// Archive an order and **delete** all local files (no move to archive_root).
+///
+/// Unlike `archive_order`, this always succeeds regardless of current status:
+/// it purges local directories first, then transitions to Archived if possible
+/// (or returns the order as-is if already archived).
+pub fn archive_order_purge(conn: &Connection, id: i64, now: i64) -> Result<Order> {
+    let order = order_repo::find_by_id(conn, id)?;
+
+    // Delete dev directory if it exists.
+    if let Some(ref dev_path) = order.dev_path {
+        let src = Path::new(dev_path);
+        if src.exists() {
+            std::fs::remove_dir_all(src).map_err(Error::Io)?;
+        }
+        order_repo::update_dev_path(conn, id, None)?;
+    }
+
+    // Delete archive directory if it exists.
+    if let Some(ref archive_path) = order.archive_path {
+        let src = Path::new(archive_path);
+        if src.exists() {
+            std::fs::remove_dir_all(src).map_err(Error::Io)?;
+        }
+        order_repo::update_archive_path(conn, id, None)?;
+    }
+
+    // Transition to Archived if not already; ignore invalid-transition errors
+    // since the primary goal is file removal.
+    match transition(conn, id, OrderStatus::Archived, now) {
+        Ok(o) => Ok(o),
+        Err(Error::InvalidTransition { .. }) if order.status == OrderStatus::Archived => {
+            order_repo::find_by_id(conn, id)
+        }
+        Err(e) => Err(e),
+    }
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 /// Recursively copy a directory tree from `src` to `dst`.

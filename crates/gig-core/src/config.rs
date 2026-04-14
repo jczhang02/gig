@@ -112,7 +112,7 @@ impl Default for PackConfig {
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Default)]
 #[serde(default)]
 pub struct DeliveryConfig {
-    /// Name of the default uploader (e.g. "rclone:r2" or "s3:aliyun-hk").
+    /// Name of the default uploader (e.g. "s3:aliyun-hk").
     pub default_uploader: String,
     /// Named S3-compatible uploader configurations.
     ///
@@ -121,8 +121,8 @@ pub struct DeliveryConfig {
     /// ```toml
     /// [delivery.s3.aliyun-hk]
     /// bucket = "gig-delivery"
-    /// region = "oss-cn-hongkong"
-    /// endpoint = "https://oss-cn-hongkong.aliyuncs.com"
+    /// region = "cn-hongkong"
+    /// endpoint = "https://s3.oss-cn-hongkong.aliyuncs.com"
     /// access_key = "LTAI5t..."
     /// secret_key = "..."
     /// link_ttl_seconds = 604800
@@ -136,10 +136,10 @@ pub struct DeliveryConfig {
 pub struct S3UploaderConfig {
     /// Bucket name (e.g. `"gig-delivery"`).
     pub bucket: String,
-    /// Region identifier (e.g. `"oss-cn-hongkong"` or `"us-east-1"`).
+    /// Region identifier (e.g. `"cn-hongkong"` or `"us-east-1"`).
     pub region: String,
     /// Base endpoint URL without trailing slash
-    /// (e.g. `"https://oss-cn-hongkong.aliyuncs.com"`).
+    /// (e.g. `"https://s3.oss-cn-hongkong.aliyuncs.com"`).
     pub endpoint: String,
     /// AWS / OSS access key ID.
     pub access_key: String,

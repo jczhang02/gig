@@ -24,7 +24,7 @@ pub fn run(cli: Cli) -> Result<()> {
         Command::Archive(args) => commands::archive::run(&conn, args),
         Command::Lead(args) => commands::lead::run(&conn, args),
         Command::Cd(args) => commands::cd::run(&conn, args),
-        Command::Doctor => commands::doctor::run(&conn),
+        Command::Doctor(args) => commands::doctor::run(&conn, args),
         Command::Pack(args) => commands::pack::run(&conn, args),
         Command::Deliver(args) => commands::deliver::run(&conn, args),
         Command::Stats(args) => commands::stats::run(&conn, args),
@@ -36,5 +36,6 @@ pub fn run(cli: Cli) -> Result<()> {
         Command::Backup => commands::backup::run(&conn),
         Command::Source(args) => commands::source::run(&conn, args),
         Command::Delete(args) => commands::delete::run(&conn, args),
+        Command::Upload(args) => commands::upload::run(args),
     }
 }

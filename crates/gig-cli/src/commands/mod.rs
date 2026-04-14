@@ -24,6 +24,7 @@ pub mod stats;
 pub mod status;
 pub mod tag;
 pub mod template;
+pub mod upload;
 
 use gig_core::context::resolve_context;
 use gig_core::models::Order;
