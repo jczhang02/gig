@@ -117,9 +117,22 @@ pub fn list_tags(conn: &Connection, order_id: i64) -> Result<Vec<Tag>> {
 
 // ─── Paid ─────────────────────────────────────────────────────────────────────
 
-/// Transition order to Paid and record paid_at timestamp.
+/// Record payment. For Delivered orders, transitions to Paid.
+/// For Archived orders (paid late), just records `paid_at` without changing status.
 pub fn mark_paid(conn: &Connection, id: i64, paid_at: i64) -> Result<Order> {
-    transition(conn, id, OrderStatus::Paid, paid_at)
+    let order = order_repo::find_by_id(conn, id)?;
+    match order.status {
+        OrderStatus::Delivered => transition(conn, id, OrderStatus::Paid, paid_at),
+        OrderStatus::Archived | OrderStatus::Paid => {
+            // Already archived or paid — just record/update the paid_at timestamp.
+            order_repo::update_status(conn, id, order.status, Some("paid_at"), Some(paid_at))?;
+            order_repo::find_by_id(conn, id)
+        }
+        _ => Err(Error::Invalid(format!(
+            "cannot mark order #{id} as paid from '{}' (must be delivered, paid, or archived)",
+            order.status
+        ))),
+    }
 }
 
 // ─── Archive ──────────────────────────────────────────────────────────────────
@@ -433,6 +446,18 @@ mod tests {
         let conn = open_in_memory().unwrap();
         let o = accepted_order(&conn);
         assert!(mark_paid(&conn, o.id, 1_000).is_err());
+    }
+
+    #[test]
+    fn mark_paid_on_archived_sets_paid_at_without_status_change() {
+        let conn = open_in_memory().unwrap();
+        let o = accepted_order(&conn);
+        svc_transition(&conn, o.id, OrderStatus::InProgress, 2_000).unwrap();
+        svc_transition(&conn, o.id, OrderStatus::Delivered, 3_000).unwrap();
+        svc_transition(&conn, o.id, OrderStatus::Archived, 4_000).unwrap();
+        let paid = mark_paid(&conn, o.id, 5_000).unwrap();
+        assert_eq!(paid.status, OrderStatus::Archived); // status unchanged
+        assert_eq!(paid.paid_at, Some(5_000)); // paid_at recorded
     }
 
     // ── archive_order ──

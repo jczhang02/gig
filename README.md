@@ -211,6 +211,13 @@ gig paid 1
 # delivered → paid
 ```
 
+如果已经归档但客户延迟付款，仍可标记收款：
+
+```bash
+gig paid 1
+# 状态保持 archived，paid_at 时间戳被记录
+```
+
 ### 9. 归档
 
 项目完结，归档到 `archive_root`：
