@@ -47,30 +47,41 @@ pub fn build_dashboard(conn: &Connection, now: i64) -> Result<Dashboard> {
     let mut summary = DashboardSummary::default();
 
     for order in &all {
-        // Count active orders (not terminal).
+        let is_unpaid = order.paid_at.is_none();
+        let is_archived_unpaid =
+            order.status == OrderStatus::Archived && is_unpaid;
+
+        // Count active orders (not terminal, plus archived-unpaid).
         match order.status {
             OrderStatus::Lead
             | OrderStatus::Negotiating
             | OrderStatus::Accepted
             | OrderStatus::InProgress
-            | OrderStatus::Delivered => {
+            | OrderStatus::Delivered
+            | OrderStatus::Revision => {
+                summary.orders_count += 1;
+            }
+            OrderStatus::Archived if is_unpaid => {
                 summary.orders_count += 1;
             }
             _ => {}
         }
 
-        // Count pending (delivered but unpaid).
-        if order.status == OrderStatus::Delivered {
+        // Count pending (delivered/revision/archived but unpaid).
+        if is_unpaid
+            && matches!(
+                order.status,
+                OrderStatus::Delivered | OrderStatus::Revision | OrderStatus::Archived
+            )
+        {
             summary.pending_count += 1;
         }
 
-        // This-month income.
-        if order.status == OrderStatus::Paid {
-            if let Some(paid_at) = order.paid_at {
-                if paid_at >= month_start && paid_at < month_end {
-                    if let Some(cut) = order.my_cut_amount() {
-                        summary.this_month_income += cut;
-                    }
+        // This-month income: any order with paid_at in this month.
+        if let Some(paid_at) = order.paid_at {
+            if paid_at >= month_start && paid_at < month_end {
+                if let Some(cut) = order.my_cut_amount() {
+                    summary.this_month_income += cut;
                 }
             }
         }
@@ -78,7 +89,7 @@ pub fn build_dashboard(conn: &Connection, now: i64) -> Result<Dashboard> {
         // Alert logic.
         let alert = compute_alert(order, conn, now)?;
 
-        // Include in focus list if it has an alert or is in an active non-terminal state.
+        // Include in focus list if it has an alert or is in an active state.
         let show = alert.is_some()
             || matches!(
                 order.status,
@@ -87,7 +98,9 @@ pub fn build_dashboard(conn: &Connection, now: i64) -> Result<Dashboard> {
                     | OrderStatus::Accepted
                     | OrderStatus::InProgress
                     | OrderStatus::Delivered
-            );
+                    | OrderStatus::Revision
+            )
+            || is_archived_unpaid;
 
         if show {
             focus_items.push(DashboardItem {
@@ -140,6 +153,16 @@ fn compute_alert(order: &Order, conn: &Connection, now: i64) -> Result<Option<St
             let since = days_since(order.created_at);
             if since >= LEAD_STALE_DAYS {
                 return Ok(Some(format!("lead sitting for {} days", since)));
+            }
+        }
+        OrderStatus::Archived => {
+            // archived but never paid.
+            if order.paid_at.is_none() {
+                let since = order
+                    .archived_at
+                    .map(days_since)
+                    .unwrap_or(days_since(order.created_at));
+                return Ok(Some(format!("archived {} days ago, unpaid", since)));
             }
         }
         _ => {}
