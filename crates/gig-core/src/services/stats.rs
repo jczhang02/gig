@@ -36,7 +36,7 @@ pub fn compute_stats(
         let mut stmt = conn.prepare(
             "SELECT id, CAST(ROUND(COALESCE(final_price,0) * my_cut_ratio) AS INTEGER) AS cut
              FROM orders
-             WHERE status = 'paid' AND paid_at >= ?1 AND paid_at < ?2",
+             WHERE paid_at IS NOT NULL AND paid_at >= ?1 AND paid_at < ?2",
         )?;
         let rows = stmt
             .query_map(params![start, end], |row| {
