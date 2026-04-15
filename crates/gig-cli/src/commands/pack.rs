@@ -39,7 +39,7 @@ pub fn run(conn: &Connection, args: PackArgs) -> Result<()> {
             let id_str = order.id.to_string();
             let slug = order.slug.as_deref().unwrap_or(&id_str);
             let tmp = std::env::temp_dir();
-            tmp.join(format!("gig-{}.{}", slug, format.extension()))
+            tmp.join(format!("gig-{}-{}.{}", order.id, slug, format.extension()))
         }
     };
 

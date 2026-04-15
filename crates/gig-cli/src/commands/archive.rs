@@ -15,8 +15,8 @@ pub fn run(conn: &Connection, args: ArchiveArgs) -> Result<()> {
     let order = resolve_order(args.id, conn)?;
     ui::print_banner(&order);
 
-    // Warn if dev_path has uncommitted git changes
-    if let Some(ref dev_path) = order.dev_path {
+    // Check for uncommitted git changes (warning only, shown before confirmation).
+    let has_dirty_git = if let Some(ref dev_path) = order.dev_path {
         let dev_dir = std::path::Path::new(dev_path);
         if dev_dir.join(".git").exists() {
             let output = std::process::Command::new("git")
@@ -32,19 +32,29 @@ pub fn run(conn: &Connection, args: ArchiveArgs) -> Result<()> {
                         "⚠".yellow(),
                         change_count
                     );
-                    if !args.yes && !ui::confirm("archive anyway?") {
-                        eprintln!("aborted.");
-                        return Ok(());
-                    }
+                    true
+                } else {
+                    false
                 }
+            } else {
+                false
             }
+        } else {
+            false
         }
-    }
+    } else {
+        false
+    };
 
     let now = OffsetDateTime::now_utc().unix_timestamp();
 
     if args.purge {
-        if !args.yes && !ui::confirm("archive and DELETE all local files?") {
+        let prompt = if has_dirty_git {
+            "archive and DELETE all local files (including uncommitted changes)?"
+        } else {
+            "archive and DELETE all local files?"
+        };
+        if !args.yes && !ui::confirm(prompt) {
             eprintln!("aborted.");
             return Ok(());
         }
@@ -56,7 +66,11 @@ pub fn run(conn: &Connection, args: ArchiveArgs) -> Result<()> {
         if !args.yes {
             let dest = std::path::Path::new(archive_root)
                 .join(order.slug.as_deref().unwrap_or(&order.id.to_string()));
-            let prompt = format!("archive to {}?", dest.display());
+            let prompt = if has_dirty_git {
+                format!("archive to {} (with uncommitted changes)?", dest.display())
+            } else {
+                format!("archive to {}?", dest.display())
+            };
             if !ui::confirm(&prompt) {
                 eprintln!("aborted.");
                 return Ok(());

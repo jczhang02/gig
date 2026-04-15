@@ -39,7 +39,7 @@ pub fn add_requirement_change(
     price_delta: i64,
     now: i64,
 ) -> Result<Order> {
-    requirement_changes::add(conn, id, description, price_delta, now)?;
+    // Validate price BEFORE writing any records to avoid orphaned req change entries.
     if price_delta != 0 {
         let order = order_repo::find_by_id(conn, id)?;
         let old_price = order.final_price;
@@ -52,8 +52,13 @@ pub fn add_requirement_change(
                 new_price
             )));
         }
+        // Validation passed — write change record, price history, and update price.
+        requirement_changes::add(conn, id, description, price_delta, now)?;
         price_history::record(conn, id, old_price, Some(new_price), Some(description), now)?;
         order_repo::update_price(conn, id, Some(new_price))?;
+    } else {
+        // No price impact — just record the requirement change.
+        requirement_changes::add(conn, id, description, price_delta, now)?;
     }
     order_repo::find_by_id(conn, id)
 }
