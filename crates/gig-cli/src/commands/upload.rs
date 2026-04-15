@@ -41,7 +41,7 @@ pub fn run(args: UploadArgs) -> Result<()> {
 
         match uploader.upload(file, &UploadOpts { link_ttl_days: None }) {
             Ok(result) => {
-                eprintln!(" done");
+                eprintln!(" done ({})", format_file_size(result.file_size));
                 println!("{} {}", "→".green().bold(), result.url);
 
                 // Try to copy to clipboard
@@ -57,6 +57,21 @@ pub fn run(args: UploadArgs) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn format_file_size(bytes: u64) -> String {
+    const KB: u64 = 1024;
+    const MB: u64 = 1024 * KB;
+    const GB: u64 = 1024 * MB;
+    if bytes >= GB {
+        format!("{:.2} GB", bytes as f64 / GB as f64)
+    } else if bytes >= MB {
+        format!("{:.1} MB", bytes as f64 / MB as f64)
+    } else if bytes >= KB {
+        format!("{:.0} KB", bytes as f64 / KB as f64)
+    } else {
+        format!("{bytes} B")
+    }
 }
 
 fn build_uploader(name: &str, config: &Config) -> Result<Box<dyn Uploader>> {

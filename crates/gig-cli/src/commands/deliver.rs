@@ -158,6 +158,7 @@ pub fn run(conn: &Connection, args: DeliverArgs) -> Result<()> {
         .map_err(|e| Error::Invalid(format!("failed to commit delivery: {e}")))?;
 
     println!("link: {}", upload_result.url);
+    println!("size: {}", format_file_size(upload_result.file_size));
     println!("status: {} → {}", order.status, updated.status);
 
     // Attempt clipboard copy. Gracefully degrade if no display server.
@@ -185,6 +186,21 @@ fn build_uploader(name: &str, config: &Config) -> Result<Box<dyn Uploader>> {
         ))
     })?;
     Ok(Box::new(S3Uploader::new(name.to_string(), s3_cfg)?))
+}
+
+fn format_file_size(bytes: u64) -> String {
+    const KB: u64 = 1024;
+    const MB: u64 = 1024 * KB;
+    const GB: u64 = 1024 * MB;
+    if bytes >= GB {
+        format!("{:.2} GB", bytes as f64 / GB as f64)
+    } else if bytes >= MB {
+        format!("{:.1} MB", bytes as f64 / MB as f64)
+    } else if bytes >= KB {
+        format!("{:.0} KB", bytes as f64 / KB as f64)
+    } else {
+        format!("{bytes} B")
+    }
 }
 
 fn copy_to_clipboard(text: &str) -> std::result::Result<(), String> {

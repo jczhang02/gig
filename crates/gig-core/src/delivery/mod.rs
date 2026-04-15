@@ -27,6 +27,8 @@ pub struct UploadResult {
     pub expires_at: Option<i64>,
     /// Human-readable provider identifier (e.g. "rclone:r2:gig-delivery").
     pub provider: String,
+    /// Size of the uploaded file in bytes.
+    pub file_size: u64,
 }
 
 /// The pluggable uploader interface.

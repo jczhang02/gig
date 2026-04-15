@@ -221,11 +221,13 @@ impl Uploader for S3Uploader {
             self.put_object(local, &file_name)?;
         }
 
-        // Generate presigned GET URL
+        // Generate presigned GET URL with Content-Disposition for proper filename.
         let ttl = opts
             .link_ttl_days
             .map(|d| d * 86_400)
             .unwrap_or(self.link_ttl_seconds);
+
+        let disposition = format!("attachment; filename=\"{file_name}\"");
 
         let presigned = self.rt.block_on(async {
             let presign_config = PresigningConfig::expires_in(Duration::from_secs(ttl as u64))
@@ -234,6 +236,7 @@ impl Uploader for S3Uploader {
                 .get_object()
                 .bucket(&self.bucket)
                 .key(&file_name)
+                .response_content_disposition(&disposition)
                 .presigned(presign_config)
                 .await
                 .map_err(|e| Error::Invalid(format!("presigning failed: {e}")))
@@ -246,6 +249,7 @@ impl Uploader for S3Uploader {
             url: presigned.uri().to_string(),
             expires_at: Some(expires_at),
             provider: self.name.clone(),
+            file_size,
         })
     }
 }
