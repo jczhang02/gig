@@ -57,7 +57,7 @@ pub fn run(conn: &Connection, args: DeliverArgs) -> Result<()> {
         let id_str = order.id.to_string();
         let slug = order.slug.as_deref().unwrap_or(&id_str);
         let tmp = std::env::temp_dir();
-        let output = tmp.join(format!("gig-{}.{}", slug, format.extension()));
+        let output = tmp.join(format!("gig-{}-{}.{}", order.id, slug, format.extension()));
 
         println!("(dry-run) would pack: {}", project_dir.display());
         println!("(dry-run) would write: {}", output.display());
@@ -107,7 +107,7 @@ pub fn run(conn: &Connection, args: DeliverArgs) -> Result<()> {
         let id_str = order.id.to_string();
         let slug = order.slug.as_deref().unwrap_or(&id_str);
         let tmp = std::env::temp_dir();
-        let output = tmp.join(format!("gig-{}.{}", slug, format.extension()));
+        let output = tmp.join(format!("gig-{}-{}.{}", order.id, slug, format.extension()));
 
         eprint!("packing...");
         let result = pack_order(
@@ -124,19 +124,26 @@ pub fn run(conn: &Connection, args: DeliverArgs) -> Result<()> {
     let uploader: Box<dyn Uploader> = build_uploader(uploader_name, &config)?;
 
     eprint!("uploading to {}...", uploader_name);
-    let upload_result = uploader.upload(
-        &archive_path,
-        &UploadOpts {
-            link_ttl_days: None,
-        },
-    )?;
+    let upload_result = match uploader.upload(&archive_path, &UploadOpts { link_ttl_days: None }) {
+        Ok(r) => r,
+        Err(e) => {
+            // Clean up temp archive on upload failure (skip for --resend since we didn't create it)
+            if !args.resend {
+                let _ = std::fs::remove_file(&archive_path);
+            }
+            return Err(e);
+        }
+    };
     eprintln!(" done");
 
     let now = OffsetDateTime::now_utc().unix_timestamp();
 
-    // Record delivery artifact.
+    // Wrap DB operations in a transaction for atomicity.
+    let tx = conn.unchecked_transaction()
+        .map_err(|e| Error::Invalid(format!("failed to begin transaction: {e}")))?;
+
     delivery_artifacts::insert(
-        conn,
+        &tx,
         order.id,
         Some(&archive_path.to_string_lossy()),
         Some(uploader_name),
@@ -145,8 +152,10 @@ pub fn run(conn: &Connection, args: DeliverArgs) -> Result<()> {
         now,
     )?;
 
-    // Transition status → delivered.
-    let updated = set_status(conn, order.id, OrderStatus::Delivered, now)?;
+    let updated = set_status(&tx, order.id, OrderStatus::Delivered, now)?;
+
+    tx.commit()
+        .map_err(|e| Error::Invalid(format!("failed to commit delivery: {e}")))?;
 
     println!("link: {}", upload_result.url);
     println!("status: {} → {}", order.status, updated.status);

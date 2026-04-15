@@ -46,6 +46,7 @@ pub fn colour_status(status: OrderStatus) -> String {
         OrderStatus::Accepted => s.cyan().to_string(),
         OrderStatus::InProgress => s.blue().to_string(),
         OrderStatus::Delivered => s.green().to_string(),
+        OrderStatus::Revision => s.magenta().to_string(),
         OrderStatus::Paid => s.green().bold().to_string(),
         OrderStatus::Archived => s.bright_black().to_string(),
         OrderStatus::Cancelled => s.red().to_string(),

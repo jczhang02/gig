@@ -4,6 +4,7 @@ use crate::ui;
 use gig_core::config::{Config, Paths};
 use gig_core::services::lifecycle::{archive_order, archive_order_purge};
 use gig_core::Result;
+use owo_colors::OwoColorize;
 use rusqlite::Connection;
 use time::OffsetDateTime;
 
@@ -13,6 +14,32 @@ pub fn run(conn: &Connection, args: ArchiveArgs) -> Result<()> {
 
     let order = resolve_order(args.id, conn)?;
     ui::print_banner(&order);
+
+    // Warn if dev_path has uncommitted git changes
+    if let Some(ref dev_path) = order.dev_path {
+        let dev_dir = std::path::Path::new(dev_path);
+        if dev_dir.join(".git").exists() {
+            let output = std::process::Command::new("git")
+                .args(["status", "--porcelain"])
+                .current_dir(dev_dir)
+                .output();
+            if let Ok(out) = output {
+                let changes = String::from_utf8_lossy(&out.stdout);
+                if !changes.trim().is_empty() {
+                    let change_count = changes.lines().count();
+                    eprintln!(
+                        "{} dev_path has {} uncommitted change(s)",
+                        "⚠".yellow(),
+                        change_count
+                    );
+                    if !args.yes && !ui::confirm("archive anyway?") {
+                        eprintln!("aborted.");
+                        return Ok(());
+                    }
+                }
+            }
+        }
+    }
 
     let now = OffsetDateTime::now_utc().unix_timestamp();
 

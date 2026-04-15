@@ -15,11 +15,14 @@ pub fn can_transition(from: OrderStatus, to: OrderStatus) -> bool {
         (Lead, Negotiating)
             | (Lead, Accepted)       // skip negotiating
             | (Negotiating, Accepted)
+            | (Negotiating, InProgress) // init from negotiating
             | (Accepted, InProgress)
             | (InProgress, InProgress) // change loop: allowed no-op
             | (InProgress, Delivered)
+            | (Delivered, Revision)   // client requests changes
+            | (Revision, Delivered)   // re-deliver after fixing
             | (Delivered, Paid)
-            | (Delivered, Archived)    // skip payment tracking
+            | (Delivered, Archived)   // skip payment tracking
             | (Paid, Archived)
     )
 }
@@ -30,6 +33,7 @@ fn timestamp_col_for(to: OrderStatus) -> Option<&'static str> {
     match to {
         Accepted => Some("accepted_at"),
         Delivered => Some("delivered_at"),
+        Revision => None, // preserve delivered_at from first delivery
         Paid => Some("paid_at"),
         Archived => Some("archived_at"),
         _ => None,
@@ -194,6 +198,55 @@ mod tests {
         for (from, to) in path {
             assert!(can_transition(*from, *to), "{from:?} → {to:?}");
         }
+    }
+
+    #[test]
+    fn happy_path_with_revision_loop() {
+        let path = &[
+            (OrderStatus::Lead, OrderStatus::Negotiating),
+            (OrderStatus::Negotiating, OrderStatus::Accepted),
+            (OrderStatus::Accepted, OrderStatus::InProgress),
+            (OrderStatus::InProgress, OrderStatus::Delivered),
+            (OrderStatus::Delivered, OrderStatus::Revision),
+            (OrderStatus::Revision, OrderStatus::Delivered),
+            (OrderStatus::Delivered, OrderStatus::Paid),
+            (OrderStatus::Paid, OrderStatus::Archived),
+        ];
+        for (from, to) in path {
+            assert!(can_transition(*from, *to), "{from:?} → {to:?}");
+        }
+    }
+
+    #[test]
+    fn delivered_to_revision_allowed() {
+        assert!(can_transition(
+            OrderStatus::Delivered,
+            OrderStatus::Revision
+        ));
+    }
+
+    #[test]
+    fn revision_to_delivered_allowed() {
+        assert!(can_transition(
+            OrderStatus::Revision,
+            OrderStatus::Delivered
+        ));
+    }
+
+    #[test]
+    fn revision_cannot_go_to_in_progress() {
+        assert!(!can_transition(
+            OrderStatus::Revision,
+            OrderStatus::InProgress
+        ));
+    }
+
+    #[test]
+    fn negotiating_to_in_progress_allowed() {
+        assert!(can_transition(
+            OrderStatus::Negotiating,
+            OrderStatus::InProgress
+        ));
     }
 
     #[test]

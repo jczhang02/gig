@@ -139,7 +139,25 @@ fn process_one(
         gig_core::services::import::is_already_imported(conn, &canonical_str)?
     {
         if args.force {
-            // --force: delete old entry, then re-import
+            // --force: warn about data loss, then delete old entry and re-import
+            eprintln!(
+                "{} --force will delete order #{} and all associated data:",
+                "⚠".yellow(),
+                existing_id
+            );
+            eprintln!("    • price history");
+            eprintln!("    • requirement changes");
+            eprintln!("    • delivery artifacts");
+            eprintln!("    • tags");
+            if !args.dry_run {
+                eprint!("  proceed? [y/N] ");
+                io::stderr().flush().ok();
+                let mut line = String::new();
+                io::stdin().lock().read_line(&mut line).map_err(Error::Io)?;
+                if !matches!(line.trim(), "y" | "Y") {
+                    return Ok(OneResult::Skipped(existing_id));
+                }
+            }
             gig_core::repo::orders::delete(conn, existing_id)?;
         } else {
             return Ok(OneResult::Skipped(existing_id));

@@ -17,6 +17,11 @@ pub fn change_price(
     reason: Option<&str>,
     now: i64,
 ) -> Result<Order> {
+    if new_price < 0 {
+        return Err(Error::Invalid(format!(
+            "price must not be negative, got {new_price}"
+        )));
+    }
     let order = order_repo::find_by_id(conn, id)?;
     let old_price = order.final_price;
     price_history::record(conn, id, old_price, Some(new_price), reason, now)?;
@@ -37,7 +42,17 @@ pub fn add_requirement_change(
     requirement_changes::add(conn, id, description, price_delta, now)?;
     if price_delta != 0 {
         let order = order_repo::find_by_id(conn, id)?;
+        let old_price = order.final_price;
         let new_price = order.final_price.unwrap_or(0) + price_delta;
+        if new_price < 0 {
+            return Err(Error::Invalid(format!(
+                "price change would result in negative final_price ({} + {} = {})",
+                order.final_price.unwrap_or(0),
+                price_delta,
+                new_price
+            )));
+        }
+        price_history::record(conn, id, old_price, Some(new_price), Some(description), now)?;
         order_repo::update_price(conn, id, Some(new_price))?;
     }
     order_repo::find_by_id(conn, id)
@@ -306,6 +321,34 @@ mod tests {
         let o = accepted_order(&conn);
         let updated = add_requirement_change(&conn, o.id, "just a note", 0, 2_000).unwrap();
         assert_eq!(updated.final_price, Some(10_000));
+    }
+
+    #[test]
+    fn requirement_change_rejects_negative_price() {
+        let conn = open_in_memory().unwrap();
+        let o = accepted_order(&conn);
+        // order has final_price=10_000; delta=-10001 would go negative
+        let result = add_requirement_change(&conn, o.id, "massive reduction", -10_001, 2_000);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn change_price_rejects_negative() {
+        let conn = open_in_memory().unwrap();
+        let o = accepted_order(&conn);
+        let result = change_price(&conn, o.id, -100, None, 2_000);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn requirement_change_records_price_history() {
+        let conn = open_in_memory().unwrap();
+        let o = accepted_order(&conn);
+        add_requirement_change(&conn, o.id, "extra feature", 5_000, 2_000).unwrap();
+        let history = get_price_history(&conn, o.id).unwrap();
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].old_price, Some(10_000));
+        assert_eq!(history[0].new_price, Some(15_000));
     }
 
     // ── append_notes ──

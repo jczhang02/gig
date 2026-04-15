@@ -153,7 +153,7 @@ pub fn init_project(
 mod tests {
     use super::*;
     use crate::db::open_in_memory;
-    use crate::services::orders::{create_order, CreateOrderInput};
+    use crate::services::orders::{create_order, transition, CreateOrderInput};
     use std::path::PathBuf;
     use tempfile::TempDir;
 
@@ -232,5 +232,36 @@ mod tests {
         .unwrap();
         let err = init_project(&conn, order.id, tmp.path(), None).unwrap_err();
         assert!(err.to_string().contains("accepted"), "err: {err}");
+    }
+
+    #[test]
+    fn init_project_succeeds_for_negotiating() {
+        let tmp = TempDir::new().unwrap();
+        let conn = open_in_memory().unwrap();
+        // Create as lead, then promote to negotiating.
+        let order = create_order(
+            &conn,
+            &CreateOrderInput {
+                title: "negotiating order",
+                slug: None,
+                client_id: None,
+                source_org: None,
+                source_id: None,
+                quoted_price: Some(5_000),
+                final_price: None,
+                my_cut_ratio: 0.6,
+                currency: "CNY",
+                notes: None,
+                as_lead: true,
+            },
+            0,
+        )
+        .unwrap();
+        let negotiating =
+            transition(&conn, order.id, OrderStatus::Negotiating, 100).unwrap();
+        assert_eq!(negotiating.status, OrderStatus::Negotiating);
+        let result = init_project(&conn, negotiating.id, tmp.path(), None).unwrap();
+        assert_eq!(result.status, OrderStatus::InProgress);
+        assert!(result.dev_path.is_some());
     }
 }
