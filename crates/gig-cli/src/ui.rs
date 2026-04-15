@@ -53,6 +53,19 @@ pub fn colour_status(status: OrderStatus) -> String {
     }
 }
 
+/// Status display that reflects payment on archived orders.
+pub fn display_status(order: &Order) -> String {
+    if order.status == OrderStatus::Archived && order.paid_at.is_some() {
+        format!(
+            "{} {}",
+            "archived".bright_black(),
+            "(paid)".green()
+        )
+    } else {
+        colour_status(order.status)
+    }
+}
+
 pub fn orders_table(orders: &[Order]) -> Table {
     let mut t = Table::new();
     t.load_preset(UTF8_FULL)
@@ -63,7 +76,7 @@ pub fn orders_table(orders: &[Order]) -> Table {
             Cell::new(o.id),
             Cell::new(o.slug.as_deref().unwrap_or("—")),
             Cell::new(&o.title),
-            Cell::new(colour_status(o.status)),
+            Cell::new(display_status(o)),
             Cell::new(format_price(o.quoted_price, &o.currency)),
             Cell::new(format_price(o.final_price, &o.currency)),
         ]);
@@ -88,7 +101,7 @@ pub fn order_detail_full(
         "  slug         : {}\n",
         o.slug.as_deref().unwrap_or("—")
     ));
-    s.push_str(&format!("  status       : {}\n", colour_status(o.status)));
+    s.push_str(&format!("  status       : {}\n", display_status(o)));
     s.push_str(&format!(
         "  quoted       : {}\n",
         format_price(o.quoted_price, &o.currency)
@@ -173,7 +186,7 @@ pub fn print_banner(o: &Order) {
         "\u{2192} order #{}  {}  ({}, {})",
         o.id,
         o.slug.as_deref().unwrap_or(&o.title),
-        colour_status(o.status),
+        display_status(o),
         price,
     );
 }

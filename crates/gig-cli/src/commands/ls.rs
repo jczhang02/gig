@@ -53,7 +53,7 @@ pub fn run(conn: &Connection, args: LsArgs) -> Result<()> {
                 let o = &item.order;
                 let slug_or_title = o.slug.as_deref().unwrap_or(&o.title);
                 let price = ui::format_price(o.final_price.or(o.quoted_price), &o.currency);
-                let status_str = ui::colour_status(o.status);
+                let status_str = ui::display_status(o);
 
                 let alert_part = match &item.alert {
                     Some(a) => format!("  {}", a.yellow()),
