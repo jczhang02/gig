@@ -28,18 +28,34 @@ pub fn run(args: UploadArgs) -> Result<()> {
 
     for file in &args.files {
         if !file.exists() {
-            eprintln!("{} {} does not exist, skipping", "⚠".yellow(), file.display());
+            eprintln!(
+                "{} {} does not exist, skipping",
+                "⚠".yellow(),
+                file.display()
+            );
             continue;
         }
         if !file.is_file() {
-            eprintln!("{} {} is not a file, skipping", "⚠".yellow(), file.display());
+            eprintln!(
+                "{} {} is not a file, skipping",
+                "⚠".yellow(),
+                file.display()
+            );
             continue;
         }
 
-        let name = file.file_name().map(|n| n.to_string_lossy()).unwrap_or_default();
+        let name = file
+            .file_name()
+            .map(|n| n.to_string_lossy())
+            .unwrap_or_default();
         eprint!("uploading {}...", name);
 
-        match uploader.upload(file, &UploadOpts { link_ttl_days: None }) {
+        match uploader.upload(
+            file,
+            &UploadOpts {
+                link_ttl_days: None,
+            },
+        ) {
             Ok(result) => {
                 eprintln!(" done ({})", format_file_size(result.file_size));
                 println!("{} {}", "→".green().bold(), result.url);

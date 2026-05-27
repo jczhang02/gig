@@ -23,8 +23,7 @@ fn make_test_uploader() -> Option<S3Uploader> {
     let bucket = std::env::var("GIG_TEST_S3_BUCKET").ok()?;
     let access_key = std::env::var("GIG_TEST_S3_ACCESS_KEY").ok()?;
     let secret_key = std::env::var("GIG_TEST_S3_SECRET_KEY").ok()?;
-    let region = std::env::var("GIG_TEST_S3_REGION")
-        .unwrap_or_else(|_| "cn-hongkong".into());
+    let region = std::env::var("GIG_TEST_S3_REGION").unwrap_or_else(|_| "cn-hongkong".into());
     let endpoint = std::env::var("GIG_TEST_S3_ENDPOINT")
         .unwrap_or_else(|_| "https://s3.oss-cn-hongkong.aliyuncs.com".into());
 
@@ -42,7 +41,9 @@ fn make_test_uploader() -> Option<S3Uploader> {
 }
 
 fn default_opts() -> UploadOpts {
-    UploadOpts { link_ttl_days: None }
+    UploadOpts {
+        link_ttl_days: None,
+    }
 }
 
 #[test]
@@ -62,7 +63,9 @@ fn test_upload_small_file() {
     tmp.write_all(&content).expect("failed to write temp file");
 
     eprintln!("test_upload_small_file: uploading");
-    let result = uploader.upload(tmp.path(), &default_opts()).expect("upload failed");
+    let result = uploader
+        .upload(tmp.path(), &default_opts())
+        .expect("upload failed");
 
     eprintln!("test_upload_small_file: url={}", result.url);
     assert!(!result.url.is_empty(), "URL should be non-empty");
@@ -102,7 +105,9 @@ fn test_upload_medium_file() {
     tmp.write_all(&content).expect("failed to write temp file");
 
     eprintln!("test_upload_medium_file: uploading");
-    let result = uploader.upload(tmp.path(), &default_opts()).expect("upload failed");
+    let result = uploader
+        .upload(tmp.path(), &default_opts())
+        .expect("upload failed");
 
     eprintln!("test_upload_medium_file: url={}", result.url);
     assert!(!result.url.is_empty(), "URL should be non-empty");
@@ -150,12 +155,15 @@ fn test_upload_large_file_multipart() {
     while written < total_bytes {
         let remaining = total_bytes - written;
         let to_write = remaining.min(chunk.len());
-        tmp.write_all(&chunk[..to_write]).expect("failed to write chunk");
+        tmp.write_all(&chunk[..to_write])
+            .expect("failed to write chunk");
         written += to_write;
     }
 
     eprintln!("test_upload_large_file_multipart: uploading (multipart path expected)");
-    let result = uploader.upload(tmp.path(), &default_opts()).expect("upload failed");
+    let result = uploader
+        .upload(tmp.path(), &default_opts())
+        .expect("upload failed");
 
     eprintln!("test_upload_large_file_multipart: url={}", result.url);
     assert!(!result.url.is_empty(), "URL should be non-empty");
@@ -227,9 +235,12 @@ fn test_presigned_url_accessible() {
 
     eprintln!("test_presigned_url_accessible: uploading small file");
     let mut tmp = NamedTempFile::new().expect("failed to create temp file");
-    tmp.write_all(&vec![0xABu8; 512]).expect("failed to write temp file");
+    tmp.write_all(&vec![0xABu8; 512])
+        .expect("failed to write temp file");
 
-    let result = uploader.upload(tmp.path(), &default_opts()).expect("upload failed");
+    let result = uploader
+        .upload(tmp.path(), &default_opts())
+        .expect("upload failed");
     eprintln!("test_presigned_url_accessible: url={}", result.url);
 
     eprintln!("test_presigned_url_accessible: checking HTTP status via curl");
