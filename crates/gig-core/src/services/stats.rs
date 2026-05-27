@@ -235,6 +235,7 @@ mod tests {
             client_id: None,
             source_org: None,
             source_id: None,
+            project_type: None,
             status: OrderStatus::Paid,
             quoted_price: Some(cut),
             final_price: Some(cut),

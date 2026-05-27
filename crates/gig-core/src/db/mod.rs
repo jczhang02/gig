@@ -58,6 +58,31 @@ mod tests {
     }
 
     #[test]
+    fn workflow_support_migration_creates_tables_and_orders_project_type() {
+        let conn = open_in_memory().unwrap();
+
+        for table in ["quote_drafts", "order_workflow", "delivery_packages"] {
+            let count: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                    [table],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(count, 1, "missing workflow support table {table}");
+        }
+
+        let project_type_cols: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('orders') WHERE name = 'project_type'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(project_type_cols, 1, "orders.project_type should exist");
+    }
+
+    #[test]
     fn foreign_keys_are_enabled() {
         let conn = open_in_memory().unwrap();
         let fk: i64 = conn

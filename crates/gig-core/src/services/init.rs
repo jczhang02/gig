@@ -87,20 +87,14 @@ pub fn init_project(
     }
 
     // Determine slug
-    let slug = match slug_override {
-        Some(s) => s.to_string(),
-        None => match &order.slug {
-            Some(s) => s.clone(),
-            None => slugify(&order.title),
-        },
-    };
+    let slug = slug_override
+        .map(str::to_string)
+        .or_else(|| order.slug.clone())
+        .unwrap_or_else(|| slugify(&order.title));
 
     // Persist slug if it changed
     if order.slug.as_deref() != Some(slug.as_str()) {
-        conn.execute(
-            "UPDATE orders SET slug = ?1 WHERE id = ?2",
-            rusqlite::params![slug, id],
-        )?;
+        conn.execute("UPDATE orders SET slug = ?1 WHERE id = ?2", (&slug, id))?;
     }
 
     // Create project directory
@@ -138,15 +132,21 @@ pub fn init_project(
         .to_string();
     conn.execute(
         "UPDATE orders SET dev_path = ?1 WHERE id = ?2",
-        rusqlite::params![dev_path_str, id],
+        (&dev_path_str, id),
     )?;
 
-    // Transition accepted → in_progress
+    // Legacy manual init intentionally bypasses the workflow-only
+    // accepted -> plan_ready -> plan_approved path.
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
-    transition(conn, id, OrderStatus::InProgress, now)
+    if order.status == OrderStatus::Accepted {
+        repo::update_status(conn, id, OrderStatus::InProgress, None, None)?;
+        repo::find_by_id(conn, id)
+    } else {
+        transition(conn, id, OrderStatus::InProgress, now)
+    }
 }
 
 #[cfg(test)]
@@ -257,8 +257,7 @@ mod tests {
             0,
         )
         .unwrap();
-        let negotiating =
-            transition(&conn, order.id, OrderStatus::Negotiating, 100).unwrap();
+        let negotiating = transition(&conn, order.id, OrderStatus::Negotiating, 100).unwrap();
         assert_eq!(negotiating.status, OrderStatus::Negotiating);
         let result = init_project(&conn, negotiating.id, tmp.path(), None).unwrap();
         assert_eq!(result.status, OrderStatus::InProgress);

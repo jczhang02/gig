@@ -21,6 +21,7 @@ fn sample_order<'a>(title: &'a str, status: OrderStatus) -> NewOrder<'a> {
         client_id: None,
         source_org: None,
         source_id: None,
+        project_type: None,
         status,
         quoted_price: Some(100_000),
         final_price: Some(120_000),

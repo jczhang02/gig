@@ -428,17 +428,33 @@ mod tests {
         assert_eq!(remaining[0].name, "web");
     }
 
+    #[test]
+    fn set_status_rejects_accepted_to_in_progress_without_plan_approval() {
+        let conn = open_in_memory().unwrap();
+        let o = accepted_order(&conn);
+
+        match set_status(&conn, o.id, OrderStatus::InProgress, 2_000) {
+            Err(Error::InvalidTransition { from, to, .. }) => {
+                assert!(from.starts_with(OrderStatus::Accepted.as_str()));
+                assert_eq!(to, OrderStatus::InProgress.as_str());
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
     // ── mark_paid ──
 
     #[test]
     fn mark_paid_transitions_to_paid() {
         let conn = open_in_memory().unwrap();
         let o = accepted_order(&conn);
-        svc_transition(&conn, o.id, OrderStatus::InProgress, 2_000).unwrap();
-        svc_transition(&conn, o.id, OrderStatus::Delivered, 3_000).unwrap();
-        let paid = mark_paid(&conn, o.id, 4_000).unwrap();
+        svc_transition(&conn, o.id, OrderStatus::PlanReady, 2_000).unwrap();
+        svc_transition(&conn, o.id, OrderStatus::PlanApproved, 3_000).unwrap();
+        svc_transition(&conn, o.id, OrderStatus::InProgress, 4_000).unwrap();
+        svc_transition(&conn, o.id, OrderStatus::Delivered, 5_000).unwrap();
+        let paid = mark_paid(&conn, o.id, 6_000).unwrap();
         assert_eq!(paid.status, OrderStatus::Paid);
-        assert_eq!(paid.paid_at, Some(4_000));
+        assert_eq!(paid.paid_at, Some(6_000));
     }
 
     #[test]
@@ -452,12 +468,14 @@ mod tests {
     fn mark_paid_on_archived_sets_paid_at_without_status_change() {
         let conn = open_in_memory().unwrap();
         let o = accepted_order(&conn);
-        svc_transition(&conn, o.id, OrderStatus::InProgress, 2_000).unwrap();
-        svc_transition(&conn, o.id, OrderStatus::Delivered, 3_000).unwrap();
-        svc_transition(&conn, o.id, OrderStatus::Archived, 4_000).unwrap();
-        let paid = mark_paid(&conn, o.id, 5_000).unwrap();
+        svc_transition(&conn, o.id, OrderStatus::PlanReady, 2_000).unwrap();
+        svc_transition(&conn, o.id, OrderStatus::PlanApproved, 3_000).unwrap();
+        svc_transition(&conn, o.id, OrderStatus::InProgress, 4_000).unwrap();
+        svc_transition(&conn, o.id, OrderStatus::Delivered, 5_000).unwrap();
+        svc_transition(&conn, o.id, OrderStatus::Archived, 6_000).unwrap();
+        let paid = mark_paid(&conn, o.id, 7_000).unwrap();
         assert_eq!(paid.status, OrderStatus::Archived); // status unchanged
-        assert_eq!(paid.paid_at, Some(5_000)); // paid_at recorded
+        assert_eq!(paid.paid_at, Some(7_000)); // paid_at recorded
     }
 
     // ── archive_order ──
@@ -466,11 +484,13 @@ mod tests {
     fn archive_without_dev_path_only_transitions() {
         let conn = open_in_memory().unwrap();
         let o = accepted_order(&conn);
-        svc_transition(&conn, o.id, OrderStatus::InProgress, 2_000).unwrap();
-        svc_transition(&conn, o.id, OrderStatus::Delivered, 3_000).unwrap();
-        svc_transition(&conn, o.id, OrderStatus::Paid, 4_000).unwrap();
+        svc_transition(&conn, o.id, OrderStatus::PlanReady, 2_000).unwrap();
+        svc_transition(&conn, o.id, OrderStatus::PlanApproved, 3_000).unwrap();
+        svc_transition(&conn, o.id, OrderStatus::InProgress, 4_000).unwrap();
+        svc_transition(&conn, o.id, OrderStatus::Delivered, 5_000).unwrap();
+        svc_transition(&conn, o.id, OrderStatus::Paid, 6_000).unwrap();
         let tmp = TempDir::new().unwrap();
-        let archived = archive_order(&conn, o.id, tmp.path(), 5_000).unwrap();
+        let archived = archive_order(&conn, o.id, tmp.path(), 7_000).unwrap();
         assert_eq!(archived.status, OrderStatus::Archived);
         assert_eq!(archived.archive_path, None);
     }

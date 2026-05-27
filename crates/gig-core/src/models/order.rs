@@ -1,3 +1,4 @@
+use super::ProjectType;
 use crate::{Error, Result};
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -10,7 +11,10 @@ pub enum OrderStatus {
     Lead,
     Negotiating,
     Accepted,
+    PlanReady,
+    PlanApproved,
     InProgress,
+    ReadyToDeliver,
     Delivered,
     Revision,
     Paid,
@@ -19,11 +23,14 @@ pub enum OrderStatus {
 }
 
 impl OrderStatus {
-    pub const ALL: &'static [OrderStatus] = &[
+    pub const ALL: [OrderStatus; 12] = [
         OrderStatus::Lead,
         OrderStatus::Negotiating,
         OrderStatus::Accepted,
+        OrderStatus::PlanReady,
+        OrderStatus::PlanApproved,
         OrderStatus::InProgress,
+        OrderStatus::ReadyToDeliver,
         OrderStatus::Delivered,
         OrderStatus::Revision,
         OrderStatus::Paid,
@@ -36,7 +43,10 @@ impl OrderStatus {
             OrderStatus::Lead => "lead",
             OrderStatus::Negotiating => "negotiating",
             OrderStatus::Accepted => "accepted",
+            OrderStatus::PlanReady => "plan_ready",
+            OrderStatus::PlanApproved => "plan_approved",
             OrderStatus::InProgress => "in_progress",
+            OrderStatus::ReadyToDeliver => "ready_to_deliver",
             OrderStatus::Delivered => "delivered",
             OrderStatus::Revision => "revision",
             OrderStatus::Paid => "paid",
@@ -59,7 +69,10 @@ impl FromStr for OrderStatus {
             "lead" => OrderStatus::Lead,
             "negotiating" => OrderStatus::Negotiating,
             "accepted" => OrderStatus::Accepted,
+            "plan_ready" => OrderStatus::PlanReady,
+            "plan_approved" => OrderStatus::PlanApproved,
             "in_progress" => OrderStatus::InProgress,
+            "ready_to_deliver" => OrderStatus::ReadyToDeliver,
             "delivered" => OrderStatus::Delivered,
             "revision" => OrderStatus::Revision,
             "paid" => OrderStatus::Paid,
@@ -80,6 +93,7 @@ pub struct Order {
     pub client_id: Option<i64>,
     pub source_org: Option<String>,
     pub source_id: Option<i64>,
+    pub project_type: Option<ProjectType>,
     pub status: OrderStatus,
     pub quoted_price: Option<i64>,
     pub final_price: Option<i64>,
@@ -99,8 +113,8 @@ impl Order {
     /// Computed my_cut amount, rounded to the nearest minor unit.
     /// Returns None when `final_price` is not yet known.
     pub fn my_cut_amount(&self) -> Option<i64> {
-        let price = self.final_price?;
-        Some((price as f64 * self.my_cut_ratio).round() as i64)
+        self.final_price
+            .map(|price| (price as f64 * self.my_cut_ratio).round() as i64)
     }
 }
 
@@ -112,8 +126,40 @@ mod tests {
     fn status_roundtrips_through_str() {
         for s in OrderStatus::ALL {
             let parsed: OrderStatus = s.as_str().parse().unwrap();
-            assert_eq!(parsed, *s);
+            assert_eq!(parsed, s);
         }
+    }
+
+    #[test]
+    fn order_status_parses_new_workflow_states() {
+        assert_eq!(
+            OrderStatus::from_str("plan_ready").unwrap(),
+            OrderStatus::PlanReady
+        );
+        assert_eq!(
+            OrderStatus::from_str("plan_approved").unwrap(),
+            OrderStatus::PlanApproved
+        );
+        assert_eq!(
+            OrderStatus::from_str("ready_to_deliver").unwrap(),
+            OrderStatus::ReadyToDeliver
+        );
+        assert_eq!(OrderStatus::PlanReady.as_str(), "plan_ready");
+        assert_eq!(OrderStatus::PlanApproved.as_str(), "plan_approved");
+        assert_eq!(OrderStatus::ReadyToDeliver.as_str(), "ready_to_deliver");
+    }
+
+    #[test]
+    fn order_status_keeps_legacy_statuses() {
+        assert_eq!(OrderStatus::from_str("lead").unwrap(), OrderStatus::Lead);
+        assert_eq!(
+            OrderStatus::from_str("negotiating").unwrap(),
+            OrderStatus::Negotiating
+        );
+        assert_eq!(
+            OrderStatus::from_str("revision").unwrap(),
+            OrderStatus::Revision
+        );
     }
 
     #[test]
@@ -131,6 +177,7 @@ mod tests {
             client_id: None,
             source_org: None,
             source_id: None,
+            project_type: None,
             status: OrderStatus::Accepted,
             quoted_price: None,
             final_price: None,
@@ -158,6 +205,7 @@ mod tests {
             client_id: None,
             source_org: None,
             source_id: None,
+            project_type: None,
             status: OrderStatus::Accepted,
             quoted_price: None,
             final_price: Some(10_000),

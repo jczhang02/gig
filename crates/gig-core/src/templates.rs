@@ -10,7 +10,7 @@ use minijinja::{context, Environment};
 
 /// Embedded default templates: (name, content) pairs.
 /// Name is without the `.j2` extension, matching the template subcommand.
-pub const EMBEDDED_TEMPLATES: &[(&str, &str)] = &[
+pub const EMBEDDED_TEMPLATES: [(&str, &str); 3] = [
     ("project-readme", DEFAULT_PROJECT_README),
     ("quote-reply", DEFAULT_QUOTE_REPLY),
     ("delivery-checklist", DEFAULT_DELIVERY_CHECKLIST),
@@ -83,6 +83,7 @@ mod tests {
             client_id: None,
             source_org: Some("Acme Corp".into()),
             source_id: None,
+            project_type: None,
             status: OrderStatus::Accepted,
             quoted_price: Some(50_000),
             final_price: None,

@@ -63,8 +63,10 @@ fn fresh_db_round_trip_create_list_show_transition() {
     let by_slug = find_by_id_or_slug(&conn, "dashboard").unwrap();
     assert_eq!(by_slug.id, full.id);
 
-    // transition happy path
-    let moved = transition(&conn, full.id, OrderStatus::InProgress, 3_000).unwrap();
+    // workflow transition happy path
+    transition(&conn, full.id, OrderStatus::PlanReady, 3_000).unwrap();
+    transition(&conn, full.id, OrderStatus::PlanApproved, 4_000).unwrap();
+    let moved = transition(&conn, full.id, OrderStatus::InProgress, 5_000).unwrap();
     assert_eq!(moved.status, OrderStatus::InProgress);
     assert_eq!(
         find_by_id(&conn, full.id).unwrap().status,

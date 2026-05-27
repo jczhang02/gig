@@ -3,28 +3,38 @@ use crate::repo::orders as repo;
 use crate::{Error, Result};
 use rusqlite::Connection;
 
-/// Returns true iff `from → to` is allowed by the v0.1 status machine.
+/// Returns true iff `from → to` is allowed by the lifecycle state machine.
 pub fn can_transition(from: OrderStatus, to: OrderStatus) -> bool {
-    use OrderStatus::*;
-    // Any state can move to cancelled.
-    if to == Cancelled && from != Cancelled && from != Archived {
-        return true;
-    }
-    matches!(
-        (from, to),
-        (Lead, Negotiating)
-            | (Lead, Accepted)       // skip negotiating
-            | (Negotiating, Accepted)
-            | (Negotiating, InProgress) // init from negotiating
-            | (Accepted, InProgress)
-            | (InProgress, InProgress) // change loop: allowed no-op
-            | (InProgress, Delivered)
-            | (Delivered, Revision)   // client requests changes
-            | (Revision, Delivered)   // re-deliver after fixing
-            | (Delivered, Paid)
-            | (Delivered, Archived)   // skip payment tracking
-            | (Paid, Archived)
-    )
+    const ALLOWED: [(OrderStatus, OrderStatus); 26] = [
+        (OrderStatus::Lead, OrderStatus::Negotiating),
+        (OrderStatus::Lead, OrderStatus::Accepted),
+        (OrderStatus::Lead, OrderStatus::Cancelled),
+        (OrderStatus::Negotiating, OrderStatus::Accepted),
+        (OrderStatus::Negotiating, OrderStatus::InProgress),
+        (OrderStatus::Negotiating, OrderStatus::Cancelled),
+        (OrderStatus::Accepted, OrderStatus::PlanReady),
+        (OrderStatus::Accepted, OrderStatus::Cancelled),
+        (OrderStatus::PlanReady, OrderStatus::PlanApproved),
+        (OrderStatus::PlanReady, OrderStatus::Cancelled),
+        (OrderStatus::PlanApproved, OrderStatus::InProgress),
+        (OrderStatus::PlanApproved, OrderStatus::Cancelled),
+        (OrderStatus::InProgress, OrderStatus::InProgress),
+        (OrderStatus::InProgress, OrderStatus::ReadyToDeliver),
+        (OrderStatus::InProgress, OrderStatus::Delivered),
+        (OrderStatus::InProgress, OrderStatus::Cancelled),
+        (OrderStatus::ReadyToDeliver, OrderStatus::Delivered),
+        (OrderStatus::ReadyToDeliver, OrderStatus::Cancelled),
+        (OrderStatus::Delivered, OrderStatus::Revision),
+        (OrderStatus::Delivered, OrderStatus::Paid),
+        (OrderStatus::Delivered, OrderStatus::Archived),
+        (OrderStatus::Delivered, OrderStatus::Cancelled),
+        (OrderStatus::Revision, OrderStatus::Delivered),
+        (OrderStatus::Revision, OrderStatus::Cancelled),
+        (OrderStatus::Paid, OrderStatus::Archived),
+        (OrderStatus::Paid, OrderStatus::Cancelled),
+    ];
+
+    ALLOWED.contains(&(from, to))
 }
 
 /// Which timestamp column (if any) should be filled when entering `to`.
@@ -101,6 +111,7 @@ pub fn create_order(conn: &Connection, input: &CreateOrderInput<'_>, now: i64) -
         client_id: input.client_id,
         source_org: input.source_org,
         source_id: input.source_id,
+        project_type: None,
         status,
         quoted_price: input.quoted_price,
         final_price: input.final_price,
@@ -165,7 +176,7 @@ mod tests {
 
     #[test]
     fn any_nonarchived_can_cancel() {
-        for &s in OrderStatus::ALL {
+        for s in OrderStatus::ALL {
             if matches!(s, OrderStatus::Cancelled | OrderStatus::Archived) {
                 continue;
             }
@@ -186,11 +197,43 @@ mod tests {
     }
 
     #[test]
+    fn workflow_plan_approval_path_allowed() {
+        let path = &[
+            (OrderStatus::Accepted, OrderStatus::PlanReady),
+            (OrderStatus::PlanReady, OrderStatus::PlanApproved),
+            (OrderStatus::PlanApproved, OrderStatus::InProgress),
+            (OrderStatus::InProgress, OrderStatus::ReadyToDeliver),
+            (OrderStatus::ReadyToDeliver, OrderStatus::Delivered),
+        ];
+        for (from, to) in path {
+            assert!(can_transition(*from, *to), "{from:?} → {to:?}");
+        }
+    }
+
+    #[test]
+    fn workflow_cannot_skip_plan_approval() {
+        assert!(!can_transition(
+            OrderStatus::PlanReady,
+            OrderStatus::InProgress
+        ));
+        assert!(!can_transition(
+            OrderStatus::Accepted,
+            OrderStatus::InProgress
+        ));
+        assert!(!can_transition(
+            OrderStatus::Accepted,
+            OrderStatus::ReadyToDeliver
+        ));
+    }
+
+    #[test]
     fn happy_path_accept_to_paid() {
         let path = &[
             (OrderStatus::Lead, OrderStatus::Negotiating),
             (OrderStatus::Negotiating, OrderStatus::Accepted),
-            (OrderStatus::Accepted, OrderStatus::InProgress),
+            (OrderStatus::Accepted, OrderStatus::PlanReady),
+            (OrderStatus::PlanReady, OrderStatus::PlanApproved),
+            (OrderStatus::PlanApproved, OrderStatus::InProgress),
             (OrderStatus::InProgress, OrderStatus::Delivered),
             (OrderStatus::Delivered, OrderStatus::Paid),
             (OrderStatus::Paid, OrderStatus::Archived),
@@ -205,7 +248,9 @@ mod tests {
         let path = &[
             (OrderStatus::Lead, OrderStatus::Negotiating),
             (OrderStatus::Negotiating, OrderStatus::Accepted),
-            (OrderStatus::Accepted, OrderStatus::InProgress),
+            (OrderStatus::Accepted, OrderStatus::PlanReady),
+            (OrderStatus::PlanReady, OrderStatus::PlanApproved),
+            (OrderStatus::PlanApproved, OrderStatus::InProgress),
             (OrderStatus::InProgress, OrderStatus::Delivered),
             (OrderStatus::Delivered, OrderStatus::Revision),
             (OrderStatus::Revision, OrderStatus::Delivered),
@@ -307,13 +352,21 @@ mod tests {
     }
 
     #[test]
-    fn transition_from_accepted_to_in_progress_round_trips() {
+    fn transition_from_accepted_to_in_progress_requires_plan_approval() {
         let conn = open_in_memory().unwrap();
         let o = create_order(&conn, &base_input("t", false), 500).unwrap();
-        let moved = transition(&conn, o.id, OrderStatus::InProgress, 600).unwrap();
-        assert_eq!(moved.status, OrderStatus::InProgress);
-        // no timestamp column for InProgress
-        assert_eq!(moved.accepted_at, Some(500));
+
+        match transition(&conn, o.id, OrderStatus::InProgress, 600) {
+            Err(Error::InvalidTransition { from, to, .. }) => {
+                assert!(from.starts_with(OrderStatus::Accepted.as_str()));
+                assert_eq!(to, OrderStatus::InProgress.as_str());
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+
+        let stored = repo::find_by_id(&conn, o.id).unwrap();
+        assert_eq!(stored.status, OrderStatus::Accepted);
+        assert_eq!(stored.accepted_at, Some(500));
     }
 
     #[test]

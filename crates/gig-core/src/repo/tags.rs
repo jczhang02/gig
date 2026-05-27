@@ -2,7 +2,7 @@
 
 use crate::models::Tag;
 use crate::{Error, Result};
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension};
 
 fn map_tag(row: &rusqlite::Row<'_>) -> rusqlite::Result<Tag> {
     Ok(Tag {
@@ -16,13 +16,13 @@ pub fn find_or_create(conn: &Connection, name: &str) -> Result<Tag> {
     // Try to find first
     let mut stmt = conn.prepare("SELECT id, name FROM tags WHERE name = ?1")?;
     let existing = stmt
-        .query_row(params![name], map_tag)
+        .query_row((name,), map_tag)
         .optional()
         .map_err(Error::Db)?;
     if let Some(tag) = existing {
         return Ok(tag);
     }
-    conn.execute("INSERT INTO tags (name) VALUES (?1)", params![name])?;
+    conn.execute("INSERT INTO tags (name) VALUES (?1)", (name,))?;
     let id = conn.last_insert_rowid();
     Ok(Tag {
         id,
@@ -34,7 +34,7 @@ pub fn find_or_create(conn: &Connection, name: &str) -> Result<Tag> {
 pub fn attach(conn: &Connection, order_id: i64, tag_id: i64) -> Result<()> {
     conn.execute(
         "INSERT OR IGNORE INTO order_tags (order_id, tag_id) VALUES (?1, ?2)",
-        params![order_id, tag_id],
+        (order_id, tag_id),
     )?;
     Ok(())
 }
@@ -45,7 +45,7 @@ pub fn detach_by_name(conn: &Connection, order_id: i64, tag_name: &str) -> Resul
         "DELETE FROM order_tags WHERE order_id = ?1 AND tag_id = (
             SELECT id FROM tags WHERE name = ?2
          )",
-        params![order_id, tag_name],
+        (order_id, tag_name),
     )?;
     Ok(())
 }
@@ -59,7 +59,7 @@ pub fn list_for_order(conn: &Connection, order_id: i64) -> Result<Vec<Tag>> {
          ORDER BY t.name",
     )?;
     let rows = stmt
-        .query_map(params![order_id], map_tag)?
+        .query_map((order_id,), map_tag)?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(rows)
 }
@@ -81,6 +81,7 @@ mod tests {
                 client_id: None,
                 source_org: None,
                 source_id: None,
+                project_type: None,
                 status: OrderStatus::Accepted,
                 quoted_price: None,
                 final_price: None,

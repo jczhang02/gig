@@ -1,7 +1,10 @@
 //! Dashboard service: build the "today's focus" view for `gig ls`.
 
-use crate::models::{Order, OrderStatus};
+use crate::models::{
+    DeliveryPackageStatus, Order, OrderStatus, OrderWorkflow, QuoteDraft, QuoteDraftStatus,
+};
 use crate::repo::orders::{list, ListFilter};
+use crate::repo::{delivery_packages, order_workflow, quote_drafts};
 use crate::{Error, Result};
 use rusqlite::Connection;
 
@@ -14,8 +17,16 @@ const LEAD_STALE_DAYS: i64 = 2;
 #[derive(Debug, Clone)]
 pub struct DashboardItem {
     pub order: Order,
+    pub workflow: Option<OrderWorkflow>,
+    pub next_action: &'static str,
     /// A human-readable alert string, e.g. "已交付 3 天未收款".
     pub alert: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct DashboardQuoteItem {
+    pub draft: QuoteDraft,
+    pub next_action: &'static str,
 }
 
 /// Summary numbers shown at the bottom of the dashboard.
@@ -32,6 +43,7 @@ pub struct DashboardSummary {
 /// The full dashboard result.
 #[derive(Debug, Clone)]
 pub struct Dashboard {
+    pub quote_items: Vec<DashboardQuoteItem>,
     pub focus_items: Vec<DashboardItem>,
     pub summary: DashboardSummary,
 }
@@ -39,6 +51,12 @@ pub struct Dashboard {
 /// Build the dashboard for the given `now` unix timestamp.
 pub fn build_dashboard(conn: &Connection, now: i64) -> Result<Dashboard> {
     let all = list(conn, &ListFilter { status: None })?;
+    let quote_items = quote_drafts::list(conn)?
+        .into_iter()
+        .filter_map(|draft| {
+            quote_next_action(&draft).map(|next_action| DashboardQuoteItem { draft, next_action })
+        })
+        .collect();
 
     // Compute month boundaries for income summary.
     let (month_start, month_end) = current_month_bounds(now);
@@ -48,15 +66,17 @@ pub fn build_dashboard(conn: &Connection, now: i64) -> Result<Dashboard> {
 
     for order in &all {
         let is_unpaid = order.paid_at.is_none();
-        let is_archived_unpaid =
-            order.status == OrderStatus::Archived && is_unpaid;
+        let is_archived_unpaid = order.status == OrderStatus::Archived && is_unpaid;
 
         // Count active orders (not terminal, plus archived-unpaid).
         match order.status {
             OrderStatus::Lead
             | OrderStatus::Negotiating
             | OrderStatus::Accepted
+            | OrderStatus::PlanReady
+            | OrderStatus::PlanApproved
             | OrderStatus::InProgress
+            | OrderStatus::ReadyToDeliver
             | OrderStatus::Delivered
             | OrderStatus::Revision => {
                 summary.orders_count += 1;
@@ -88,6 +108,9 @@ pub fn build_dashboard(conn: &Connection, now: i64) -> Result<Dashboard> {
 
         // Alert logic.
         let alert = compute_alert(order, conn, now)?;
+        let workflow = order_workflow::find_by_order_id(conn, order.id)?;
+        let latest_package_status = latest_package_status(conn, order.id)?;
+        let next_action = order_next_action(order, workflow.as_ref(), latest_package_status);
 
         // Include in focus list if it has an alert or is in an active state.
         let show = alert.is_some()
@@ -96,7 +119,10 @@ pub fn build_dashboard(conn: &Connection, now: i64) -> Result<Dashboard> {
                 OrderStatus::Lead
                     | OrderStatus::Negotiating
                     | OrderStatus::Accepted
+                    | OrderStatus::PlanReady
+                    | OrderStatus::PlanApproved
                     | OrderStatus::InProgress
+                    | OrderStatus::ReadyToDeliver
                     | OrderStatus::Delivered
                     | OrderStatus::Revision
             )
@@ -105,6 +131,8 @@ pub fn build_dashboard(conn: &Connection, now: i64) -> Result<Dashboard> {
         if show {
             focus_items.push(DashboardItem {
                 order: order.clone(),
+                workflow,
+                next_action,
                 alert,
             });
         }
@@ -118,25 +146,80 @@ pub fn build_dashboard(conn: &Connection, now: i64) -> Result<Dashboard> {
     });
 
     Ok(Dashboard {
+        quote_items,
         focus_items,
         summary,
     })
+}
+
+pub fn quote_next_action(draft: &QuoteDraft) -> Option<&'static str> {
+    match draft.status {
+        QuoteDraftStatus::QuoteDraft => Some("price_quote"),
+        QuoteDraftStatus::NeedsClarification => Some("collect_missing_facts"),
+        QuoteDraftStatus::Quoted if draft.sent_at.is_some() => Some("wait_client_decision"),
+        QuoteDraftStatus::Quoted => Some("send_quote"),
+        QuoteDraftStatus::Accepted | QuoteDraftStatus::Dropped => None,
+    }
+}
+
+pub fn order_next_action(
+    order: &Order,
+    workflow: Option<&OrderWorkflow>,
+    latest_package_status: Option<DeliveryPackageStatus>,
+) -> &'static str {
+    let workflow_required = matches!(
+        order.status,
+        OrderStatus::Accepted
+            | OrderStatus::PlanReady
+            | OrderStatus::PlanApproved
+            | OrderStatus::InProgress
+            | OrderStatus::ReadyToDeliver
+    );
+    if workflow_required && workflow.is_none() {
+        return "legacy_workflow_metadata_missing";
+    }
+
+    match order.status {
+        OrderStatus::Lead => "qualify_lead",
+        OrderStatus::Negotiating => "resolve_quote",
+        OrderStatus::Accepted => "prepare_plan",
+        OrderStatus::PlanReady => "approve_plan",
+        OrderStatus::PlanApproved => "start_work",
+        OrderStatus::InProgress => "complete_acceptance",
+        OrderStatus::ReadyToDeliver
+            if latest_package_status == Some(DeliveryPackageStatus::Validated) =>
+        {
+            "mark_package_sent"
+        }
+        OrderStatus::ReadyToDeliver => "check_package",
+        OrderStatus::Delivered => "collect_payment",
+        OrderStatus::Revision => "complete_revision",
+        OrderStatus::Paid => "archive_order",
+        OrderStatus::Archived | OrderStatus::Cancelled => "none",
+    }
+}
+
+fn latest_package_status(
+    conn: &Connection,
+    order_id: i64,
+) -> Result<Option<DeliveryPackageStatus>> {
+    Ok(delivery_packages::list_for_order(conn, order_id)?
+        .first()
+        .map(|package| package.status))
 }
 
 fn compute_alert(order: &Order, conn: &Connection, now: i64) -> Result<Option<String>> {
     let days_since = |ts: i64| -> i64 { (now - ts) / 86400 };
 
     match order.status {
-        OrderStatus::Delivered => {
+        OrderStatus::Delivered if order.paid_at.is_none() => {
             // delivered with no paid_at for 3+ days.
-            if order.paid_at.is_none() {
-                let since = order
-                    .delivered_at
-                    .map(days_since)
-                    .unwrap_or(days_since(order.created_at));
-                if since >= DELIVERED_UNPAID_DAYS {
-                    return Ok(Some(format!("delivered {} days ago, unpaid", since)));
-                }
+            let since = order
+                .delivered_at
+                .map(days_since)
+                .unwrap_or(days_since(order.created_at));
+            if since >= DELIVERED_UNPAID_DAYS {
+                return Ok(Some(format!("delivered {} days ago, unpaid", since)));
             }
         }
         OrderStatus::InProgress => {
@@ -155,15 +238,13 @@ fn compute_alert(order: &Order, conn: &Connection, now: i64) -> Result<Option<St
                 return Ok(Some(format!("lead sitting for {} days", since)));
             }
         }
-        OrderStatus::Archived => {
+        OrderStatus::Archived if order.paid_at.is_none() => {
             // archived but never paid.
-            if order.paid_at.is_none() {
-                let since = order
-                    .archived_at
-                    .map(days_since)
-                    .unwrap_or(days_since(order.created_at));
-                return Ok(Some(format!("archived {} days ago, unpaid", since)));
-            }
+            let since = order
+                .archived_at
+                .map(days_since)
+                .unwrap_or(days_since(order.created_at));
+            return Ok(Some(format!("archived {} days ago, unpaid", since)));
         }
         _ => {}
     }
@@ -180,7 +261,7 @@ fn last_activity_ts(conn: &Connection, order_id: i64) -> Result<Option<i64>> {
                 UNION ALL
                 SELECT MAX(created_at) AS ts FROM price_history WHERE order_id = ?1
              )",
-            rusqlite::params![order_id],
+            (order_id,),
             |row| row.get(0),
         )
         .map_err(Error::Db)?;
@@ -248,6 +329,7 @@ mod tests {
             client_id: None,
             source_org: None,
             source_id: None,
+            project_type: None,
             status,
             quoted_price: Some(10_000),
             final_price: Some(10_000),
@@ -275,7 +357,7 @@ mod tests {
         // Manually set delivered_at.
         conn.execute(
             "UPDATE orders SET delivered_at = ?1 WHERE id = ?2",
-            rusqlite::params![NOW - 4 * DAY, o.id],
+            (NOW - 4 * DAY, o.id),
         )
         .unwrap();
 
