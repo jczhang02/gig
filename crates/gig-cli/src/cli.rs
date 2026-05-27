@@ -1,6 +1,6 @@
 //! CLI argument structure.
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -12,6 +12,20 @@ use clap::{Parser, Subcommand};
 pub struct Cli {
     #[command(subcommand)]
     pub command: Command,
+}
+
+impl Cli {
+    pub fn wants_json_errors(&self) -> bool {
+        match &self.command {
+            Command::Ls(args) => args.json,
+            Command::Show(args) => args.json,
+            Command::Quote(args) => quote_wants_json(args),
+            Command::Plan(args) => plan_wants_json(args),
+            Command::Acceptance(args) => acceptance_wants_json(args),
+            Command::Package(args) => package_wants_json(args),
+            _ => false,
+        }
+    }
 }
 
 #[derive(Subcommand, Debug)]
@@ -26,7 +40,7 @@ pub enum Command {
     /// Show a single order in detail.
     Show(ShowArgs),
 
-    /// Initialise a project folder for an accepted order.
+    /// Legacy/manual project folder initialisation for accepted orders.
     Init(InitArgs),
 
     /// Update the final price of an order.
@@ -62,10 +76,10 @@ pub enum Command {
     /// Run consistency checks on paths and data.
     Doctor(DoctorArgs),
 
-    /// Pack a project into an archive (zip or tar.zst).
+    /// Legacy/manual archive packing; workflow delivery uses package commands.
     Pack(PackArgs),
 
-    /// Pack, upload, record artifact, and transition order to delivered.
+    /// Legacy/manual delivery; workflow delivery uses package check/record/mark-sent.
     Deliver(DeliverArgs),
 
     /// Show income statistics.
@@ -95,8 +109,69 @@ pub enum Command {
     /// Snapshot the database to the backups directory.
     Backup,
 
+    /// Print shell completion script.
+    Completion(CompletionArgs),
+
     /// Source subcommands (add / ls).
     Source(SourceArgs),
+
+    /// Quote draft workflow subcommands.
+    Quote(QuoteArgs),
+
+    /// Workflow plan gate subcommands.
+    Plan(PlanArgs),
+
+    /// Workflow acceptance gate subcommands.
+    Acceptance(AcceptanceArgs),
+
+    /// Client package validation subcommands.
+    Package(PackageArgs),
+}
+
+fn package_wants_json(args: &PackageArgs) -> bool {
+    match &args.command {
+        PackageCommand::Check(args) => args.json,
+        PackageCommand::Record(args) => args.json,
+        PackageCommand::MarkSent(args) => args.json,
+    }
+}
+
+fn acceptance_wants_json(args: &AcceptanceArgs) -> bool {
+    match &args.command {
+        AcceptanceCommand::Check(args) => args.json,
+        AcceptanceCommand::Complete(args) => args.json,
+    }
+}
+
+fn plan_wants_json(args: &PlanArgs) -> bool {
+    match &args.command {
+        PlanCommand::Ready(args) => args.json,
+        PlanCommand::Approve(args) => args.json,
+        PlanCommand::Reject(args) => args.json,
+    }
+}
+
+fn quote_wants_json(args: &QuoteArgs) -> bool {
+    match &args.command {
+        QuoteCommand::New(args) => args.json,
+        QuoteCommand::Show(args) => args.json,
+        QuoteCommand::List(args) => args.json,
+        QuoteCommand::Price(args) => args.json,
+        QuoteCommand::MarkSent(args) => args.json,
+        QuoteCommand::Accept(args) => args.json,
+        QuoteCommand::Drop(args) => args.json,
+    }
+}
+
+#[derive(clap::Args, Debug)]
+pub struct CompletionArgs {
+    /// Target shell type.
+    pub shell: CompletionShell,
+}
+
+#[derive(Copy, Clone, Debug, ValueEnum)]
+pub enum CompletionShell {
+    Zsh,
 }
 
 // ─── Existing ─────────────────────────────────────────────────────────────────
@@ -153,12 +228,329 @@ pub struct LsArgs {
     /// Show all orders including archived and cancelled.
     #[arg(long, short)]
     pub all: bool,
+
+    /// Emit stable machine-readable JSON for the default decision board.
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(clap::Args, Debug)]
 pub struct ShowArgs {
     /// Order id or slug (omit to use context from current directory).
     pub id: Option<String>,
+
+    /// Emit stable machine-readable JSON.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct PackageArgs {
+    #[command(subcommand)]
+    pub command: PackageCommand,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum PackageCommand {
+    /// Validate a workflow-created client package manifest and files.
+    Check(PackageCheckArgs),
+
+    /// Record existing client package metadata.
+    Record(PackageRecordArgs),
+
+    /// Mark a validated package as sent outside gig.
+    MarkSent(PackageMarkSentArgs),
+}
+
+#[derive(clap::Args, Debug)]
+pub struct PackageCheckArgs {
+    /// Order id or slug.
+    pub id_or_slug: String,
+
+    /// Delivery date matching manifest.toml.
+    #[arg(long)]
+    pub delivery_date: String,
+
+    /// Existing .gig delivery directory.
+    #[arg(long)]
+    pub delivery_dir: std::path::PathBuf,
+
+    /// Emit stable machine-readable JSON.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct PackageRecordArgs {
+    /// Order id or slug.
+    pub id_or_slug: String,
+
+    /// Delivery date for this package record.
+    #[arg(long)]
+    pub delivery_date: String,
+
+    /// Existing .gig delivery directory.
+    #[arg(long)]
+    pub delivery_dir: std::path::PathBuf,
+
+    /// Existing client-visible directory.
+    #[arg(long)]
+    pub client_dir: std::path::PathBuf,
+
+    /// Existing client manifest path.
+    #[arg(long)]
+    pub manifest_path: std::path::PathBuf,
+
+    /// Existing client package archive path, if workflow created one.
+    #[arg(long)]
+    pub package_path: Option<std::path::PathBuf>,
+
+    /// Package status to record: prepared or validated.
+    #[arg(long)]
+    pub status: String,
+
+    /// Emit stable machine-readable JSON.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct PackageMarkSentArgs {
+    /// Delivery package id.
+    pub package_id: i64,
+
+    /// Emit stable machine-readable JSON.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct AcceptanceArgs {
+    #[command(subcommand)]
+    pub command: AcceptanceCommand,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum AcceptanceCommand {
+    /// Check workflow-created acceptance evidence.
+    Check(AcceptanceCheckArgs),
+
+    /// Complete acceptance and mark the order ready to deliver.
+    Complete(AcceptanceCompleteArgs),
+}
+
+#[derive(clap::Args, Debug)]
+pub struct AcceptanceCheckArgs {
+    /// Order id or slug.
+    pub id_or_slug: String,
+
+    /// Emit stable machine-readable JSON.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct AcceptanceCompleteArgs {
+    /// Order id or slug.
+    pub id_or_slug: String,
+
+    /// Emit stable machine-readable JSON.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct PlanArgs {
+    #[command(subcommand)]
+    pub command: PlanCommand,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum PlanCommand {
+    /// Mark workflow-created plan files ready for review.
+    Ready(PlanReadyArgs),
+
+    /// Approve a ready plan.
+    Approve(PlanApproveArgs),
+
+    /// Reject a ready plan and record the reason.
+    Reject(PlanRejectArgs),
+}
+
+#[derive(clap::Args, Debug)]
+pub struct PlanApproveArgs {
+    /// Order id or slug.
+    pub id_or_slug: String,
+
+    /// Emit stable machine-readable JSON.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct PlanRejectArgs {
+    /// Order id or slug.
+    pub id_or_slug: String,
+
+    /// Non-empty reason for rejection.
+    #[arg(long)]
+    pub reason: String,
+
+    /// Emit stable machine-readable JSON.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct PlanReadyArgs {
+    /// Order id or slug.
+    pub id_or_slug: String,
+
+    /// Emit stable machine-readable JSON.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct QuoteArgs {
+    #[command(subcommand)]
+    pub command: QuoteCommand,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum QuoteCommand {
+    /// Record a pre-acceptance quote draft.
+    New(QuoteNewArgs),
+
+    /// Show a quote draft.
+    Show(QuoteShowArgs),
+
+    /// List quote drafts.
+    List(QuoteListArgs),
+
+    /// Price a quote draft.
+    Price(QuotePriceArgs),
+
+    /// Mark a priced quote as sent outside gig.
+    MarkSent(QuoteMarkSentArgs),
+
+    /// Accept a priced quote and register workflow paths.
+    Accept(QuoteAcceptArgs),
+
+    /// Drop a quote draft.
+    Drop(QuoteDropArgs),
+}
+
+#[derive(clap::Args, Debug)]
+pub struct QuoteShowArgs {
+    /// Quote draft id or slug.
+    pub id_or_slug: String,
+
+    /// Emit stable machine-readable JSON.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct QuoteListArgs {
+    /// Emit stable machine-readable JSON.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct QuotePriceArgs {
+    /// Quote draft id or slug.
+    pub id_or_slug: String,
+
+    /// Minimum quote in yuan.
+    #[arg(long)]
+    pub min: String,
+
+    /// Recommended quote in yuan.
+    #[arg(long)]
+    pub recommended: String,
+
+    /// Maximum quote in yuan.
+    #[arg(long)]
+    pub max: String,
+
+    /// Emit stable machine-readable JSON.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct QuoteMarkSentArgs {
+    /// Quote draft id or slug.
+    pub id_or_slug: String,
+
+    /// Emit stable machine-readable JSON.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct QuoteAcceptArgs {
+    /// Quote draft id or slug.
+    pub id_or_slug: String,
+
+    /// Existing formal project directory containing .gig/JOB.md and .gig/QUOTE.md.
+    #[arg(long)]
+    pub project_dir: std::path::PathBuf,
+
+    /// Developer cut ratio for the promoted order.
+    #[arg(long, default_value_t = 0.6)]
+    pub my_cut_ratio: f64,
+
+    /// Emit stable machine-readable JSON.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct QuoteDropArgs {
+    /// Quote draft id or slug.
+    pub id_or_slug: String,
+
+    /// Non-empty reason for dropping the draft.
+    #[arg(long)]
+    pub reason: String,
+
+    /// Emit stable machine-readable JSON.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct QuoteNewArgs {
+    /// Stable quote draft slug.
+    #[arg(long)]
+    pub slug: String,
+
+    /// One-line quote title.
+    #[arg(long)]
+    pub title: String,
+
+    /// Partjob project type, e.g. crawler or frontend_web.
+    #[arg(long)]
+    pub project_type: String,
+
+    /// Short problem or scope summary.
+    #[arg(long)]
+    pub summary: String,
+
+    /// Human-readable client label.
+    #[arg(long)]
+    pub client_label: Option<String>,
+
+    /// Source group / org identifier.
+    #[arg(long)]
+    pub source_org: Option<String>,
+
+    /// Emit stable machine-readable JSON.
+    #[arg(long)]
+    pub json: bool,
 }
 
 // ─── New commands ─────────────────────────────────────────────────────────────

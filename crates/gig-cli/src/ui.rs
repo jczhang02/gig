@@ -29,12 +29,11 @@ pub fn parse_yuan(s: &str) -> Result<i64> {
 }
 
 pub fn format_price(minor: Option<i64>, currency: &str) -> String {
-    match minor {
-        None => "—".into(),
-        Some(m) => {
-            let major = m as f64 / 100.0;
-            format!("{currency} {major:.2}")
-        }
+    if let Some(m) = minor {
+        let major = m as f64 / 100.0;
+        format!("{currency} {major:.2}")
+    } else {
+        "—".into()
     }
 }
 
@@ -44,7 +43,10 @@ pub fn colour_status(status: OrderStatus) -> String {
         OrderStatus::Lead => s.yellow().to_string(),
         OrderStatus::Negotiating => s.yellow().to_string(),
         OrderStatus::Accepted => s.cyan().to_string(),
+        OrderStatus::PlanReady => s.cyan().to_string(),
+        OrderStatus::PlanApproved => s.blue().to_string(),
         OrderStatus::InProgress => s.blue().to_string(),
+        OrderStatus::ReadyToDeliver => s.green().to_string(),
         OrderStatus::Delivered => s.green().to_string(),
         OrderStatus::Revision => s.magenta().to_string(),
         OrderStatus::Paid => s.green().bold().to_string(),
@@ -56,11 +58,7 @@ pub fn colour_status(status: OrderStatus) -> String {
 /// Status display that reflects payment on archived orders.
 pub fn display_status(order: &Order) -> String {
     if order.status == OrderStatus::Archived && order.paid_at.is_some() {
-        format!(
-            "{} {}",
-            "archived".bright_black(),
-            "(paid)".green()
-        )
+        format!("{} {}", "archived".bright_black(), "(paid)".green())
     } else {
         colour_status(order.status)
     }
@@ -85,7 +83,10 @@ pub fn orders_table(orders: &[Order]) -> Table {
 }
 
 pub fn order_detail(o: &Order) -> String {
-    order_detail_full(o, &[], &[], &[], None)
+    let tags: Vec<Tag> = Vec::new();
+    let price_history: Vec<PriceHistoryEntry> = Vec::new();
+    let req_changes: Vec<RequirementChange> = Vec::new();
+    order_detail_full(o, &tags, &price_history, &req_changes, None)
 }
 
 pub fn order_detail_full(
@@ -196,10 +197,10 @@ pub fn confirm(prompt: &str) -> bool {
     eprint!("{prompt} [y/N] ");
     io::stderr().flush().ok();
     let mut line = String::new();
-    if io::stdin().lock().read_line(&mut line).is_err() {
-        return false;
+    match io::stdin().lock().read_line(&mut line) {
+        Ok(_) => matches!(line.trim(), "y" | "Y"),
+        Err(_) => false,
     }
-    matches!(line.trim(), "y" | "Y")
 }
 
 #[cfg(test)]

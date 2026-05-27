@@ -82,7 +82,7 @@ fn cmd_edit(paths: &Paths, name: &str) -> Result<()> {
 
 fn find_embedded(name: &str) -> Option<&'static str> {
     for (k, v) in EMBEDDED_TEMPLATES {
-        if *k == name {
+        if k == name {
             return Some(v);
         }
     }

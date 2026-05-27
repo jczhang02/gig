@@ -7,6 +7,7 @@ use gig_core::services::stats::now_unix;
 use gig_core::{Error, Result};
 use owo_colors::OwoColorize;
 use rusqlite::Connection;
+use serde_json::json;
 use std::str::FromStr;
 
 pub fn run(conn: &Connection, args: LsArgs) -> Result<()> {
@@ -42,11 +43,26 @@ pub fn run(conn: &Connection, args: LsArgs) -> Result<()> {
         // No filter: dashboard focus view.
         let now = now_unix();
         let dashboard = build_dashboard(conn, now)?;
+        if args.json {
+            print_dashboard_json(&dashboard);
+            return Ok(());
+        }
 
-        println!("{}", "Today's focus".bold());
+        println!("{}", "Workflow decision board".bold());
         println!("{}", "─".repeat(60));
 
-        if dashboard.focus_items.is_empty() {
+        for item in &dashboard.quote_items {
+            let draft = &item.draft;
+            println!(
+                "  quote #{:<3}  {:<22}  {:<18}  next: {}",
+                draft.id,
+                draft.slug,
+                draft.status.as_str(),
+                item.next_action
+            );
+        }
+
+        if dashboard.focus_items.is_empty() && dashboard.quote_items.is_empty() {
             println!("  (nothing active)");
         } else {
             for item in &dashboard.focus_items {
@@ -55,14 +71,15 @@ pub fn run(conn: &Connection, args: LsArgs) -> Result<()> {
                 let price = ui::format_price(o.final_price.or(o.quoted_price), &o.currency);
                 let status_str = ui::display_status(o);
 
-                let alert_part = match &item.alert {
-                    Some(a) => format!("  {}", a.yellow()),
-                    None => String::new(),
+                let alert_part = if let Some(alert) = &item.alert {
+                    format!("  {}", alert.yellow())
+                } else {
+                    String::new()
                 };
 
                 println!(
-                    "  #{:<4}  {:<22}  {:<14}  {:<12}{}",
-                    o.id, slug_or_title, status_str, price, alert_part
+                    "  #{:<4}  {:<22}  {:<14}  {:<12}  next: {:<28}{}",
+                    o.id, slug_or_title, status_str, price, item.next_action, alert_part
                 );
             }
         }
@@ -77,4 +94,42 @@ pub fn run(conn: &Connection, args: LsArgs) -> Result<()> {
         );
     }
     Ok(())
+}
+
+fn print_dashboard_json(dashboard: &gig_core::services::dashboard::Dashboard) {
+    let output = json!({
+        "status": "ok",
+        "quote_items": dashboard.quote_items.iter().map(|item| {
+            let draft = &item.draft;
+            json!({
+                "kind": "quote_draft",
+                "id": draft.id,
+                "slug": draft.slug,
+                "title": draft.title,
+                "status": draft.status.as_str(),
+                "project_type": draft.project_type.as_str(),
+                "next_action": item.next_action,
+            })
+        }).collect::<Vec<_>>(),
+        "order_items": dashboard.focus_items.iter().map(|item| {
+            let order = &item.order;
+            let workflow = item.workflow.as_ref();
+            json!({
+                "kind": "order",
+                "id": order.id,
+                "slug": order.slug,
+                "title": order.title,
+                "status": order.status.as_str(),
+                "next_action": item.next_action,
+                "alert": item.alert,
+                "project_type": workflow.and_then(|workflow| workflow.project_type.map(|project_type| project_type.as_str())),
+            })
+        }).collect::<Vec<_>>(),
+        "summary": {
+            "this_month_income": dashboard.summary.this_month_income,
+            "orders_count": dashboard.summary.orders_count,
+            "pending_count": dashboard.summary.pending_count,
+        }
+    });
+    println!("{output}");
 }

@@ -5,6 +5,10 @@ use crate::commands;
 use gig_core::{config::Paths, db, Result};
 
 pub fn run(cli: Cli) -> Result<()> {
+    if let Command::Completion(args) = cli.command {
+        return commands::completion::run(args);
+    }
+
     let paths = Paths::from_env()?;
     paths.ensure_dirs()?;
     let conn = db::open(&paths.db_file)?;
@@ -35,7 +39,12 @@ pub fn run(cli: Cli) -> Result<()> {
         Command::Import(args) => commands::import::run(&conn, args),
         Command::Backup => commands::backup::run(&conn),
         Command::Source(args) => commands::source::run(&conn, args),
+        Command::Quote(args) => commands::quote::run(&conn, args),
+        Command::Plan(args) => commands::plan::run(&conn, args),
+        Command::Acceptance(args) => commands::acceptance::run(&conn, args),
+        Command::Package(args) => commands::package::run(&conn, args),
         Command::Delete(args) => commands::delete::run(&conn, args),
         Command::Upload(args) => commands::upload::run(args),
+        Command::Completion(_) => unreachable!("completion is handled before DB bootstrap"),
     }
 }

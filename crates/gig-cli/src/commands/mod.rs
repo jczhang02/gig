@@ -1,8 +1,10 @@
+pub mod acceptance;
 pub mod archive;
 pub mod backup;
 pub mod cd;
 pub mod change;
 pub mod client;
+pub mod completion;
 pub mod config;
 pub mod cut;
 pub mod delete;
@@ -16,8 +18,11 @@ pub mod ls;
 pub mod new;
 pub mod note;
 pub mod pack;
+pub mod package;
 pub mod paid;
+pub mod plan;
 pub mod price;
+pub mod quote;
 pub mod show;
 pub mod source;
 pub mod stats;
@@ -34,17 +39,16 @@ use rusqlite::Connection;
 
 /// Resolve an order from an optional CLI id/slug, falling back to context.
 pub fn resolve_order(id: Option<String>, conn: &Connection) -> Result<Order> {
-    match id {
-        Some(ref s) => find_by_id_or_slug(conn, s),
-        None => {
-            let order_id = resolve_context(conn)?.ok_or_else(|| {
-                Error::Invalid(
-                    "not inside a gig project directory; pass <id> or cd into one.\n\
-                     hint: `gig cd <id>` prints the dev_path."
-                        .into(),
-                )
-            })?;
-            gig_core::repo::orders::find_by_id(conn, order_id)
-        }
+    if let Some(ref s) = id {
+        return find_by_id_or_slug(conn, s);
     }
+
+    let order_id = resolve_context(conn)?.ok_or_else(|| {
+        Error::Invalid(
+            "not inside a gig project directory; pass <id> or cd into one.
+             hint: `gig cd <id>` prints the dev_path."
+                .into(),
+        )
+    })?;
+    gig_core::repo::orders::find_by_id(conn, order_id)
 }

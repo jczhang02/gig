@@ -15,7 +15,10 @@ pub fn run(conn: &Connection, args: PaidArgs) -> Result<()> {
     let was_archived = order.status == gig_core::models::OrderStatus::Archived;
     let updated = mark_paid(conn, order.id, paid_at)?;
     if was_archived {
-        println!("order #{} payment recorded (status remains archived)", updated.id);
+        println!(
+            "order #{} payment recorded (status remains archived)",
+            updated.id
+        );
     } else {
         println!("order #{} marked as paid", updated.id);
     }

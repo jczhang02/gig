@@ -177,15 +177,14 @@ fn process_one(
         base_slug
     };
 
-    let inferred_status = match &args.status {
-        Some(s) => {
-            OrderStatus::from_str(s).map_err(|_| Error::Invalid(format!("unknown status: {s}")))?
-        }
-        None => infer_status(
+    let inferred_status = if let Some(s) = &args.status {
+        OrderStatus::from_str(s).map_err(|_| Error::Invalid(format!("unknown status: {s}")))?
+    } else {
+        infer_status(
             &canonical,
             &config.general.dev_root,
             &config.general.archive_root,
-        ),
+        )
     };
     let inferred_created_at = infer_created_at(&canonical, date_ts);
     let inferred_title = slug_to_title(&base_slug);
@@ -334,7 +333,7 @@ fn interactive_prompt(
     }
 
     // Numbered status selection
-    let all_statuses = OrderStatus::ALL;
+    let all_statuses = OrderStatus::ALL.as_slice();
     let default_idx = all_statuses
         .iter()
         .position(|s| *s == inferred_status)
@@ -489,9 +488,10 @@ fn slug_to_title(slug: &str) -> String {
     slug.split('-')
         .map(|word| {
             let mut chars = word.chars();
-            match chars.next() {
-                None => String::new(),
-                Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+            if let Some(first) = chars.next() {
+                first.to_uppercase().collect::<String>() + chars.as_str()
+            } else {
+                String::new()
             }
         })
         .collect::<Vec<_>>()

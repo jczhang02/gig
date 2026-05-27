@@ -14,6 +14,10 @@ pub fn run(conn: &Connection, args: DeleteArgs) -> Result<()> {
     }
 
     orders::delete(conn, order.id)?;
-    println!("deleted order #{} ({})", order.id, order.slug.as_deref().unwrap_or(&order.title));
+    println!(
+        "deleted order #{} ({})",
+        order.id,
+        order.slug.as_deref().unwrap_or(&order.title)
+    );
     Ok(())
 }

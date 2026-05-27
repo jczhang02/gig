@@ -23,10 +23,7 @@ pub fn run(conn: &Connection, args: InitArgs) -> Result<()> {
             let dev_root = &config.general.dev_root;
             let order = init_project(conn, order.id, dev_root, args.slug.as_deref())?;
             println!("initialised project for order #{}", order.id);
-            println!(
-                "  dev_path : {}",
-                order.dev_path.as_deref().unwrap_or("—")
-            );
+            println!("  dev_path : {}", order.dev_path.as_deref().unwrap_or("—"));
             println!("{}", ui::order_detail(&order));
         }
         None => {
@@ -128,10 +125,7 @@ pub fn run(conn: &Connection, args: InitArgs) -> Result<()> {
                 "→".green().bold(),
                 order.id
             );
-            println!(
-                "  dev_path : {}",
-                order.dev_path.as_deref().unwrap_or("—")
-            );
+            println!("  dev_path : {}", order.dev_path.as_deref().unwrap_or("—"));
             println!("{}", ui::order_detail(&order));
         }
     }
@@ -157,11 +151,7 @@ fn prompt_field(name: &str, default: &str) -> String {
     } else {
         default.to_string()
     };
-    print!(
-        "  {} [{}]: ",
-        name.cyan().bold(),
-        default_display.dimmed()
-    );
+    print!("  {} [{}]: ", name.cyan().bold(), default_display.dimmed());
     io::stdout().flush().ok();
     let mut line = String::new();
     io::stdin().lock().read_line(&mut line).ok();

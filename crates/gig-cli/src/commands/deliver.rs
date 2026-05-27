@@ -124,7 +124,12 @@ pub fn run(conn: &Connection, args: DeliverArgs) -> Result<()> {
     let uploader: Box<dyn Uploader> = build_uploader(uploader_name, &config)?;
 
     eprint!("uploading to {}...", uploader_name);
-    let upload_result = match uploader.upload(&archive_path, &UploadOpts { link_ttl_days: None }) {
+    let upload_result = match uploader.upload(
+        &archive_path,
+        &UploadOpts {
+            link_ttl_days: None,
+        },
+    ) {
         Ok(r) => r,
         Err(e) => {
             // Clean up temp archive on upload failure (skip for --resend since we didn't create it)
@@ -139,7 +144,8 @@ pub fn run(conn: &Connection, args: DeliverArgs) -> Result<()> {
     let now = OffsetDateTime::now_utc().unix_timestamp();
 
     // Wrap DB operations in a transaction for atomicity.
-    let tx = conn.unchecked_transaction()
+    let tx = conn
+        .unchecked_transaction()
         .map_err(|e| Error::Invalid(format!("failed to begin transaction: {e}")))?;
 
     delivery_artifacts::insert(
