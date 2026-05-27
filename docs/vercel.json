@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    {
+      "source": "/",
+      "destination": "/gig-workflow.html"
+    }
+  ]
+}

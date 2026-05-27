@@ -8,6 +8,19 @@
 cargo install --path crates/gig-cli
 ```
 
+### Zsh completion
+
+```bash
+mkdir -p ~/.local/share/zsh/site-functions
+gig completion zsh > ~/.local/share/zsh/site-functions/_gig
+```
+
+然后把 `~/.local/share/zsh/site-functions` 加入 `fpath`（如果你还没加），并执行：
+
+```bash
+autoload -Uz compinit && compinit
+```
+
 ## 初始配置
 
 ```bash
@@ -48,9 +61,53 @@ gig source add --name "直接客户" --cut-ratio 1.0
 ## 完整工作流
 
 ```
-Lead → Negotiating → Accepted → InProgress → Delivered ⇄ Revision → Paid → Archived
-                                                  ↘ Cancelled (任何阶段均可取消)
+Lead → Negotiating → Accepted → PlanReady → PlanApproved → InProgress
+                                                               ↓
+ReadyToDeliver → Delivered ⇄ Revision → Paid → Archived
+        ↘ Cancelled (任何非终态均可取消)
 ```
+
+`gig` 现在同时支持两层工作流：
+
+- 传统手动项目流：`gig new` / `gig init` / `gig deliver` 仍可使用，适合旧订单和临时项目。
+- 支持层工作流：`gig quote` / `gig plan` / `gig acceptance` / `gig package` 只登记和校验外部工作流生成的文件，不负责生成项目文件或调用模型。
+
+### XDG 报价草稿 vs 项目内 `.gig/`
+
+报价阶段还没有正式项目目录，因此 `gig quote new` 只在 XDG 数据目录中记录报价草稿路径，例如 `$XDG_DATA_HOME/gig/quotes/<slug>`，不会创建项目目录或工作流文件。
+
+客户接受报价后，外部工作流应已经准备好正式项目目录及项目内 `.gig/` 文件。此时用 `gig quote accept` 登记这些路径：
+
+```bash
+gig quote new --slug crawler-a --title "数据爬虫" \
+  --project-type crawler \
+  --summary "采集公开列表并导出 CSV"
+
+gig quote price crawler-a --min 3000 --recommended 5000 --max 8000
+gig quote mark-sent crawler-a
+
+gig quote accept crawler-a --project-dir ~/dev/partjobs/crawler-a
+```
+
+`gig quote accept` 只记录 `<project>/.gig/JOB.md`、`QUOTE.md`、`INDEX.html` 等路径并创建订单，不会生成这些文件。缺失文件会阻塞后续 `plan` / `acceptance` / `package` 命令。
+
+### 计划、验收和安全交付包
+
+```bash
+gig plan ready crawler-a       # 校验 .gig/plan/PLAN.md 和 PLAN.html
+gig plan approve crawler-a     # plan_ready → plan_approved
+gig status crawler-a in_progress
+gig acceptance complete crawler-a
+
+gig package check crawler-a \
+  --delivery-date 2026-05-27 \
+  --delivery-dir ~/dev/partjobs/crawler-a/.gig/delivery/2026-05-27
+gig package mark-sent <package-id>
+```
+
+客户端交付包必须由外部工作流创建为 `.gig/delivery/<YYYY-MM-DD>/export/client-package.zip`。`gig package check` 只校验并记录这个已有 zip，不会从项目根目录打包。允许交付的文件必须写在 `manifest.toml` 的 `client_files` 中；`.gig/`、`internal/`、`prompts/`、`ACCEPTANCE.md`、`DELIVERY_INTERNAL.html` 等路径会被拒绝，避免把内部材料泄露给客户。
+
+旧订单可以没有 `order_workflow` 行和 `project_type`。它们仍可 `list`、`show`、`export`、`archive`；机器可读输出会把需要工作流元数据的下一步标为 `legacy_workflow_metadata_missing`。后续如果要补齐旧订单类型，核心库提供了 `orders::update_project_type`，可以由迁移脚本或未来 CLI 助手调用；本阶段不强制回填。
 
 ---
 
@@ -149,13 +206,14 @@ gig cut 1 0.7
 
 ```bash
 gig show 1
+gig show 1 --json
 ```
 
-输出包含：价格历史、需求变更记录、备注、标签。
+输出包含：价格历史、需求变更记录、备注、标签；支持层订单还会显示工作流路径和下一步决策。
 
 ### 6. 交付
 
-开发完成，一键打包上传：
+开发完成，传统手动流程可一键打包上传：
 
 ```bash
 gig deliver 1
@@ -179,6 +237,8 @@ gig deliver 1
 gig deliver 1 --dry-run       # 查看会打包哪些文件
 gig pack 1                     # 只打包不上传
 ```
+
+支持层工作流的客户交付不要使用项目根目录打包；请使用 `.gig/delivery/<date>/manifest.toml` 加 `gig package check` 的 allowlist 校验。
 
 ### 7. 客户要求修改
 
@@ -245,6 +305,7 @@ gig archive 1 --purge
 
 ```bash
 gig ls              # 今日焦点面板：活跃订单 + 本月收入
+gig ls --json       # 机器可读决策面板
 gig ls --all        # 全部订单表格
 gig ls --status in_progress   # 按状态筛选
 ```
@@ -277,6 +338,7 @@ gig import --relocate                     # 导入并移动到标准目录结构
 
 ```bash
 gig doctor          # 检查数据和路径一致性
+                    # 也检查工作流文件和客户交付包是否缺失/不安全
 gig backup          # 备份数据库
 ```
 
@@ -308,20 +370,26 @@ gig upload report.pdf slides.pptx
     │                   │
     └→ Accepted ←───────┘
           │
-          ↓  init
-      InProgress ──→ Delivered ⇄ Revision
-          │              │
-          ↓              ↓
-      Cancelled        Paid
-                         │
-                         ↓
-                      Archived
+          ↓
+      PlanReady ──→ PlanApproved ──→ InProgress ──→ ReadyToDeliver
+          │                │              │               │
+          ↓                ↓              ↓               ↓
+      Cancelled        Cancelled      Cancelled       Delivered ⇄ Revision
+                                                             │
+                                                             ↓
+                                                            Paid
+                                                             │
+                                                             ↓
+                                                          Archived
 ```
 
 - **Lead**：线索，尚未接触
 - **Negotiating**：沟通中
 - **Accepted**：已确认接单
+- **PlanReady**：计划文件已准备，等待批准
+- **PlanApproved**：计划已批准，等待开始执行
 - **InProgress**：开发中
+- **ReadyToDeliver**：验收完成，等待校验客户交付包
 - **Delivered**：已交付
 - **Revision**：交付后返工
 - **Paid**：已收款
