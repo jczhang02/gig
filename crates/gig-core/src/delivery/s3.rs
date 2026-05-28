@@ -204,15 +204,16 @@ impl Uploader for S3Uploader {
             .ok_or_else(|| Error::Invalid("local path has no filename".into()))?
             .to_string_lossy()
             .into_owned();
+        let object_key = opts.object_key.as_deref().unwrap_or(&file_name);
 
         let file_size = std::fs::metadata(local)
             .map_err(|e| Error::PathUnavailable(local.to_path_buf(), e))?
             .len();
 
         if file_size >= MULTIPART_THRESHOLD {
-            self.multipart_upload(local, &file_name)?;
+            self.multipart_upload(local, object_key)?;
         } else {
-            self.put_object(local, &file_name)?;
+            self.put_object(local, object_key)?;
         }
 
         // Generate presigned GET URL with Content-Disposition for proper filename.
@@ -229,7 +230,7 @@ impl Uploader for S3Uploader {
             self.client
                 .get_object()
                 .bucket(&self.bucket)
-                .key(&file_name)
+                .key(object_key)
                 .response_content_disposition(&disposition)
                 .presigned(presign_config)
                 .await

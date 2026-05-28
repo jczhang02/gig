@@ -1,5 +1,6 @@
-use crate::models::{DeliveryPackage, DeliveryPackageStatus, OrderStatus};
-use crate::repo::{delivery_packages, orders};
+use crate::delivery::{UploadOpts, Uploader};
+use crate::models::{DeliveryArtifact, DeliveryPackage, DeliveryPackageStatus, OrderStatus};
+use crate::repo::{delivery_artifacts, delivery_packages, orders};
 use crate::services::orders as order_service;
 use crate::{Error, Result};
 use rusqlite::Connection;
@@ -19,14 +20,16 @@ pub struct PackageCheckInput<'a> {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct PackageRecordInput<'a> {
+pub struct PackageSendInput<'a> {
     pub delivery_date: &'a str,
     pub delivery_dir: &'a Path,
-    pub client_dir: &'a Path,
-    pub manifest_path: &'a Path,
-    pub package_path: Option<&'a Path>,
-    pub status: DeliveryPackageStatus,
-    pub recorded_at: &'a str,
+    pub sent_at: &'a str,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PackageSendResult {
+    pub package: DeliveryPackage,
+    pub artifact: DeliveryArtifact,
 }
 
 #[derive(Debug, Deserialize)]
@@ -36,81 +39,60 @@ struct ClientManifest {
     client_files: Vec<String>,
 }
 
-pub fn record_client_package(
+pub fn send_client_package(
     conn: &Connection,
     order_id: i64,
-    input: PackageRecordInput<'_>,
-) -> Result<DeliveryPackage> {
+    input: PackageSendInput<'_>,
+    uploader: &dyn Uploader,
+) -> Result<PackageSendResult> {
     let order = orders::find_by_id(conn, order_id)?;
-    if order.status != OrderStatus::ReadyToDeliver {
-        return Err(Error::Invalid(format!(
-            "invalid transition: package record requires ready_to_deliver, got {}",
-            order.status
-        )));
-    }
-    if !matches!(
-        input.status,
-        DeliveryPackageStatus::Prepared | DeliveryPackageStatus::Validated
-    ) {
-        return Err(Error::Invalid(
-            "package record status must be prepared or validated".to_string(),
-        ));
-    }
-    require_existing_dir(input.delivery_dir, "delivery dir")?;
-    require_existing_dir(input.client_dir, "client dir")?;
-    require_existing_file(input.manifest_path, "package manifest")?;
-    if input.status == DeliveryPackageStatus::Validated {
-        let package_path = input.package_path.ok_or_else(|| {
-            Error::Invalid(
-                "missing workflow-created package artifact: client-package.zip".to_string(),
-            )
-        })?;
-        validate_package_contents(
-            input.delivery_date,
-            input.client_dir,
-            input.manifest_path,
-            package_path,
-        )?;
-    } else if let Some(package_path) = input.package_path {
-        require_existing_file(package_path, "package artifact")?;
-    }
+    ensure_package_send_status(order.status)?;
+    let paths = validate_package_input(input.delivery_date, input.delivery_dir)?;
+    let package_path = path_string(&paths.package_path);
+    let sent_at = parse_rfc3339(input.sent_at)?;
+    let uploaded_at = sent_at.unix_timestamp();
+    let delivery_attempt = next_delivery_attempt(conn, order_id, input.delivery_date)?;
+    let upload_result = uploader.upload(
+        &paths.package_path,
+        &UploadOpts {
+            link_ttl_days: None,
+            object_key: Some(client_package_object_key(
+                order_id,
+                input.delivery_date,
+                sent_at,
+                delivery_attempt,
+            )),
+        },
+    )?;
 
-    let package_path = input.package_path.map(path_string);
-    delivery_packages::insert(
-        conn,
+    let tx = conn.unchecked_transaction()?;
+    let package = delivery_packages::insert(
+        &tx,
         &delivery_packages::NewDeliveryPackage {
             order_id,
             delivery_date: input.delivery_date,
             delivery_dir: &path_string(input.delivery_dir),
-            client_dir: &path_string(input.client_dir),
-            manifest_path: &path_string(input.manifest_path),
-            package_path: package_path.as_deref(),
-            status: input.status,
-            created_at: input.recorded_at,
-            updated_at: input.recorded_at,
+            client_dir: &path_string(&paths.client_dir),
+            manifest_path: &path_string(&paths.manifest_path),
+            package_path: Some(&package_path),
+            status: DeliveryPackageStatus::Sent,
+            created_at: input.sent_at,
+            updated_at: input.sent_at,
         },
-    )
-}
-
-pub fn mark_client_package_sent(
-    conn: &Connection,
-    package_id: i64,
-    sent_at: &str,
-) -> Result<DeliveryPackage> {
-    let package = delivery_packages::find_by_id(conn, package_id)?;
-    if package.status != DeliveryPackageStatus::Validated {
-        return Err(Error::Invalid(format!(
-            "package must be validated before marking sent, got {}",
-            package.status
-        )));
-    }
-    let delivered_at = parse_rfc3339_unix(sent_at)?;
-    let tx = conn.unchecked_transaction()?;
-    let sent =
-        delivery_packages::update_status(&tx, package_id, DeliveryPackageStatus::Sent, sent_at)?;
-    order_service::transition(&tx, package.order_id, OrderStatus::Delivered, delivered_at)?;
+    )?;
+    let artifact = delivery_artifacts::insert(
+        &tx,
+        order_id,
+        Some(&package_path),
+        Some(uploader.name()),
+        Some(&upload_result.url),
+        upload_result.expires_at,
+        uploaded_at,
+    )?;
+    order_service::transition(&tx, order_id, OrderStatus::Delivered, uploaded_at)?;
     tx.commit()?;
-    Ok(sent)
+
+    Ok(PackageSendResult { package, artifact })
 }
 
 pub fn check_client_package(
@@ -119,39 +101,63 @@ pub fn check_client_package(
     input: PackageCheckInput<'_>,
 ) -> Result<DeliveryPackage> {
     let order = orders::find_by_id(conn, order_id)?;
-    if order.status != OrderStatus::ReadyToDeliver {
-        return Err(Error::Invalid(format!(
-            "invalid transition: package check requires ready_to_deliver, got {}",
-            order.status
-        )));
-    }
+    ensure_package_send_status(order.status)?;
 
-    let delivery_dir = input.delivery_dir;
-    let client_dir = delivery_dir.join("client");
-    let manifest_path = delivery_dir.join("manifest.toml");
-    let package_path = delivery_dir.join("export").join("client-package.zip");
-    validate_package_contents(
-        input.delivery_date,
-        &client_dir,
-        &manifest_path,
-        &package_path,
-    )?;
-    let package_path = path_string(&package_path);
+    let paths = validate_package_input(input.delivery_date, input.delivery_dir)?;
+    let package_path = path_string(&paths.package_path);
 
     delivery_packages::insert(
         conn,
         &delivery_packages::NewDeliveryPackage {
             order_id,
             delivery_date: input.delivery_date,
-            delivery_dir: &path_string(delivery_dir),
-            client_dir: &path_string(&client_dir),
-            manifest_path: &path_string(&manifest_path),
+            delivery_dir: &path_string(input.delivery_dir),
+            client_dir: &path_string(&paths.client_dir),
+            manifest_path: &path_string(&paths.manifest_path),
             package_path: Some(&package_path),
             status: DeliveryPackageStatus::Validated,
             created_at: input.checked_at,
             updated_at: input.checked_at,
         },
     )
+}
+
+#[derive(Debug)]
+struct ValidatedPackagePaths {
+    client_dir: PathBuf,
+    manifest_path: PathBuf,
+    package_path: PathBuf,
+}
+
+fn ensure_package_send_status(status: OrderStatus) -> Result<()> {
+    if matches!(status, OrderStatus::ReadyToDeliver | OrderStatus::Revision) {
+        Ok(())
+    } else {
+        Err(Error::Invalid(format!(
+            "invalid transition: package send requires ready_to_deliver or revision, got {status}"
+        )))
+    }
+}
+
+fn validate_package_input(
+    delivery_date: &str,
+    delivery_dir: &Path,
+) -> Result<ValidatedPackagePaths> {
+    let client_dir = delivery_dir.join("client");
+    let manifest_path = delivery_dir.join("manifest.toml");
+    let package_path = delivery_dir.join("export").join("client-package.zip");
+    validate_package_contents(
+        delivery_date,
+        delivery_dir,
+        &client_dir,
+        &manifest_path,
+        &package_path,
+    )?;
+    Ok(ValidatedPackagePaths {
+        client_dir,
+        manifest_path,
+        package_path,
+    })
 }
 
 fn require_existing_dir(path: &Path, label: &str) -> Result<()> {
@@ -179,17 +185,6 @@ fn require_existing_dir(path: &Path, label: &str) -> Result<()> {
     }
 }
 
-fn require_existing_file(path: &Path, label: &str) -> Result<()> {
-    if path.is_file() {
-        Ok(())
-    } else {
-        Err(Error::Invalid(format!(
-            "missing workflow-created {label}: {}",
-            path.display()
-        )))
-    }
-}
-
 fn read_manifest(path: &Path) -> Result<ClientManifest> {
     let contents = fs::read_to_string(path).map_err(|err| {
         Error::Invalid(format!(
@@ -202,12 +197,22 @@ fn read_manifest(path: &Path) -> Result<ClientManifest> {
 
 fn validate_package_contents(
     delivery_date: &str,
+    delivery_dir: &Path,
     client_dir: &Path,
     manifest_path: &Path,
     package_path: &Path,
 ) -> Result<()> {
+    require_existing_dir(delivery_dir, "delivery dir")?;
+    let canonical_delivery_dir = canonicalize_workflow_path(delivery_dir, "delivery dir")?;
     require_existing_dir(client_dir, "client dir")?;
     let canonical_client_dir = canonicalize_workflow_path(client_dir, "client dir")?;
+    require_path_inside_dir(
+        &canonical_delivery_dir,
+        &canonical_client_dir,
+        client_dir,
+        "client dir",
+    )?;
+    require_workflow_file_inside_dir(&canonical_delivery_dir, manifest_path, "package manifest")?;
     let manifest = read_manifest(manifest_path)?;
     validate_manifest(delivery_date, &manifest)?;
 
@@ -220,6 +225,7 @@ fn validate_package_contents(
         )?;
     }
 
+    require_workflow_file_inside_dir(&canonical_delivery_dir, package_path, "package artifact")?;
     validate_zip_package(package_path, &manifest.client_files)
 }
 
@@ -284,6 +290,27 @@ fn require_client_file_inside_dir(client_dir: &Path, path: &Path, label: &str) -
     Ok(())
 }
 
+fn require_workflow_file_inside_dir(workflow_dir: &Path, path: &Path, label: &str) -> Result<()> {
+    require_regular_file(path, label)?;
+    let canonical_path = canonicalize_workflow_path(path, label)?;
+    require_path_inside_dir(workflow_dir, &canonical_path, path, label)
+}
+
+fn require_path_inside_dir(
+    expected_dir: &Path,
+    canonical_path: &Path,
+    original_path: &Path,
+    label: &str,
+) -> Result<()> {
+    if !canonical_path.starts_with(expected_dir) {
+        return Err(Error::Invalid(format!(
+            "workflow-created {label} must stay inside delivery dir: {}",
+            original_path.display()
+        )));
+    }
+    Ok(())
+}
+
 fn validate_zip_package(package_path: &Path, client_files: &[String]) -> Result<()> {
     require_regular_file(package_path, "package artifact")?;
     let allowed_entries = client_files
@@ -343,9 +370,8 @@ fn is_manifest_parent_dir(name: &str, client_files: &[String]) -> bool {
     client_files.iter().any(|file| file.starts_with(&prefix))
 }
 
-fn parse_rfc3339_unix(timestamp: &str) -> Result<i64> {
+fn parse_rfc3339(timestamp: &str) -> Result<OffsetDateTime> {
     OffsetDateTime::parse(timestamp, &Rfc3339)
-        .map(|timestamp| timestamp.unix_timestamp())
         .map_err(|err| Error::Invalid(format!("invalid sent_at timestamp: {timestamp} ({err})")))
 }
 
@@ -402,18 +428,126 @@ fn path_string(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
 
+fn next_delivery_attempt(conn: &Connection, order_id: i64, delivery_date: &str) -> Result<usize> {
+    let attempts = delivery_packages::list_for_order(conn, order_id)?
+        .iter()
+        .filter(|package| package.delivery_date == delivery_date)
+        .count();
+    Ok(attempts)
+}
+
+fn client_package_object_key(
+    order_id: i64,
+    delivery_date: &str,
+    uploaded_at: OffsetDateTime,
+    delivery_attempt: usize,
+) -> String {
+    let uploaded_at = uploaded_at.unix_timestamp_nanos();
+    format!(
+        "orders/{order_id}/deliveries/{delivery_date}/{uploaded_at}-{delivery_attempt}-client-package.zip"
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::db::open_in_memory;
+    use crate::delivery::{UploadOpts, UploadResult, Uploader};
     use crate::models::{DeliveryPackageStatus, OrderStatus, ProjectType};
     use crate::repo::orders::NewOrder;
-    use crate::repo::{delivery_packages, orders};
+    use crate::repo::{delivery_artifacts, delivery_packages, orders};
     use std::fs;
     use std::io::Write;
     use std::path::{Path, PathBuf};
+    use std::sync::Mutex;
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct UploadCall {
+        local: PathBuf,
+        object_key: Option<String>,
+    }
+
+    #[derive(Debug, Default)]
+    struct RecordingUploader {
+        upload_calls: Mutex<Vec<UploadCall>>,
+    }
+
+    #[derive(Debug, Default)]
+    struct FailingUploader {
+        upload_calls: Mutex<Vec<UploadCall>>,
+    }
+
+    impl RecordingUploader {
+        fn uploaded_paths(&self) -> Vec<PathBuf> {
+            self.upload_calls
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|call| call.local.clone())
+                .collect()
+        }
+
+        fn uploaded_object_keys(&self) -> Vec<Option<String>> {
+            self.upload_calls
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|call| call.object_key.clone())
+                .collect()
+        }
+    }
+
+    impl Uploader for RecordingUploader {
+        fn name(&self) -> &str {
+            "test:uploader"
+        }
+
+        fn upload(&self, local: &Path, opts: &UploadOpts) -> Result<UploadResult> {
+            assert_eq!(opts.link_ttl_days, None);
+            self.upload_calls.lock().unwrap().push(UploadCall {
+                local: local.to_path_buf(),
+                object_key: opts.object_key.clone(),
+            });
+            Ok(UploadResult {
+                url: "https://example.test/client-package.zip".to_string(),
+                expires_at: Some(1_780_000_000),
+                provider: self.name().to_string(),
+                file_size: fs::metadata(local).unwrap().len(),
+            })
+        }
+    }
+
+    impl FailingUploader {
+        fn uploaded_paths(&self) -> Vec<PathBuf> {
+            self.upload_calls
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|call| call.local.clone())
+                .collect()
+        }
+    }
+
+    impl Uploader for FailingUploader {
+        fn name(&self) -> &str {
+            "test:failing"
+        }
+
+        fn upload(&self, local: &Path, opts: &UploadOpts) -> Result<UploadResult> {
+            assert_eq!(opts.link_ttl_days, None);
+            self.upload_calls.lock().unwrap().push(UploadCall {
+                local: local.to_path_buf(),
+                object_key: opts.object_key.clone(),
+            });
+            Err(Error::Invalid("upload failed".to_string()))
+        }
+    }
 
     fn ready_order(conn: &rusqlite::Connection) -> i64 {
+        order_with_status(conn, OrderStatus::ReadyToDeliver)
+    }
+
+    fn order_with_status(conn: &rusqlite::Connection, status: OrderStatus) -> i64 {
         orders::insert(
             conn,
             &NewOrder {
@@ -424,7 +558,7 @@ mod tests {
                 source_org: None,
                 source_id: None,
                 project_type: Some(ProjectType::Crawler),
-                status: OrderStatus::ReadyToDeliver,
+                status,
                 quoted_price: Some(15_000),
                 final_price: None,
                 my_cut_ratio: 0.6,
@@ -525,6 +659,230 @@ mod tests {
 
         let listed = delivery_packages::list_for_order(&conn, order_id).unwrap();
         assert_eq!(listed, vec![package]);
+    }
+
+    #[test]
+    fn send_client_package_uploads_zip_records_artifact_and_delivers_order() {
+        let conn = open_in_memory().unwrap();
+        let order_id = ready_order(&conn);
+        let root = tempfile::tempdir().unwrap();
+        let delivery_dir = delivery_layout(root.path());
+        let client_dir = delivery_dir.join("client");
+        let export_dir = delivery_dir.join("export");
+        let package_path = export_dir.join("client-package.zip");
+        fs::create_dir_all(&client_dir).unwrap();
+        fs::create_dir_all(&export_dir).unwrap();
+        fs::write(client_dir.join("DELIVERY_CLIENT.html"), "client html").unwrap();
+        write_zip(&package_path, [("DELIVERY_CLIENT.html", "client html")]);
+        write_manifest(&delivery_dir, ["DELIVERY_CLIENT.html"]);
+        let uploader = RecordingUploader::default();
+
+        let sent = send_client_package(
+            &conn,
+            order_id,
+            PackageSendInput {
+                delivery_date: "2026-05-27",
+                delivery_dir: &delivery_dir,
+                sent_at: "2026-05-27T07:00:00Z",
+            },
+            &uploader,
+        )
+        .unwrap();
+
+        assert_eq!(uploader.uploaded_paths(), vec![package_path.clone()]);
+        assert_eq!(
+            uploader.uploaded_object_keys(),
+            vec![Some(format!(
+                "orders/{order_id}/deliveries/2026-05-27/1779865200000000000-0-client-package.zip"
+            ))]
+        );
+        assert_eq!(sent.package.order_id, order_id);
+        assert_eq!(sent.package.status, DeliveryPackageStatus::Sent);
+        assert_eq!(
+            sent.package.package_path,
+            Some(package_path.to_string_lossy().into_owned())
+        );
+        assert_eq!(sent.artifact.order_id, order_id);
+        assert_eq!(
+            sent.artifact.local_path,
+            Some(package_path.to_string_lossy().into_owned())
+        );
+        assert_eq!(
+            sent.artifact.uploader_name,
+            Some("test:uploader".to_string())
+        );
+        assert_eq!(
+            sent.artifact.remote_url,
+            Some("https://example.test/client-package.zip".to_string())
+        );
+        assert_eq!(sent.artifact.expires_at, Some(1_780_000_000));
+        assert_eq!(sent.artifact.uploaded_at, 1_779_865_200);
+        assert_eq!(
+            orders::find_by_id(&conn, order_id).unwrap().status,
+            OrderStatus::Delivered
+        );
+        assert_eq!(
+            delivery_packages::list_for_order(&conn, order_id).unwrap(),
+            vec![sent.package]
+        );
+        assert_eq!(
+            delivery_artifacts::list_for_order(&conn, order_id).unwrap(),
+            vec![sent.artifact]
+        );
+    }
+
+    #[test]
+    fn send_client_package_allows_revision_resend_and_delivers_order() {
+        let conn = open_in_memory().unwrap();
+        let order_id = ready_order(&conn);
+        let root = tempfile::tempdir().unwrap();
+        let delivery_dir = delivery_layout(root.path());
+        let client_dir = delivery_dir.join("client");
+        let export_dir = delivery_dir.join("export");
+        let package_path = export_dir.join("client-package.zip");
+        fs::create_dir_all(&client_dir).unwrap();
+        fs::create_dir_all(&export_dir).unwrap();
+        fs::write(client_dir.join("DELIVERY_CLIENT.html"), "client html").unwrap();
+        write_zip(&package_path, [("DELIVERY_CLIENT.html", "client html")]);
+        write_manifest(&delivery_dir, ["DELIVERY_CLIENT.html"]);
+        let uploader = RecordingUploader::default();
+
+        let first_sent = send_client_package(
+            &conn,
+            order_id,
+            PackageSendInput {
+                delivery_date: "2026-05-27",
+                delivery_dir: &delivery_dir,
+                sent_at: "2026-05-27T07:00:00Z",
+            },
+            &uploader,
+        )
+        .unwrap();
+
+        order_service::transition(&conn, order_id, OrderStatus::Revision, 1_779_900_000).unwrap();
+
+        let resent = send_client_package(
+            &conn,
+            order_id,
+            PackageSendInput {
+                delivery_date: "2026-05-27",
+                delivery_dir: &delivery_dir,
+                sent_at: "2026-05-28T07:00:00Z",
+            },
+            &uploader,
+        )
+        .unwrap();
+
+        let first_key = format!(
+            "orders/{order_id}/deliveries/2026-05-27/1779865200000000000-0-client-package.zip"
+        );
+        let resend_key = format!(
+            "orders/{order_id}/deliveries/2026-05-27/1779951600000000000-1-client-package.zip"
+        );
+        assert_ne!(first_key, resend_key);
+        assert_eq!(
+            uploader.uploaded_paths(),
+            vec![package_path.clone(), package_path]
+        );
+        assert_eq!(
+            uploader.uploaded_object_keys(),
+            vec![Some(first_key), Some(resend_key)]
+        );
+        assert_eq!(first_sent.package.status, DeliveryPackageStatus::Sent);
+        assert_eq!(resent.package.status, DeliveryPackageStatus::Sent);
+        assert_eq!(
+            orders::find_by_id(&conn, order_id).unwrap().status,
+            OrderStatus::Delivered
+        );
+    }
+
+    #[test]
+    fn send_client_package_same_second_resend_uses_distinct_object_keys() {
+        let conn = open_in_memory().unwrap();
+        let order_id = ready_order(&conn);
+        let root = tempfile::tempdir().unwrap();
+        let delivery_dir = delivery_layout(root.path());
+        let client_dir = delivery_dir.join("client");
+        let export_dir = delivery_dir.join("export");
+        let package_path = export_dir.join("client-package.zip");
+        fs::create_dir_all(&client_dir).unwrap();
+        fs::create_dir_all(&export_dir).unwrap();
+        fs::write(client_dir.join("DELIVERY_CLIENT.html"), "client html").unwrap();
+        write_zip(&package_path, [("DELIVERY_CLIENT.html", "client html")]);
+        write_manifest(&delivery_dir, ["DELIVERY_CLIENT.html"]);
+        let uploader = RecordingUploader::default();
+
+        send_client_package(
+            &conn,
+            order_id,
+            PackageSendInput {
+                delivery_date: "2026-05-27",
+                delivery_dir: &delivery_dir,
+                sent_at: "2026-05-27T07:00:00.000000001Z",
+            },
+            &uploader,
+        )
+        .unwrap();
+
+        order_service::transition(&conn, order_id, OrderStatus::Revision, 1_779_900_000).unwrap();
+
+        send_client_package(
+            &conn,
+            order_id,
+            PackageSendInput {
+                delivery_date: "2026-05-27",
+                delivery_dir: &delivery_dir,
+                sent_at: "2026-05-27T07:00:00.000000002Z",
+            },
+            &uploader,
+        )
+        .unwrap();
+
+        let object_keys = uploader.uploaded_object_keys();
+        assert_eq!(object_keys.len(), 2);
+        assert_ne!(object_keys[0], object_keys[1]);
+    }
+
+    #[test]
+    fn send_client_package_upload_failure_leaves_no_package_record() {
+        let conn = open_in_memory().unwrap();
+        let order_id = ready_order(&conn);
+        let root = tempfile::tempdir().unwrap();
+        let delivery_dir = delivery_layout(root.path());
+        let client_dir = delivery_dir.join("client");
+        let export_dir = delivery_dir.join("export");
+        let package_path = export_dir.join("client-package.zip");
+        fs::create_dir_all(&client_dir).unwrap();
+        fs::create_dir_all(&export_dir).unwrap();
+        fs::write(client_dir.join("DELIVERY_CLIENT.html"), "client html").unwrap();
+        write_zip(&package_path, [("DELIVERY_CLIENT.html", "client html")]);
+        write_manifest(&delivery_dir, ["DELIVERY_CLIENT.html"]);
+        let uploader = FailingUploader::default();
+
+        let err = send_client_package(
+            &conn,
+            order_id,
+            PackageSendInput {
+                delivery_date: "2026-05-27",
+                delivery_dir: &delivery_dir,
+                sent_at: "2026-05-27T07:00:00Z",
+            },
+            &uploader,
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("upload failed"));
+        assert_eq!(uploader.uploaded_paths(), vec![package_path]);
+        assert!(delivery_packages::list_for_order(&conn, order_id)
+            .unwrap()
+            .is_empty());
+        assert!(delivery_artifacts::list_for_order(&conn, order_id)
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            orders::find_by_id(&conn, order_id).unwrap().status,
+            OrderStatus::ReadyToDeliver
+        );
     }
 
     #[test]
@@ -637,6 +995,42 @@ mod tests {
         .unwrap_err();
 
         assert!(err.to_string().contains("symlink"));
+        assert!(delivery_packages::list_for_order(&conn, order_id)
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn check_client_package_rejects_symlinked_export_dir_without_recording() {
+        let conn = open_in_memory().unwrap();
+        let order_id = ready_order(&conn);
+        let root = tempfile::tempdir().unwrap();
+        let delivery_dir = delivery_layout(root.path());
+        let client_dir = delivery_dir.join("client");
+        let export_dir = delivery_dir.join("export");
+        let outside_export_dir = root.path().join("outside-export");
+        fs::create_dir_all(&client_dir).unwrap();
+        fs::create_dir_all(&outside_export_dir).unwrap();
+        fs::write(client_dir.join("DELIVERY_CLIENT.html"), "client html").unwrap();
+        std::os::unix::fs::symlink(&outside_export_dir, &export_dir).unwrap();
+        write_manifest(&delivery_dir, ["DELIVERY_CLIENT.html"]);
+        write_zip(
+            &outside_export_dir.join("client-package.zip"),
+            [("DELIVERY_CLIENT.html", "client html")],
+        );
+
+        let err = check_client_package(
+            &conn,
+            order_id,
+            PackageCheckInput {
+                delivery_date: "2026-05-27",
+                delivery_dir: &delivery_dir,
+                checked_at: "2026-05-27T06:00:00Z",
+            },
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("delivery dir"));
         assert!(delivery_packages::list_for_order(&conn, order_id)
             .unwrap()
             .is_empty());
@@ -781,181 +1175,5 @@ mod tests {
         assert!(delivery_packages::list_for_order(&conn, order_id)
             .unwrap()
             .is_empty());
-    }
-
-    #[test]
-    fn record_client_package_records_existing_metadata_without_validating_contents() {
-        let conn = open_in_memory().unwrap();
-        let order_id = ready_order(&conn);
-        let root = tempfile::tempdir().unwrap();
-        let delivery_dir = delivery_layout(root.path());
-        let client_dir = delivery_dir.join("client");
-        let manifest_path = delivery_dir.join("manifest.toml");
-        fs::create_dir_all(&client_dir).unwrap();
-        fs::write(&manifest_path, "version = 1\n").unwrap();
-
-        let package = record_client_package(
-            &conn,
-            order_id,
-            PackageRecordInput {
-                delivery_date: "2026-05-27",
-                delivery_dir: &delivery_dir,
-                client_dir: &client_dir,
-                manifest_path: &manifest_path,
-                package_path: None,
-                status: DeliveryPackageStatus::Prepared,
-                recorded_at: "2026-05-27T06:30:00Z",
-            },
-        )
-        .unwrap();
-
-        assert_eq!(package.status, DeliveryPackageStatus::Prepared);
-        assert_eq!(package.package_path, None);
-        assert_eq!(package.delivery_dir, delivery_dir.to_string_lossy());
-        assert_eq!(
-            delivery_packages::list_for_order(&conn, order_id).unwrap(),
-            vec![package]
-        );
-    }
-
-    #[test]
-    fn record_client_package_validated_rejects_invalid_manifest_without_recording() {
-        let conn = open_in_memory().unwrap();
-        let order_id = ready_order(&conn);
-        let root = tempfile::tempdir().unwrap();
-        let delivery_dir = delivery_layout(root.path());
-        let client_dir = delivery_dir.join("client");
-        let export_dir = delivery_dir.join("export");
-        let manifest_path = delivery_dir.join("manifest.toml");
-        let package_path = export_dir.join("client-package.zip");
-        fs::create_dir_all(&client_dir).unwrap();
-        fs::create_dir_all(&export_dir).unwrap();
-        fs::write(client_dir.join("DELIVERY_CLIENT.html"), "client html").unwrap();
-        write_manifest(&delivery_dir, ["DELIVERY_CLIENT.html", "../secret.txt"]);
-        write_zip(&package_path, [("DELIVERY_CLIENT.html", "client html")]);
-
-        let err = record_client_package(
-            &conn,
-            order_id,
-            PackageRecordInput {
-                delivery_date: "2026-05-27",
-                delivery_dir: &delivery_dir,
-                client_dir: &client_dir,
-                manifest_path: &manifest_path,
-                package_path: Some(&package_path),
-                status: DeliveryPackageStatus::Validated,
-                recorded_at: "2026-05-27T06:30:00Z",
-            },
-        )
-        .unwrap_err();
-
-        assert!(err.to_string().contains("unsafe package path"));
-        assert!(delivery_packages::list_for_order(&conn, order_id)
-            .unwrap()
-            .is_empty());
-    }
-
-    #[test]
-    fn record_client_package_rejects_sent_status() {
-        let conn = open_in_memory().unwrap();
-        let order_id = ready_order(&conn);
-        let root = tempfile::tempdir().unwrap();
-        let delivery_dir = delivery_layout(root.path());
-        let client_dir = delivery_dir.join("client");
-        let manifest_path = delivery_dir.join("manifest.toml");
-        fs::create_dir_all(&client_dir).unwrap();
-        fs::write(&manifest_path, "version = 1\n").unwrap();
-
-        let err = record_client_package(
-            &conn,
-            order_id,
-            PackageRecordInput {
-                delivery_date: "2026-05-27",
-                delivery_dir: &delivery_dir,
-                client_dir: &client_dir,
-                manifest_path: &manifest_path,
-                package_path: None,
-                status: DeliveryPackageStatus::Sent,
-                recorded_at: "2026-05-27T06:30:00Z",
-            },
-        )
-        .unwrap_err();
-
-        assert!(err.to_string().contains("prepared or validated"));
-        assert!(delivery_packages::list_for_order(&conn, order_id)
-            .unwrap()
-            .is_empty());
-    }
-
-    #[test]
-    fn mark_client_package_sent_requires_validated_package() {
-        let conn = open_in_memory().unwrap();
-        let order_id = ready_order(&conn);
-        let root = tempfile::tempdir().unwrap();
-        let delivery_dir = delivery_layout(root.path());
-        let client_dir = delivery_dir.join("client");
-        let manifest_path = delivery_dir.join("manifest.toml");
-        fs::create_dir_all(&client_dir).unwrap();
-        fs::write(&manifest_path, "version = 1\n").unwrap();
-        let package = record_client_package(
-            &conn,
-            order_id,
-            PackageRecordInput {
-                delivery_date: "2026-05-27",
-                delivery_dir: &delivery_dir,
-                client_dir: &client_dir,
-                manifest_path: &manifest_path,
-                package_path: None,
-                status: DeliveryPackageStatus::Prepared,
-                recorded_at: "2026-05-27T06:30:00Z",
-            },
-        )
-        .unwrap();
-
-        let err = mark_client_package_sent(&conn, package.id, "2026-05-27T07:00:00Z").unwrap_err();
-
-        assert!(err.to_string().contains("validated"));
-        assert_eq!(
-            delivery_packages::find_by_id(&conn, package.id)
-                .unwrap()
-                .status,
-            DeliveryPackageStatus::Prepared
-        );
-    }
-
-    #[test]
-    fn mark_client_package_sent_records_external_send_confirmation() {
-        let conn = open_in_memory().unwrap();
-        let order_id = ready_order(&conn);
-        let root = tempfile::tempdir().unwrap();
-        let delivery_dir = delivery_layout(root.path());
-        let client_dir = delivery_dir.join("client");
-        let export_dir = delivery_dir.join("export");
-        fs::create_dir_all(&client_dir).unwrap();
-        fs::create_dir_all(&export_dir).unwrap();
-        fs::write(client_dir.join("DELIVERY_CLIENT.html"), "client html").unwrap();
-        write_manifest(&delivery_dir, ["DELIVERY_CLIENT.html"]);
-        write_zip(
-            &export_dir.join("client-package.zip"),
-            [("DELIVERY_CLIENT.html", "client html")],
-        );
-        let package = check_client_package(
-            &conn,
-            order_id,
-            PackageCheckInput {
-                delivery_date: "2026-05-27",
-                delivery_dir: &delivery_dir,
-                checked_at: "2026-05-27T06:00:00Z",
-            },
-        )
-        .unwrap();
-
-        let sent = mark_client_package_sent(&conn, package.id, "2026-05-27T07:00:00Z").unwrap();
-
-        assert_eq!(sent.status, DeliveryPackageStatus::Sent);
-        assert_eq!(sent.updated_at, "2026-05-27T07:00:00Z");
-        let order = orders::find_by_id(&conn, order_id).unwrap();
-        assert_eq!(order.status, OrderStatus::Delivered);
-        assert_eq!(order.delivered_at, Some(1_779_865_200));
     }
 }

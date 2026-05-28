@@ -1,10 +1,8 @@
 //! Dashboard service: build the "today's focus" view for `gig ls`.
 
-use crate::models::{
-    DeliveryPackageStatus, Order, OrderStatus, OrderWorkflow, QuoteDraft, QuoteDraftStatus,
-};
+use crate::models::{Order, OrderStatus, OrderWorkflow, QuoteDraft, QuoteDraftStatus};
 use crate::repo::orders::{list, ListFilter};
-use crate::repo::{delivery_packages, order_workflow, quote_drafts};
+use crate::repo::{order_workflow, quote_drafts};
 use crate::{Error, Result};
 use rusqlite::Connection;
 
@@ -109,8 +107,7 @@ pub fn build_dashboard(conn: &Connection, now: i64) -> Result<Dashboard> {
         // Alert logic.
         let alert = compute_alert(order, conn, now)?;
         let workflow = order_workflow::find_by_order_id(conn, order.id)?;
-        let latest_package_status = latest_package_status(conn, order.id)?;
-        let next_action = order_next_action(order, workflow.as_ref(), latest_package_status);
+        let next_action = order_next_action(order, workflow.as_ref());
 
         // Include in focus list if it has an alert or is in an active state.
         let show = alert.is_some()
@@ -162,11 +159,7 @@ pub fn quote_next_action(draft: &QuoteDraft) -> Option<&'static str> {
     }
 }
 
-pub fn order_next_action(
-    order: &Order,
-    workflow: Option<&OrderWorkflow>,
-    latest_package_status: Option<DeliveryPackageStatus>,
-) -> &'static str {
+pub fn order_next_action(order: &Order, workflow: Option<&OrderWorkflow>) -> &'static str {
     let workflow_required = matches!(
         order.status,
         OrderStatus::Accepted
@@ -186,26 +179,12 @@ pub fn order_next_action(
         OrderStatus::PlanReady => "approve_plan",
         OrderStatus::PlanApproved => "start_work",
         OrderStatus::InProgress => "complete_acceptance",
-        OrderStatus::ReadyToDeliver
-            if latest_package_status == Some(DeliveryPackageStatus::Validated) =>
-        {
-            "mark_package_sent"
-        }
-        OrderStatus::ReadyToDeliver => "check_package",
+        OrderStatus::ReadyToDeliver => "send_package",
         OrderStatus::Delivered => "collect_payment",
         OrderStatus::Revision => "complete_revision",
         OrderStatus::Paid => "archive_order",
         OrderStatus::Archived | OrderStatus::Cancelled => "none",
     }
-}
-
-fn latest_package_status(
-    conn: &Connection,
-    order_id: i64,
-) -> Result<Option<DeliveryPackageStatus>> {
-    Ok(delivery_packages::list_for_order(conn, order_id)?
-        .first()
-        .map(|package| package.status))
 }
 
 fn compute_alert(order: &Order, conn: &Connection, now: i64) -> Result<Option<String>> {

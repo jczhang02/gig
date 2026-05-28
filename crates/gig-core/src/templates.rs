@@ -1,7 +1,6 @@
 //! Template rendering using minijinja.
 //!
-//! Embeds a default project README template that `gig init` writes into the
-//! newly-created project folder.
+//! Embeds default text templates exposed by the template command.
 
 use crate::models::Order;
 use crate::Error;

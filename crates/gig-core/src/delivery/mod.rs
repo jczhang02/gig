@@ -1,6 +1,6 @@
 //! Delivery trait and uploader backends.
 //!
-//! The `Uploader` trait is the only interface that `gig deliver` calls.
+//! The `Uploader` trait is used by `gig package send` and `gig artifact send`.
 //! Backends live in submodules.
 
 pub mod s3;
@@ -16,6 +16,8 @@ pub struct UploadOpts {
     /// If set, request that the shared link expires after this many days.
     /// Not all backends honour this; it is advisory.
     pub link_ttl_days: Option<u32>,
+    /// If set, use this backend object key instead of the local basename.
+    pub object_key: Option<String>,
 }
 
 /// Result returned by a successful upload.

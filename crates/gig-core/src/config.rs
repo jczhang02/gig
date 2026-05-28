@@ -160,7 +160,7 @@ fn default_link_ttl() -> u32 {
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(default)]
 pub struct General {
-    /// Root directory where `gig init` creates new project folders.
+    /// Default root for user-managed project folders.
     pub dev_root: PathBuf,
     /// Root directory where `gig archive` moves finished projects.
     pub archive_root: PathBuf,
