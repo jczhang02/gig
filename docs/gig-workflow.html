@@ -1,1101 +1,128 @@
 <!doctype html>
 <html lang="zh-CN">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>gig 工作流：人话版</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%239b4a25'/%3E%3Ctext x='16' y='22' text-anchor='middle' font-family='serif' font-size='18' fill='%23fff7ea'%3Eg%3C/text%3E%3C/svg%3E">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>gig workflow</title>
   <style>
     :root {
-      --paper: #f6efe3;
-      --paper-strong: #efe3d1;
-      --ink: #262017;
-      --muted: #756a5b;
-      --line: rgba(38, 32, 23, 0.18);
-      --line-strong: rgba(38, 32, 23, 0.34);
-      --accent: #9b4a25;
-      --accent-soft: #ead0bd;
-      --green: #526b48;
-      --blue: #405d74;
-      --shadow: 0 28px 80px rgba(61, 43, 24, 0.14);
-      --shadow-soft: 0 18px 52px rgba(61, 43, 24, 0.1);
-      --shadow-hover: 0 24px 64px rgba(61, 43, 24, 0.16);
-      --surface: rgba(255, 250, 241, 0.72);
-      --surface-strong: rgba(255, 252, 246, 0.82);
-      --terminal: #241c15;
-      --terminal-line: rgba(255, 255, 255, 0.12);
-      --ease-out: cubic-bezier(0.2, 0, 0, 1);
-      --serif: Georgia, "Times New Roman", "Noto Serif CJK SC", "Songti SC", serif;
-      --sans: "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
-      --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      --paper: #f5efe3;
+      --ink: #172033;
+      --muted: #6f6658;
+      --line: #ded1bd;
+      --accent: #284f82;
+      --accent-soft: #e4edf7;
+      --warm: #a45f30;
     }
-
-    * {
-      box-sizing: border-box;
-    }
-
-    html {
-      scroll-behavior: smooth;
-      -webkit-font-smoothing: antialiased;
-      -moz-osx-font-smoothing: grayscale;
-      text-rendering: optimizeLegibility;
-    }
-
+    * { box-sizing: border-box; }
     body {
       margin: 0;
       color: var(--ink);
-      background:
-        radial-gradient(circle at 14% 8%, rgba(155, 74, 37, 0.16), transparent 30rem),
-        radial-gradient(circle at 88% 16%, rgba(82, 107, 72, 0.12), transparent 28rem),
-        linear-gradient(135deg, #fbf5ea 0%, var(--paper) 48%, #efe2cf 100%);
-      font-family: var(--sans);
+      background: radial-gradient(circle at 20% 0%, #fffaf0 0, var(--paper) 38%, #eee1ce 100%);
+      font-family: "Source Han Serif SC", "Noto Serif CJK SC", "Songti SC", serif;
       line-height: 1.7;
-      -webkit-font-smoothing: antialiased;
-      -moz-osx-font-smoothing: grayscale;
     }
-
-    body::before {
-      content: "";
-      position: fixed;
-      inset: 0;
-      pointer-events: none;
-      opacity: 0.3;
-      background-image:
-        linear-gradient(rgba(38, 32, 23, 0.035) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(38, 32, 23, 0.025) 1px, transparent 1px);
-      background-size: 36px 36px;
-      mix-blend-mode: multiply;
-    }
-
-    a {
-      color: var(--accent);
-      text-decoration-thickness: 1px;
-      text-underline-offset: 0.2em;
-    }
-
-    a:focus-visible {
-      outline: 3px solid rgba(155, 74, 37, 0.38);
-      outline-offset: 4px;
-      border-radius: 0.45rem;
-    }
-
-    code {
-      padding: 0.13rem 0.34rem;
-      border: 1px solid rgba(38, 32, 23, 0.12);
-      border-radius: 0.35rem;
-      background: rgba(255, 252, 246, 0.62);
-      font-family: var(--mono);
-      font-size: 0.94em;
-      font-variant-numeric: tabular-nums;
-      color: #3b2b1f;
-    }
-
-    pre {
-      position: relative;
-      max-width: 100%;
-      margin: 0;
-      padding: 2.35rem 1.15rem 1.08rem;
-      overflow-x: auto;
-      overflow-y: hidden;
-      border: 1px solid var(--terminal-line);
-      border-radius: 1rem;
-      background: var(--terminal);
-      color: #f7efe4;
-      line-height: 1.65;
-      white-space: pre;
-      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
-    }
-
-    pre::before {
-      content: "terminal";
-      position: absolute;
-      top: 0;
-      right: 0;
-      left: 0;
-      height: 1.55rem;
-      padding: 0.38rem 1.05rem 0;
-      border-bottom: 1px solid var(--terminal-line);
-      color: rgba(247, 239, 228, 0.58);
-      font-family: var(--mono);
-      font-size: 0.68rem;
-      font-variant-numeric: tabular-nums;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-    }
-
-    pre code {
-      display: block;
-      min-width: max-content;
-      padding: 0;
-      border: 0;
-      border-radius: 0;
-      background: transparent;
-      color: inherit;
-      font-size: 0.9rem;
-      line-height: 1.65;
-      white-space: pre;
-    }
-
-    p,
-    li,
-    td,
-    small,
-    .command-row span,
-    .hero-copy,
-    .model-line span {
-      text-wrap: pretty;
-    }
-
-    .page {
-      position: relative;
-      z-index: 1;
-      width: min(1180px, calc(100vw - 32px));
-      margin: 0 auto;
-      padding: 48px 0 72px;
-    }
-
-    .hero {
-      display: grid;
-      grid-template-columns: minmax(0, 1.2fr) minmax(300px, 0.8fr);
-      gap: 32px;
-      align-items: stretch;
-      margin-bottom: 28px;
-    }
-
-    .sheet,
-    .note,
-    .card,
-    .scene,
-    .reference-table,
-    .footer-card {
-      border: 1px solid var(--line);
-      background: var(--surface);
-      box-shadow: var(--shadow);
-      backdrop-filter: blur(10px);
-    }
-
-    .sheet {
-      min-height: 560px;
-      padding: clamp(28px, 5vw, 66px);
-      border-radius: 30px;
-    }
-
-    .eyebrow {
-      display: inline-flex;
-      gap: 0.5rem;
-      align-items: center;
-      margin-bottom: 1.2rem;
-      padding: 0.32rem 0.7rem;
-      border: 1px solid var(--line);
-      border-radius: 999px;
-      color: var(--muted);
-      background: rgba(255, 255, 255, 0.38);
-      font-size: 0.82rem;
-      letter-spacing: 0.04em;
-    }
-
-    .eyebrow::before {
-      content: "";
-      width: 0.48rem;
-      height: 0.48rem;
-      border-radius: 50%;
-      background: var(--accent);
-    }
-
-    h1,
-    h2,
-    h3 {
-      margin: 0;
-      font-family: var(--serif);
-      font-weight: 700;
-      line-height: 1.08;
-      text-wrap: balance;
-    }
-
-    h1 {
-      max-width: 860px;
-      font-size: clamp(3rem, 8vw, 6.9rem);
-      letter-spacing: -0.055em;
-    }
-
-    h2 {
-      font-size: clamp(2rem, 4.4vw, 4rem);
-      letter-spacing: -0.04em;
-    }
-
-    h3 {
-      font-size: clamp(1.3rem, 2vw, 1.9rem);
-      letter-spacing: -0.02em;
-    }
-
-    .hero-copy {
-      max-width: 680px;
-      margin-top: 1.4rem;
-      color: #4c4135;
-      font-size: clamp(1.05rem, 1.8vw, 1.32rem);
-    }
-
-    .hero-copy strong {
-      color: var(--ink);
-      font-weight: 700;
-    }
-
-    .mental-model {
-      display: grid;
-      gap: 16px;
-      align-content: start;
-      padding: 26px;
-      border-radius: 26px;
-    }
-
-    .model-line {
-      padding: 18px 18px 16px;
-      border: 1px solid var(--line);
-      border-radius: 18px;
-      background: rgba(255, 255, 255, 0.4);
-    }
-
-    .model-line b {
-      display: block;
-      margin-bottom: 4px;
-      color: var(--accent);
-      font-family: var(--serif);
-      font-size: 1.1rem;
-    }
-
-    .model-line span {
-      color: var(--muted);
-      font-size: 0.96rem;
-    }
-
-    .toc {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-      margin: 24px 0 56px;
-    }
-
-    .toc a {
-      display: inline-flex;
-      align-items: center;
-      min-height: 42px;
-      padding: 0.46rem 0.82rem;
-      border: 1px solid var(--line);
-      border-radius: 999px;
-      background: rgba(255, 250, 241, 0.68);
-      color: #4b3e30;
-      text-decoration: none;
-      box-shadow: 0 10px 28px rgba(61, 43, 24, 0.08);
-      transition-property: transform, background-color, border-color, box-shadow, color;
-      transition-duration: 180ms;
-      transition-timing-function: var(--ease-out);
-    }
-
-    .toc a:hover {
-      border-color: rgba(155, 74, 37, 0.32);
-      background: var(--surface-strong);
-      color: var(--accent);
-      box-shadow: 0 14px 34px rgba(61, 43, 24, 0.12);
-      transform: translateY(-1px);
-    }
-
-    .toc a:active {
-      transform: translateY(0) scale(0.96);
-    }
-
-    .toc a:focus-visible {
-      outline: 3px solid rgba(155, 74, 37, 0.38);
-      outline-offset: 4px;
-    }
-
-    section {
-      margin-top: 56px;
-    }
-
-    .section-head {
-      display: grid;
-      grid-template-columns: minmax(0, 0.9fr) minmax(280px, 0.6fr);
-      gap: 28px;
-      align-items: end;
-      margin-bottom: 22px;
-    }
-
-    .section-head p {
-      margin: 0;
-      color: var(--muted);
-      font-size: 1rem;
-    }
-
-    .workflow {
-      display: grid;
-      grid-template-columns: repeat(7, minmax(120px, 1fr));
-      gap: 10px;
-      padding: 18px;
-      border: 1px solid var(--line);
-      border-radius: 26px;
-      background: rgba(255, 250, 241, 0.74);
-      box-shadow: var(--shadow);
-    }
-
-    .step {
-      position: relative;
-      min-height: 145px;
-      padding: 16px;
-      border: 1px solid rgba(38, 32, 23, 0.15);
-      border-radius: 18px;
-      background: linear-gradient(180deg, rgba(255, 255, 255, 0.52), rgba(255, 249, 238, 0.44));
-    }
-
-    .step:not(:last-child)::after {
-      content: "";
-      position: absolute;
-      top: 50%;
-      right: -8px;
-      width: 12px;
-      height: 12px;
-      border-top: 2px solid var(--line-strong);
-      border-right: 2px solid var(--line-strong);
-      transform: translateY(-50%) rotate(45deg);
-      background: var(--paper);
-      z-index: 2;
-    }
-
-    .step .num {
-      display: block;
-      margin-bottom: 18px;
-      color: var(--accent);
-      font-family: var(--mono);
-      font-size: 0.78rem;
-      font-variant-numeric: tabular-nums;
-    }
-
-    .step b {
-      display: block;
-      font-size: 1.02rem;
-      line-height: 1.3;
-    }
-
-    .step small {
-      display: block;
-      margin-top: 8px;
-      color: var(--muted);
-      line-height: 1.55;
-    }
-
-    .note {
-      padding: 24px;
-      border-radius: 24px;
-      background: rgba(234, 208, 189, 0.42);
-    }
-
-    .note p {
-      margin: 0;
-      color: #4c3828;
-    }
-
-    .note .big {
-      margin-bottom: 12px;
-      font-family: var(--serif);
-      font-size: 1.55rem;
-      line-height: 1.2;
-    }
-
-    .scenes {
-      display: grid;
-      gap: 18px;
-    }
-
-    .scene {
-      display: grid;
-      grid-template-columns: 0.82fr 1.18fr;
-      gap: 24px;
-      padding: 22px;
-      border-radius: 26px;
-      box-shadow: var(--shadow-soft);
-      transition-property: transform, box-shadow, border-color, background-color;
-      transition-duration: 180ms;
-      transition-timing-function: var(--ease-out);
-    }
-
-    .scene:hover {
-      border-color: rgba(155, 74, 37, 0.26);
-      background: rgba(255, 250, 241, 0.82);
-      box-shadow: var(--shadow-hover);
-      transform: translateY(-2px);
-    }
-
-    .scene-title {
-      display: grid;
-      align-content: start;
-      gap: 12px;
-      padding: 4px 0;
-    }
-
-    .badge {
-      width: max-content;
-      padding: 0.24rem 0.58rem;
-      border: 1px solid var(--line);
-      border-radius: 999px;
-      color: var(--accent);
-      background: rgba(255, 255, 255, 0.4);
-      font-family: var(--mono);
-      font-size: 0.78rem;
-    }
-
-    .scene-title p,
-    .scene-body p {
-      margin: 0;
-      color: var(--muted);
-    }
-
-    .scene-body {
-      display: grid;
-      gap: 14px;
-      min-width: 0;
-    }
-
-    .scene-body ul,
-    .rules ul {
-      margin: 0;
-      padding-left: 1.15rem;
-      color: #524639;
-    }
-
-    .scene-body li + li,
-    .rules li + li {
-      margin-top: 0.35rem;
-    }
-
-    .two-col {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 18px;
-    }
-
-    .card {
-      min-width: 0;
-      padding: 24px;
-      border-radius: 24px;
-      box-shadow: 0 18px 52px rgba(61, 43, 24, 0.08);
-      transition-property: transform, box-shadow, border-color, background-color;
-      transition-duration: 180ms;
-      transition-timing-function: var(--ease-out);
-    }
-
-    .card:hover {
-      border-color: rgba(155, 74, 37, 0.24);
-      background: rgba(255, 250, 241, 0.82);
-      box-shadow: var(--shadow-soft);
-      transform: translateY(-2px);
-    }
-
-    .scene:active,
-    .card:active {
-      transform: translateY(0);
-    }
-
-    .card p {
-      margin: 12px 0 0;
-      color: var(--muted);
-    }
-
-    .commands {
-      display: grid;
-      gap: 10px;
-      min-width: 0;
-      margin-top: 14px;
-    }
-
-    .command-row {
-      display: grid;
-      grid-template-columns: minmax(160px, 0.58fr) minmax(0, 1fr);
-      gap: 14px;
-      align-items: start;
-      padding: 14px;
-      border: 1px solid rgba(38, 32, 23, 0.12);
-      border-radius: 16px;
-      background: rgba(255, 252, 246, 0.56);
-      transition-property: transform, background-color, border-color, box-shadow;
-      transition-duration: 160ms;
-      transition-timing-function: var(--ease-out);
-    }
-
-    .command-row:hover {
-      border-color: rgba(155, 74, 37, 0.22);
-      background: var(--surface-strong);
-      box-shadow: 0 10px 24px rgba(61, 43, 24, 0.08);
-      transform: translateY(-1px);
-    }
-
-    .command-row:active {
-      transform: translateY(0) scale(0.96);
-    }
-
-    .command-row code {
-      max-width: 100%;
-      overflow-x: auto;
-      white-space: nowrap;
-    }
-
-    .command-row span {
-      color: var(--muted);
-      font-size: 0.94rem;
-    }
-
-    .reference-table {
-      width: 100%;
-      overflow: hidden;
-      border-collapse: separate;
-      border-spacing: 0;
-      border-radius: 24px;
-      box-shadow: 0 18px 52px rgba(61, 43, 24, 0.08);
-      font-variant-numeric: tabular-nums;
-    }
-
-    .reference-table th,
-    .reference-table td {
-      padding: 15px 18px;
-      border-bottom: 1px solid rgba(38, 32, 23, 0.11);
-      text-align: left;
-      vertical-align: top;
-    }
-
-    .reference-table th {
-      color: #4d3728;
-      background: rgba(234, 208, 189, 0.5);
-      font-family: var(--serif);
-      font-size: 1.04rem;
-    }
-
-    .reference-table tr:last-child td {
-      border-bottom: 0;
-    }
-
-    .reference-table td:first-child {
-      width: 36%;
-      color: #4f4337;
-    }
-
-    .reference-table code {
-      white-space: normal;
-      overflow-wrap: anywhere;
-    }
-
-    @media (prefers-reduced-motion: reduce) {
-      html {
-        scroll-behavior: auto;
-      }
-
-      .toc a,
-      .card,
-      .scene,
-      .command-row {
-        transition-duration: 1ms;
-      }
-    }
-
-    .rules {
-      display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 18px;
-    }
-
-    .footer-card {
-      margin-top: 56px;
-      padding: 30px;
-      border-radius: 28px;
-      background: #241c15;
-      color: #f7efe4;
-    }
-
-    .footer-card h2 {
-      color: #fff8ee;
-    }
-
-    .footer-card p {
-      max-width: 760px;
-      margin: 14px 0 0;
-      color: #ddcdbd;
-    }
-
-    .footer-card code {
-      border-color: rgba(255, 255, 255, 0.12);
-      background: rgba(255, 255, 255, 0.08);
-      color: #fff3df;
-    }
-
-    @media (max-width: 980px) {
-      .hero,
-      .section-head,
-      .scene,
-      .two-col,
-      .rules {
-        grid-template-columns: 1fr;
-      }
-
-      .workflow {
-        grid-template-columns: 1fr;
-      }
-
-      pre {
-        border-radius: 0.9rem;
-      }
-
-      .step:not(:last-child)::after {
-        top: auto;
-        right: 50%;
-        bottom: -8px;
-        transform: translateX(50%) rotate(135deg);
-      }
-    }
-
-    @media (max-width: 680px) {
-      .page {
-        width: min(100vw - 20px, 1180px);
-        padding-top: 20px;
-      }
-
-      h1 {
-        font-size: clamp(2.55rem, 17vw, 4.6rem);
-      }
-
-      .toc {
-        gap: 8px;
-        margin-bottom: 42px;
-      }
-
-      .toc a {
-        min-height: 40px;
-        padding: 0.42rem 0.72rem;
-      }
-
-      .sheet,
-      .mental-model,
-      .scene,
-      .card,
-      .note,
-      .footer-card {
-        border-radius: 20px;
-        padding: 20px;
-      }
-
-      .command-row {
-        grid-template-columns: 1fr;
-      }
-
-      pre {
-        padding-right: 0.9rem;
-        padding-left: 0.9rem;
-      }
-
-      .reference-table,
-      .reference-table tbody,
-      .reference-table tr,
-      .reference-table th,
-      .reference-table td {
-        display: block;
-      }
-
-      .reference-table thead {
-        display: none;
-      }
-
-      .reference-table td:first-child {
-        width: auto;
-        padding-bottom: 2px;
-        color: var(--accent);
-        font-weight: 700;
-      }
-
-      .reference-table td:last-child {
-        padding-top: 2px;
-      }
-    }
-
-    @media print {
-      body {
-        background: #fffaf0;
-      }
-
-      body::before,
-      .toc {
-        display: none;
-      }
-
-      .page {
-        width: auto;
-        padding: 0;
-      }
-
-      .sheet,
-      .note,
-      .card,
-      .scene,
-      .reference-table,
-      .footer-card,
-      .workflow {
-        box-shadow: none;
-        break-inside: avoid;
-      }
-    }
+    main { max-width: 1120px; margin: 0 auto; padding: 56px 28px 80px; }
+    header { border-bottom: 1px solid var(--line); padding-bottom: 32px; margin-bottom: 34px; }
+    .eyebrow { color: var(--warm); letter-spacing: .18em; text-transform: uppercase; font-size: 12px; }
+    h1 { font-size: clamp(40px, 7vw, 82px); line-height: .95; margin: 16px 0; letter-spacing: -.04em; }
+    h2 { font-size: 28px; margin: 42px 0 14px; letter-spacing: -.02em; }
+    h3 { margin: 0 0 8px; font-size: 18px; }
+    p { margin: 0 0 14px; color: var(--muted); }
+    code, pre { font-family: "SFMono-Regular", "JetBrains Mono", Consolas, monospace; }
+    pre { background: #172033; color: #fff6e8; padding: 18px; border-radius: 18px; overflow: auto; line-height: 1.55; }
+    code { font-size: .92em; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+    .card { background: rgba(255,255,255,.46); border: 1px solid var(--line); border-radius: 22px; padding: 20px; }
+    .pill { display: inline-block; border: 1px solid var(--line); border-radius: 999px; padding: 4px 10px; margin: 3px; color: var(--accent); background: var(--accent-soft); font-size: 13px; }
+    .note { border-left: 4px solid var(--accent); background: rgba(255,255,255,.5); padding: 16px 18px; border-radius: 14px; }
+    ul { padding-left: 20px; color: var(--muted); }
+    footer { margin-top: 58px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 22px; font-size: 14px; }
   </style>
 </head>
 <body>
-  <main class="page">
-    <div class="hero">
-      <header class="sheet">
-        <div class="eyebrow">gig 工作流 · 人话版</div>
-        <h1>别把它当项目管理软件。</h1>
-        <p class="hero-copy">
-          <strong>gig 更像一本接单流水账。</strong> 它帮你记住：这个单子现在走到哪了，项目文件夹在哪，报价和变更怎么来的，交付包发过几次，最后有没有收款归档。
-        </p>
-      </header>
+  <main>
+    <header>
+      <div class="eyebrow">gig workflow</div>
+      <h1>从报价到交付的当前工作流</h1>
+      <p>这份页面描述当前公开命令面：<code>gig</code> 只负责账本、状态机、校验、上传留痕；项目文件、计划页、验收材料和客户包内容由外部 workflow 或 agent 生成。</p>
+    </header>
 
-      <aside class="mental-model" aria-label="gig 的心智模型">
-        <div class="model-line">
-          <b>接单流水账</b>
-          <span>线索、报价、客户、抽成、需求变更都记在一处。</span>
-        </div>
-        <div class="model-line">
-          <b>项目路径</b>
-          <span>订单和本地开发目录绑定。进了项目目录，很多命令可以不写订单 id。</span>
-        </div>
-        <div class="model-line">
-          <b>交付记录</b>
-          <span>打包、上传、重发、收款、归档，按接单流程往后走。</span>
-        </div>
-      </aside>
-    </div>
-
-    <nav class="toc" aria-label="页面导航">
-      <a href="#flow">主线流程</a>
-      <a href="#scenes">按场景使用</a>
-      <a href="#daily">每天看什么</a>
-      <a href="#shortcuts">常用命令</a>
-      <a href="#rules">三条记法</a>
-    </nav>
-
-    <section id="flow" aria-labelledby="flow-title">
-      <div class="section-head">
-        <h2 id="flow-title">主线只有一条</h2>
-        <p>命令看起来多，是因为每个阶段都有小动作。真正要记的不是命令列表，而是订单状态怎么往前走。</p>
-      </div>
-
-      <div class="workflow">
-        <div class="step">
-          <span class="num">01</span>
-          <b>看到线索</b>
-          <small><code>lead</code>：客户可能会下单，但还没确定。</small>
-        </div>
-        <div class="step">
-          <span class="num">02</span>
-          <b>开始沟通</b>
-          <small><code>negotiating</code>：记录备注、报价、来源。</small>
-        </div>
-        <div class="step">
-          <span class="num">03</span>
-          <b>确认接单</b>
-          <small><code>accepted</code>：价格基本定了，可以开工。</small>
-        </div>
-        <div class="step">
-          <span class="num">04</span>
-          <b>开始开发</b>
-          <small><code>in_progress</code>：订单绑定本地项目目录。</small>
-        </div>
-        <div class="step">
-          <span class="num">05</span>
-          <b>交付返修</b>
-          <small><code>delivered</code> 和 <code>revision</code> 来回走。</small>
-        </div>
-        <div class="step">
-          <span class="num">06</span>
-          <b>客户付款</b>
-          <small><code>paid</code>：收入真正算进账。</small>
-        </div>
-        <div class="step">
-          <span class="num">07</span>
-          <b>结束归档</b>
-          <small><code>archived</code>：项目挪到归档目录。</small>
-        </div>
-      </div>
-    </section>
-
-    <section id="scenes" aria-labelledby="scenes-title">
-      <div class="section-head">
-        <h2 id="scenes-title">按你脑子里的场景用</h2>
-        <p>下面不是完整手册。它只回答一个问题：我现在遇到这个情况，应该敲什么。</p>
-      </div>
-
-      <div class="scenes">
-        <article class="scene">
-          <div class="scene-title">
-            <span class="badge">刚有可能的单子</span>
-            <h3>先记下来，不要急着开项目</h3>
-            <p>客户只是问一问、还没确认需求时，用线索。这样它会出现在你的待跟进列表里，但不会假装已经成交。</p>
-          </div>
-          <div class="scene-body">
-            <pre><code>gig new --lead --title "某公司官网重做" --quoted-price 5000
-gig lead ls</code></pre>
-            <ul>
-              <li>还在聊，就保持 <code>lead</code> 或推进到 <code>negotiating</code>。</li>
-              <li>有新信息，用 <code>gig note 1 "客户说月底前要上线"</code> 记一句。</li>
-            </ul>
-          </div>
-        </article>
-
-        <article class="scene">
-          <div class="scene-title">
-            <span class="badge">客户说可以做了</span>
-            <h3>把价格和状态定下来</h3>
-            <p>确认接单的意思是：你已经愿意把它当一笔真实订单来管。价格以后还能改，但最好先有一个版本。</p>
-          </div>
-          <div class="scene-body">
-            <pre><code>gig lead promote 1
-gig price --amount 5000 --reason "最终报价" 1
-gig status 1 accepted</code></pre>
-            <p>如果一开始就已经确定，也可以直接创建一个已接单订单：</p>
-            <pre><code>gig new --title "数据爬虫" --slug data-scraper \
-  --quoted-price 3000 --final-price 3000 \
-  --source "企业微信A群"</code></pre>
-          </div>
-        </article>
-
-        <article class="scene">
-          <div class="scene-title">
-            <span class="badge">准备开始写代码</span>
-            <h3>让订单和本地目录绑在一起</h3>
-            <p><code>gig init</code> 是一个分水岭。它会建项目目录、初始化 git、写基础 README，然后把订单推进到开发中。</p>
-          </div>
-          <div class="scene-body">
-            <pre><code>gig init 1
-cd $(gig cd 1)</code></pre>
-            <ul>
-              <li>以后你在这个项目目录里，很多命令可以省略 <code>1</code>。</li>
-              <li>比如 <code>gig show</code> 会自动识别当前目录对应的订单。</li>
-              <li>如果项目目录已经存在，可以先 <code>cd</code> 进去再跑 <code>gig init</code>。</li>
-            </ul>
-          </div>
-        </article>
-
-        <article class="scene">
-          <div class="scene-title">
-            <span class="badge">客户中途改需求</span>
-            <h3>把变化写进账本，不要只记在脑子里</h3>
-            <p>需求变更最容易导致最后对账混乱。加钱、减钱、备注、标签、抽成，都应该顺手记。</p>
-          </div>
-          <div class="scene-body">
-            <pre><code>gig change --message "新增后台管理页面" --delta 500
-gig tag 1 web vue
-gig cut 1 0.7
-gig show 1</code></pre>
-            <ul>
-              <li><code>change</code> 会留下变更记录，也会更新价格。</li>
-              <li><code>cut</code> 是你自己的分成比例，范围是 0 到 1。</li>
-              <li><code>show</code> 用来看完整来龙去脉。</li>
-            </ul>
-          </div>
-        </article>
-
-        <article class="scene">
-          <div class="scene-title">
-            <span class="badge">做完要发给客户</span>
-            <h3>先预览，再交付</h3>
-            <p><code>deliver</code> 会打包项目、上传、记录交付物，并把订单推进到已交付。真正发之前，先 dry-run 看看会打进去哪些文件。</p>
-          </div>
-          <div class="scene-body">
-            <pre><code>gig deliver --dry-run
-gig deliver</code></pre>
-            <ul>
-              <li>打包会避开 <code>.git/</code>、项目 <code>.gigignore</code> 和配置里的忽略规则。</li>
-              <li>客户要求返修时：<code>gig status revision</code>，改完再 <code>gig deliver</code>。</li>
-              <li>只是重发上一次交付包：<code>gig deliver --resend</code>。</li>
-            </ul>
-          </div>
-        </article>
-
-        <article class="scene">
-          <div class="scene-title">
-            <span class="badge">客户付款了</span>
-            <h3>收款和归档分开做</h3>
-            <p>付款是财务状态，归档是本地文件管理。通常先标记收款，再把项目挪走。</p>
-          </div>
-          <div class="scene-body">
-            <pre><code>gig paid
-gig archive</code></pre>
-            <ul>
-              <li><code>paid</code> 之后，这笔钱才会进入收入统计。</li>
-              <li><code>archive</code> 会把项目目录从开发目录移到归档目录。</li>
-              <li>如果项目已经归档但客户后来才付款，仍然可以跑 <code>gig paid</code> 记录收款时间。</li>
-            </ul>
-          </div>
-        </article>
-      </div>
-    </section>
-
-    <section id="daily" aria-labelledby="daily-title">
-      <div class="section-head">
-        <h2 id="daily-title">每天打开先看这里</h2>
-        <p>如果你不知道今天该处理哪个单子，不要先翻命令。先看列表，再进入具体订单。</p>
-      </div>
-
-      <div class="two-col">
-        <div class="card">
-          <h3>今天看板</h3>
-          <p><code>gig ls</code> 会显示当天关注：活跃订单、月收入、未收款数量。它适合每天第一眼看。</p>
-          <div class="commands">
-            <div class="command-row">
-              <code>gig ls</code>
-              <span>不知道今天该看什么时先敲这个。</span>
-            </div>
-            <div class="command-row">
-              <code>gig ls --status in_progress</code>
-              <span>只看开发中的订单。</span>
-            </div>
-            <div class="command-row">
-              <code>gig ls --all</code>
-              <span>看所有订单，不只看当前焦点。</span>
-            </div>
-          </div>
-        </div>
-
-        <div class="card">
-          <h3>进订单看细节</h3>
-          <p>列表负责提醒，<code>show</code> 负责查账。报价怎么改的、客户说过什么、交付过几次，都应该从这里确认。</p>
-          <div class="commands">
-            <div class="command-row">
-              <code>gig show 1</code>
-              <span>看指定订单。</span>
-            </div>
-            <div class="command-row">
-              <code>gig show</code>
-              <span>在项目目录里可以省略 id。</span>
-            </div>
-            <div class="command-row">
-              <code>cd $(gig cd 1)</code>
-              <span>跳到这个订单的项目目录。</span>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section id="shortcuts" aria-labelledby="shortcuts-title">
-      <div class="section-head">
-        <h2 id="shortcuts-title">忘了命令时看这张表</h2>
-        <p>把它当小抄。真正高频的命令其实不多。</p>
-      </div>
-
-      <table class="reference-table">
-        <thead>
-          <tr>
-            <th>你想做什么</th>
-            <th>敲什么</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td>新建一条线索</td>
-            <td><code>gig new --lead --title "项目名" --quoted-price 5000</code></td>
-          </tr>
-          <tr>
-            <td>线索变成真实订单</td>
-            <td><code>gig lead promote 1</code>，然后 <code>gig price --amount 5000 1</code></td>
-          </tr>
-          <tr>
-            <td>开始项目</td>
-            <td><code>gig init 1</code></td>
-          </tr>
-          <tr>
-            <td>进入项目目录</td>
-            <td><code>cd $(gig cd 1)</code></td>
-          </tr>
-          <tr>
-            <td>记一条客户备注</td>
-            <td><code>gig note 1 "客户说周五前给素材"</code></td>
-          </tr>
-          <tr>
-            <td>记录需求变更和加价</td>
-            <td><code>gig change --message "新增后台" --delta 500 1</code></td>
-          </tr>
-          <tr>
-            <td>查看完整详情</td>
-            <td><code>gig show 1</code>，在项目目录里可用 <code>gig show</code></td>
-          </tr>
-          <tr>
-            <td>预览交付包</td>
-            <td><code>gig deliver 1 --dry-run</code></td>
-          </tr>
-          <tr>
-            <td>正式交付</td>
-            <td><code>gig deliver 1</code></td>
-          </tr>
-          <tr>
-            <td>返修后重新交付</td>
-            <td><code>gig status 1 revision</code>，改完再 <code>gig deliver 1</code></td>
-          </tr>
-          <tr>
-            <td>标记收款</td>
-            <td><code>gig paid 1</code></td>
-          </tr>
-          <tr>
-            <td>项目结束，移到归档目录</td>
-            <td><code>gig archive 1</code></td>
-          </tr>
-        </tbody>
-      </table>
-    </section>
-
-    <section id="rules" aria-labelledby="rules-title">
-      <div class="section-head">
-        <h2 id="rules-title">三条记法</h2>
-        <p>记住这三条，命令数量就没那么吓人了。</p>
-      </div>
-
-      <div class="rules">
-        <div class="card">
-          <h3>1. 先看状态</h3>
-          <p>你不是在背命令，而是在推进订单状态。</p>
-          <ul>
-            <li><code>lead</code> 还没确定</li>
-            <li><code>accepted</code> 已接单</li>
-            <li><code>in_progress</code> 正在开发</li>
-            <li><code>delivered</code> 已发给客户</li>
-            <li><code>paid</code> 已收款</li>
-          </ul>
-        </div>
-
-        <div class="card">
-          <h3>2. 进目录后少写 id</h3>
-          <p>订单绑定项目目录后，你在目录里执行命令，gig 会尽量识别当前订单。</p>
-          <ul>
-            <li><code>gig show</code></li>
-            <li><code>gig change --message "..." --delta 500</code></li>
-            <li><code>gig deliver</code></li>
-            <li><code>gig paid</code></li>
-          </ul>
-        </div>
-
-        <div class="card">
-          <h3>3. 不确定就先看</h3>
-          <p>最稳的顺序是：先 <code>ls</code> 找订单，再 <code>show</code> 看细节，最后才做状态变化。</p>
-          <ul>
-            <li><code>gig ls</code></li>
-            <li><code>gig show 1</code></li>
-            <li><code>gig status 1 delivered</code></li>
-          </ul>
-        </div>
-      </div>
-    </section>
-
-    <section class="footer-card" aria-label="结尾提示">
-      <h2>一句话总结</h2>
+    <section>
+      <h2>1. 状态主线</h2>
       <p>
-        用 gig 时，不要问「我该背哪个命令」。先问「这个单子现在在哪个阶段」。阶段确定了，命令基本只剩一两个：记下来、开工、变更、交付、收款、归档。
+        <span class="pill">lead</span>
+        <span class="pill">negotiating</span>
+        <span class="pill">accepted</span>
+        <span class="pill">plan_ready</span>
+        <span class="pill">plan_approved</span>
+        <span class="pill">in_progress</span>
+        <span class="pill">ready_to_deliver</span>
+        <span class="pill">delivered</span>
+        <span class="pill">revision</span>
+        <span class="pill">paid</span>
+        <span class="pill">archived</span>
       </p>
-      <p>
-        最常用的入口是 <code>gig ls</code>、<code>gig show</code>、<code>gig init</code>、<code>gig change</code>、<code>gig deliver</code>、<code>gig paid</code>、<code>gig archive</code>。
-      </p>
+      <div class="note">返修后可以再次走客户包发送路径，订单会从 <code>revision</code> 回到 <code>delivered</code>。</div>
     </section>
+
+    <section>
+      <h2>2. 新订单与报价</h2>
+      <pre><code>gig quote new --slug crawler-a --title "数据爬虫" --project-type crawler --summary "采集公开列表并导出 CSV"
+gig quote price crawler-a --min 3000 --recommended 5000 --max 8000
+gig quote mark-sent crawler-a
+gig quote accept crawler-a --project-dir ~/dev/partjobs/crawler-a</code></pre>
+      <p>接受报价只登记外部 workflow 已经生成的项目路径，不生成项目文件。</p>
+    </section>
+
+    <section>
+      <h2>3. 计划与验收</h2>
+      <div class="grid">
+        <div class="card">
+          <h3>计划关</h3>
+          <pre><code>gig plan ready crawler-a
+        </div>
+        <div class="card">
+          <h3>验收关</h3>
+          <pre><code>gig acceptance check crawler-a
+        </div>
+      </div>
+      <p>验收材料由 workflow 写入项目目录；<code>gig</code> 只校验并推进状态。</p>
+    </section>
+
+    <section>
+      <h2>4. 客户包交付</h2>
+      <p>客户包目录由外部 workflow 准备，形状固定：</p>
+      <pre><code>.gig/delivery/2026-05-27/
+  client/
+  manifest.toml
+  export/client-package.zip</code></pre>
+      <pre><code>gig package send crawler-a \
+  --delivery-date 2026-05-27 \
+  --delivery-dir ~/dev/partjobs/crawler-a/.gig/delivery/2026-05-27</code></pre>
+      <p><code>package send</code> 会先执行严格白名单校验，再用配置好的 uploader 上传 zip，记录 artifact，把 package 标为 sent，并把订单推进到 delivered。</p>
+      <ul>
+        <li><code>manifest.toml</code> 的 <code>client_files</code> 是精确白名单。</li>
+        <li>内部目录、隐藏路径、反斜杠路径、未声明 zip 条目、符号链接逃逸都会被拒绝。</li>
+        <li>客户包发送是唯一正式客户交付路径。</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>5. 单独附件上传</h2>
+      <pre><code>gig artifact send crawler-a report.pdf screenshot.png</code></pre>
+      <p>用于临时附件、补充材料或沟通文件。它会上传每个文件并写入 <code>delivery_artifacts</code>，但不改变订单状态。</p>
+    </section>
+
+    <section>
+      <h2>6. 日常看板</h2>
+      <pre><code>gig ls
+      <p><code>gig ls --json</code> 和 <code>gig show --json</code> 面向自动化，输出稳定英文枚举与 next_action。</p>
+    </section>
+
+    <footer>
+      当前公开交付入口已经收敛为 <code>package send</code> 与 <code>artifact send</code>。历史订单仍可 list/show/export/archive，但不会保留绕过 workflow 上传留痕的公开入口。
+    </footer>
   </main>
 </body>
 </html>
