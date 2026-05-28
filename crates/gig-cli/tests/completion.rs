@@ -36,10 +36,49 @@ fn zsh_completion_prints_script_without_bootstrapping_state() {
     assert!(stdout.contains("#compdef gig"));
     assert!(stdout.contains("new"));
     assert!(stdout.contains("ls"));
+    assert!(stdout.contains("artifact"));
+    assert!(stdout.contains("send"));
     assert!(stdout.contains("completion"));
     assert!(stdout.contains("--title"));
+    assert!(stdout.contains("--uploader"));
 
     assert!(!Path::new(&config_home).exists());
     assert!(!Path::new(&data_home).exists());
     assert!(!Path::new(&state_home).exists());
+}
+
+#[test]
+fn legacy_delivery_routes_are_not_public_commands() {
+    let legacy_commands = ["init", "pack", "deliver", "upload"];
+
+    for command_name in legacy_commands {
+        let output = Command::new(env!("CARGO_BIN_EXE_gig"))
+            .args([command_name, "--help"])
+            .output()
+            .unwrap();
+
+        assert!(
+            !output.status.success(),
+            "legacy command `{command_name}` is still exposed:\n{}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+}
+
+#[test]
+fn compatibility_package_routes_are_not_public_commands() {
+    let compatibility_routes = ["check", "record", "mark-sent"];
+
+    for route in compatibility_routes {
+        let output = Command::new(env!("CARGO_BIN_EXE_gig"))
+            .args(["package", route, "--help"])
+            .output()
+            .unwrap();
+
+        assert!(
+            !output.status.success(),
+            "compatibility package route `{route}` is still exposed:\n{}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
 }

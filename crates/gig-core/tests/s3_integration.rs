@@ -43,6 +43,7 @@ fn make_test_uploader() -> Option<S3Uploader> {
 fn default_opts() -> UploadOpts {
     UploadOpts {
         link_ttl_days: None,
+        object_key: None,
     }
 }
 
@@ -51,7 +52,7 @@ fn default_opts() -> UploadOpts {
 fn test_upload_small_file() {
     let uploader = match make_test_uploader() {
         Some(u) => u,
-        None => {
+        std::option::Option::None => {
             eprintln!("Skipping test_upload_small_file: required env vars not set");
             return;
         }
@@ -93,7 +94,7 @@ fn test_upload_small_file() {
 fn test_upload_medium_file() {
     let uploader = match make_test_uploader() {
         Some(u) => u,
-        None => {
+        std::option::Option::None => {
             eprintln!("Skipping test_upload_medium_file: required env vars not set");
             return;
         }
@@ -135,7 +136,7 @@ fn test_upload_medium_file() {
 fn test_upload_large_file_multipart() {
     let uploader = match make_test_uploader() {
         Some(u) => u,
-        None => {
+        std::option::Option::None => {
             eprintln!("Skipping test_upload_large_file_multipart: required env vars not set");
             return;
         }
@@ -191,7 +192,7 @@ fn test_upload_large_file_multipart() {
 fn test_upload_multiple_files() {
     let uploader = match make_test_uploader() {
         Some(u) => u,
-        None => {
+        std::option::Option::None => {
             eprintln!("Skipping test_upload_multiple_files: required env vars not set");
             return;
         }
@@ -227,7 +228,7 @@ fn test_upload_multiple_files() {
 fn test_presigned_url_accessible() {
     let uploader = match make_test_uploader() {
         Some(u) => u,
-        None => {
+        std::option::Option::None => {
             eprintln!("Skipping test_presigned_url_accessible: required env vars not set");
             return;
         }

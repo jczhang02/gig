@@ -1,3 +1,4 @@
+use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -188,7 +189,7 @@ fn plan_ready_json_missing_workflow_file_emits_machine_readable_error_to_stderr(
 }
 
 #[test]
-fn package_check_json_missing_zip_emits_machine_readable_error_to_stderr() {
+fn package_send_json_missing_uploader_emits_machine_readable_error_to_stderr() {
     let (config_home, data_home, state_home) = isolated_homes("package-json-error");
     let project_dir = unique_temp_dir("package-json-error-project");
     let gig_dir = project_dir.join(".gig");
@@ -198,7 +199,7 @@ fn package_check_json_missing_zip_emits_machine_readable_error_to_stderr() {
     let output = gig_command(&config_home, &data_home, &state_home)
         .args([
             "package",
-            "check",
+            "send",
             &order_id.to_string(),
             "--delivery-date",
             "2026-05-27",
@@ -213,11 +214,43 @@ fn package_check_json_missing_zip_emits_machine_readable_error_to_stderr() {
     assert!(output.stdout.is_empty());
     let json: Value = serde_json::from_slice(&output.stderr).unwrap();
     assert_eq!(json["status"], "error");
-    assert_eq!(json["error"]["code"], "missing_package_artifact");
+    assert_eq!(json["error"]["code"], "missing_required_field");
     assert!(json["error"]["message"]
         .as_str()
         .unwrap()
-        .contains("client-package.zip"));
+        .contains("no uploader configured"));
+}
+
+#[test]
+fn artifact_send_json_missing_uploader_emits_machine_readable_error_to_stderr() {
+    let (config_home, data_home, state_home) = isolated_homes("artifact-json-error");
+    let project_dir = unique_temp_dir("artifact-json-error-project");
+    let gig_dir = project_dir.join(".gig");
+    let order_id = seed_order_with_workflow(&data_home, OrderStatus::Accepted, &gig_dir);
+    let artifact_path = project_dir.join("note.txt");
+    fs::create_dir_all(&project_dir).unwrap();
+    fs::write(&artifact_path, "standalone artifact").unwrap();
+
+    let output = gig_command(&config_home, &data_home, &state_home)
+        .args([
+            "artifact",
+            "send",
+            &order_id.to_string(),
+            artifact_path.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    let json: Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(json["status"], "error");
+    assert_eq!(json["error"]["code"], "missing_required_field");
+    assert!(json["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("no uploader configured"));
 }
 
 #[test]
@@ -296,7 +329,7 @@ fn ls_json_marks_validated_ready_to_deliver_package_as_sendable() {
     assert_eq!(json["status"], "ok");
     assert_eq!(json["order_items"][0]["id"], order_id);
     assert_eq!(json["order_items"][0]["status"], "ready_to_deliver");
-    assert_eq!(json["order_items"][0]["next_action"], "mark_package_sent");
+    assert_eq!(json["order_items"][0]["next_action"], "send_package");
 }
 
 #[test]
@@ -1049,7 +1082,7 @@ fn acceptance_complete_json_sets_ready_to_deliver_without_creating_delivery_file
     let stdout = String::from_utf8(output.stdout).unwrap();
     let json: Value = serde_json::from_str(&stdout).unwrap();
     assert_eq!(json["status"], "ready_to_deliver");
-    assert_eq!(json["next_action"], "check_package");
+    assert_eq!(json["next_action"], "send_package");
     assert!(!gig_dir.join("delivery").exists());
 
     let conn = db::open(&data_home.join("gig/gig.db")).unwrap();
@@ -1108,161 +1141,4 @@ fn prepare_client_delivery(gig_dir: &Path, with_zip: bool) -> PathBuf {
         );
     }
     delivery_dir
-}
-
-#[test]
-fn package_check_json_validates_manifest_and_records_existing_zip_without_generating_archive() {
-    let (config_home, data_home, state_home) = isolated_homes("package-check");
-    let project_dir = unique_temp_dir("package-check-project");
-    let gig_dir = project_dir.join(".gig");
-    let delivery_dir = prepare_client_delivery(&gig_dir, true);
-    let order_id = seed_order_with_workflow(&data_home, OrderStatus::ReadyToDeliver, &gig_dir);
-
-    let output = gig_command(&config_home, &data_home, &state_home)
-        .args([
-            "package",
-            "check",
-            &order_id.to_string(),
-            "--delivery-date",
-            "2026-05-27",
-            "--delivery-dir",
-            delivery_dir.to_str().unwrap(),
-            "--json",
-        ])
-        .output()
-        .unwrap();
-
-    assert!(
-        output.status.success(),
-        "package check failed\nstdout:\n{}\nstderr:\n{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-
-    let stdout = String::from_utf8(output.stdout).unwrap();
-    let json: Value = serde_json::from_str(&stdout).unwrap();
-    assert_eq!(json["status"], "validated");
-    assert_eq!(json["next_action"], "mark_package_sent");
-    assert_eq!(json["package"]["delivery_date"], "2026-05-27");
-    assert_eq!(
-        json["paths"]["package_path"],
-        delivery_dir
-            .join("export/client-package.zip")
-            .to_string_lossy()
-            .into_owned()
-    );
-
-    let conn = db::open(&data_home.join("gig/gig.db")).unwrap();
-    let packages = delivery_packages::list_for_order(&conn, order_id).unwrap();
-    assert_eq!(packages.len(), 1);
-    assert_eq!(packages[0].status, DeliveryPackageStatus::Validated);
-    assert_eq!(
-        packages[0].package_path.as_deref(),
-        Some(
-            delivery_dir
-                .join("export/client-package.zip")
-                .to_str()
-                .unwrap()
-        )
-    );
-}
-
-#[test]
-fn package_record_json_records_existing_metadata_without_validating_manifest() {
-    let (config_home, data_home, state_home) = isolated_homes("package-record");
-    let project_dir = unique_temp_dir("package-record-project");
-    let gig_dir = project_dir.join(".gig");
-    let delivery_dir = prepare_client_delivery(&gig_dir, false);
-    let client_dir = delivery_dir.join("client");
-    let manifest_path = delivery_dir.join("manifest.toml");
-    let order_id = seed_order_with_workflow(&data_home, OrderStatus::ReadyToDeliver, &gig_dir);
-
-    let output = gig_command(&config_home, &data_home, &state_home)
-        .args([
-            "package",
-            "record",
-            &order_id.to_string(),
-            "--delivery-date",
-            "2026-05-27",
-            "--delivery-dir",
-            delivery_dir.to_str().unwrap(),
-            "--client-dir",
-            client_dir.to_str().unwrap(),
-            "--manifest-path",
-            manifest_path.to_str().unwrap(),
-            "--status",
-            "prepared",
-            "--json",
-        ])
-        .output()
-        .unwrap();
-
-    assert!(
-        output.status.success(),
-        "package record failed\nstdout:\n{}\nstderr:\n{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-
-    let stdout = String::from_utf8(output.stdout).unwrap();
-    let json: Value = serde_json::from_str(&stdout).unwrap();
-    assert_eq!(json["status"], "prepared");
-    assert_eq!(json["next_action"], "check_package");
-    assert_eq!(json["package"]["delivery_date"], "2026-05-27");
-
-    let conn = db::open(&data_home.join("gig/gig.db")).unwrap();
-    let packages = delivery_packages::list_for_order(&conn, order_id).unwrap();
-    assert_eq!(packages.len(), 1);
-    assert_eq!(packages[0].status, DeliveryPackageStatus::Prepared);
-}
-
-#[test]
-fn package_mark_sent_json_marks_validated_package_sent_and_delivers_order() {
-    let (config_home, data_home, state_home) = isolated_homes("package-mark-sent");
-    let project_dir = unique_temp_dir("package-mark-sent-project");
-    let gig_dir = project_dir.join(".gig");
-    let delivery_dir = prepare_client_delivery(&gig_dir, true);
-    let order_id = seed_order_with_workflow(&data_home, OrderStatus::ReadyToDeliver, &gig_dir);
-
-    let check_output = gig_command(&config_home, &data_home, &state_home)
-        .args([
-            "package",
-            "check",
-            &order_id.to_string(),
-            "--delivery-date",
-            "2026-05-27",
-            "--delivery-dir",
-            delivery_dir.to_str().unwrap(),
-            "--json",
-        ])
-        .output()
-        .unwrap();
-    assert!(check_output.status.success());
-    let checked: Value = serde_json::from_slice(&check_output.stdout).unwrap();
-    let package_id = checked["package"]["id"].as_i64().unwrap();
-
-    let output = gig_command(&config_home, &data_home, &state_home)
-        .args(["package", "mark-sent", &package_id.to_string(), "--json"])
-        .output()
-        .unwrap();
-
-    assert!(
-        output.status.success(),
-        "package mark-sent failed\nstdout:\n{}\nstderr:\n{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-
-    let stdout = String::from_utf8(output.stdout).unwrap();
-    let json: Value = serde_json::from_str(&stdout).unwrap();
-    assert_eq!(json["status"], "sent");
-    assert_eq!(json["next_action"], "none");
-
-    let conn = db::open(&data_home.join("gig/gig.db")).unwrap();
-    let package = delivery_packages::find_by_id(&conn, package_id).unwrap();
-    assert_eq!(package.status, DeliveryPackageStatus::Sent);
-    let order = orders::find_by_id(&conn, order_id).unwrap();
-    assert_eq!(order.status, OrderStatus::Delivered);
-    assert!(order.delivered_at.is_some());
-    assert!(delivery_dir.join("export/client-package.zip").is_file());
 }

@@ -1,12 +1,12 @@
 //! End-to-end lifecycle integration test.
 //!
-//! Exercises: create → init → price change → requirement change → tag → paid → archive,
+//! Exercises: create → workflow start → price change → requirement change → tag → paid → archive,
 //! verifying state at each step.
 
 use gig_core::db;
 use gig_core::models::OrderStatus;
+use gig_core::repo::orders as order_repo;
 use gig_core::services::{
-    init::init_project,
     lifecycle::{
         add_requirement_change, add_tags, archive_order, change_price, get_price_history,
         get_requirement_changes, list_tags, mark_paid,
@@ -52,11 +52,21 @@ fn full_lifecycle_create_to_archive() {
     assert_eq!(order.slug.as_deref(), Some("acme-scraper"));
     assert_eq!(order.accepted_at, Some(1_000));
 
-    // 2. Init → creates project folder, transitions to in_progress
+    // 2. Workflow start → in_progress with an existing project folder
     let dev_root = tmp.path().join("dev");
     std::fs::create_dir_all(&dev_root).unwrap();
-    let order = init_project(&conn, order.id, &dev_root, None).unwrap();
+    let dev_path = dev_root.join("acme-scraper");
+    std::fs::create_dir_all(&dev_path).unwrap();
+    std::fs::write(dev_path.join("README.md"), "# Acme Scraper\n").unwrap();
+    std::fs::write(dev_path.join(".gitignore"), "target/\n").unwrap();
+
+    let order = transition(&conn, order.id, OrderStatus::PlanReady, 1_200).unwrap();
+    let order = transition(&conn, order.id, OrderStatus::PlanApproved, 1_300).unwrap();
+    let order = transition(&conn, order.id, OrderStatus::InProgress, 1_400).unwrap();
     assert_eq!(order.status, OrderStatus::InProgress);
+    let dev_path_str = dev_path.to_string_lossy().into_owned();
+    order_repo::update_dev_path(&conn, order.id, Some(&dev_path_str)).unwrap();
+    let order = order_repo::find_by_id(&conn, order.id).unwrap();
     let dev_path = order.dev_path.as_deref().expect("dev_path must be set");
     assert!(std::path::Path::new(dev_path).exists());
     assert!(std::path::Path::new(dev_path).join("README.md").exists());
@@ -81,12 +91,13 @@ fn full_lifecycle_create_to_archive() {
     assert_eq!(changes[0].price_delta, 5_000);
 
     // 5. Add tags
-    let tags = add_tags(&conn, order.id, &["python", "scraper", "web"]).unwrap();
+    let tag_names = vec!["python", "scraper", "web"];
+    let tags = add_tags(&conn, order.id, tag_names.as_slice()).unwrap();
     assert_eq!(tags.len(), 3);
     let fetched_tags = list_tags(&conn, order.id).unwrap();
     assert_eq!(fetched_tags.len(), 3);
 
-    // 6. Deliver → Paid
+    // 6. Delivery state → Paid
     let order = transition(&conn, order.id, OrderStatus::Delivered, 4_000).unwrap();
     assert_eq!(order.status, OrderStatus::Delivered);
 
