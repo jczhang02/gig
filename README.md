@@ -67,10 +67,10 @@ ReadyToDeliver → Delivered ⇄ Revision → Paid → Archived
         ↘ Cancelled (任何非终态均可取消)
 ```
 
-`gig` 现在同时支持两层工作流：
+`gig` 现在使用 workflow-only 交付路径：
 
-- 传统手动项目流：`gig new` / `gig init` / `gig deliver` 仍可使用，适合旧订单和临时项目。
-- 支持层工作流：`gig quote` / `gig plan` / `gig acceptance` / `gig package` 只登记和校验外部工作流生成的文件，不负责生成项目文件或调用模型。
+- `gig quote` / `gig plan` / `gig acceptance` / `gig package` 负责状态推进、文件校验、交付上传与留痕。
+- 外部 workflow / agents 负责生成项目文件、计划文件、验收材料和客户交付包内容；`gig` 不生成这些文件。
 
 ### XDG 报价草稿 vs 项目内 `.gig/`
 
@@ -99,13 +99,12 @@ gig plan approve crawler-a     # plan_ready → plan_approved
 gig status crawler-a in_progress
 gig acceptance complete crawler-a
 
-gig package check crawler-a \
+gig package send crawler-a \
   --delivery-date 2026-05-27 \
   --delivery-dir ~/dev/partjobs/crawler-a/.gig/delivery/2026-05-27
-gig package mark-sent <package-id>
 ```
 
-客户端交付包必须由外部工作流创建为 `.gig/delivery/<YYYY-MM-DD>/export/client-package.zip`。`gig package check` 只校验并记录这个已有 zip，不会从项目根目录打包。允许交付的文件必须写在 `manifest.toml` 的 `client_files` 中；`.gig/`、`internal/`、`prompts/`、`ACCEPTANCE.md`、`DELIVERY_INTERNAL.html` 等路径会被拒绝，避免把内部材料泄露给客户。
+客户端交付包必须由外部工作流创建为 `.gig/delivery/<YYYY-MM-DD>/export/client-package.zip`。`gig package send` 会先执行严格安全校验，再用配置好的 uploader 上传 zip，并记录 delivery artifact 与 sent 状态。允许交付的文件必须写在 `manifest.toml` 的 `client_files` 中；`.gig/`、`internal/`、`prompts/`、`ACCEPTANCE.md`、`DELIVERY_INTERNAL.html` 等路径会被拒绝，避免把内部材料泄露给客户。
 
 旧订单可以没有 `order_workflow` 行和 `project_type`。它们仍可 `list`、`show`、`export`、`archive`；机器可读输出会把需要工作流元数据的下一步标为 `legacy_workflow_metadata_missing`。后续如果要补齐旧订单类型，核心库提供了 `orders::update_project_type`，可以由迁移脚本或未来 CLI 助手调用；本阶段不强制回填。
 
@@ -160,25 +159,11 @@ gig new --title "数据爬虫" --slug data-scraper \
 # created order #2 (accepted)
 ```
 
-### 4. 初始化项目
+### 4. 项目接入与上下文
 
-**方式 A**：从已有订单创建项目目录
+项目目录和 `.gig/` 结构由外部 workflow 维护。`gig` 只登记并使用这些路径。
 
-```bash
-gig init 1
-# 在 dev_root/某公司官网重做/ 下创建目录、git init、.gitignore、README
-# accepted → in_progress
-```
-
-**方式 B**：在当前目录直接开始（自动创建订单 + 初始化）
-
-```bash
-cd ~/dev/partjobs/my-project
-gig init
-# 以当前目录名作为 slug，创建订单并注册 dev_path
-```
-
-快速跳转到项目目录：
+快速跳转到已登记项目目录：
 
 ```bash
 cd $(gig cd 1)
@@ -213,32 +198,28 @@ gig show 1 --json
 
 ### 6. 交付
 
-开发完成，传统手动流程可一键打包上传：
+支持层交付统一使用 `package send`：
 
 ```bash
-gig deliver 1
-# packing... 42 file(s)
-# uploading to s3:aliyun-hk... done
-# link: https://...presigned-url...
-# size: 12.3 MB
-# status: in_progress → delivered
-# (URL copied to clipboard)
+gig package send 1 \
+  --delivery-date 2026-05-27 \
+  --delivery-dir ~/dev/partjobs/crawler-a/.gig/delivery/2026-05-27
 ```
 
-把链接发给客户即可。打包规则：
+该命令会：
 
-- 自动排除 `.git/`、`.gitignore` 中的文件
-- 项目内可添加 `.gigignore` 定义额外排除
-- 配置 `[pack] extra_ignore` 定义全局排除
+- 校验 `manifest.toml` 与 `client-package.zip`（严格 allowlist）；
+- 通过配置的 uploader 上传 zip；
+- 写入 `delivery_artifacts`；
+- 把 package 置为 `sent`，订单置为 `delivered`。
 
-先预览再交付：
+如果只是给某个订单上传临时附件或单独文件，不推进客户交付状态，用 `artifact send`：
 
 ```bash
-gig deliver 1 --dry-run       # 查看会打包哪些文件
-gig pack 1                     # 只打包不上传
+gig artifact send 1 report.pdf screenshot.png
 ```
 
-支持层工作流的客户交付不要使用项目根目录打包；请使用 `.gig/delivery/<date>/manifest.toml` 加 `gig package check` 的 allowlist 校验。
+`artifact send` 会上传每个文件并写入 `delivery_artifacts`，但不会把订单改成 `delivered`。
 
 ### 7. 客户要求修改
 
@@ -249,17 +230,12 @@ gig status 1 revision
 # delivered → revision
 ```
 
-修改完成后重新交付：
+修改完成后外部 workflow 重新生成 `.gig/delivery/<date>/` 内容，再次执行：
 
 ```bash
-gig deliver 1
-# revision → delivered（delivered_at 更新为新的交付时间）
-```
-
-或使用上次的打包文件重新上传（链接过期时有用）：
-
-```bash
-gig deliver 1 --resend
+gig package send 1 \
+  --delivery-date 2026-05-28 \
+  --delivery-dir ~/dev/partjobs/crawler-a/.gig/delivery/2026-05-28
 ```
 
 ### 8. 收款
@@ -342,15 +318,9 @@ gig doctor          # 检查数据和路径一致性
 gig backup          # 备份数据库
 ```
 
-## 上传任意文件
+## 命令迁移说明
 
-不绑定订单，直接上传文件获取分享链接：
-
-```bash
-gig upload report.pdf slides.pptx
-# uploading report.pdf... done (2.3 MB)
-# → https://...presigned-url...
-```
+旧的公开交付入口已从命令面移除。客户交付统一使用 `gig package send`；单独文件上传使用 `gig artifact send`，不改变订单状态。
 
 ## OSS 费用参考（香港区）
 
