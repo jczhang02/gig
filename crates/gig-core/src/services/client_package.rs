@@ -452,7 +452,7 @@ fn client_package_object_key(
 mod tests {
     use super::*;
     use crate::db::open_in_memory;
-    use crate::delivery::{UploadOpts, UploadResult, Uploader};
+    use crate::delivery::{ShortLinker, ShorteningUploader, UploadOpts, UploadResult, Uploader};
     use crate::models::{DeliveryPackageStatus, OrderStatus, ProjectType};
     use crate::repo::orders::NewOrder;
     use crate::repo::{delivery_artifacts, delivery_packages, orders};
@@ -476,6 +476,9 @@ mod tests {
     struct FailingUploader {
         upload_calls: Mutex<Vec<UploadCall>>,
     }
+
+    #[derive(Debug)]
+    struct StaticShortLinker;
 
     impl RecordingUploader {
         fn uploaded_paths(&self) -> Vec<PathBuf> {
@@ -540,6 +543,12 @@ mod tests {
                 object_key: opts.object_key.clone(),
             });
             Err(Error::Invalid("upload failed".to_string()))
+        }
+    }
+
+    impl ShortLinker for StaticShortLinker {
+        fn shorten(&self, _long_url: &str, _ttl_seconds: Option<u32>) -> Result<String> {
+            Ok("https://go.jczhang.cc/pkg12345".to_string())
         }
     }
 
@@ -728,6 +737,49 @@ mod tests {
         assert_eq!(
             delivery_artifacts::list_for_order(&conn, order_id).unwrap(),
             vec![sent.artifact]
+        );
+    }
+
+    #[test]
+    fn send_client_package_records_shortened_remote_url() {
+        let conn = open_in_memory().unwrap();
+        let order_id = ready_order(&conn);
+        let root = tempfile::tempdir().unwrap();
+        let delivery_dir = delivery_layout(root.path());
+        let client_dir = delivery_dir.join("client");
+        let export_dir = delivery_dir.join("export");
+        let package_path = export_dir.join("client-package.zip");
+        fs::create_dir_all(&client_dir).unwrap();
+        fs::create_dir_all(&export_dir).unwrap();
+        fs::write(client_dir.join("DELIVERY_CLIENT.html"), "client html").unwrap();
+        write_zip(&package_path, [("DELIVERY_CLIENT.html", "client html")]);
+        write_manifest(&delivery_dir, ["DELIVERY_CLIENT.html"]);
+        let uploader: Box<dyn Uploader> = Box::new(ShorteningUploader::new(
+            Box::new(RecordingUploader::default()),
+            Box::new(StaticShortLinker),
+        ));
+
+        let sent = send_client_package(
+            &conn,
+            order_id,
+            PackageSendInput {
+                delivery_date: "2026-05-27",
+                delivery_dir: &delivery_dir,
+                sent_at: "2026-05-27T07:00:00Z",
+            },
+            uploader.as_ref(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            sent.artifact.remote_url.as_deref(),
+            Some("https://go.jczhang.cc/pkg12345")
+        );
+        assert_eq!(
+            delivery_artifacts::list_for_order(&conn, order_id).unwrap()[0]
+                .remote_url
+                .as_deref(),
+            Some("https://go.jczhang.cc/pkg12345")
         );
     }
 

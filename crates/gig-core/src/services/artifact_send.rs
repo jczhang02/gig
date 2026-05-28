@@ -115,7 +115,7 @@ fn artifact_object_key(
 mod tests {
     use super::*;
     use crate::db::open_in_memory;
-    use crate::delivery::{UploadOpts, UploadResult, Uploader};
+    use crate::delivery::{ShortLinker, ShorteningUploader, UploadOpts, UploadResult, Uploader};
     use crate::models::{OrderStatus, ProjectType};
     use crate::repo::delivery_artifacts;
     use crate::repo::orders::{self, NewOrder};
@@ -139,6 +139,9 @@ mod tests {
     struct FailingSecondUploader {
         upload_calls: Mutex<Vec<UploadCall>>,
     }
+
+    #[derive(Debug)]
+    struct StaticShortLinker;
 
     impl RecordingUploader {
         fn uploaded_paths(&self) -> Vec<PathBuf> {
@@ -218,6 +221,12 @@ mod tests {
                 provider: self.name().to_string(),
                 file_size: fs::metadata(local).unwrap().len(),
             })
+        }
+    }
+
+    impl ShortLinker for StaticShortLinker {
+        fn shorten(&self, _long_url: &str, _ttl_seconds: Option<u32>) -> Result<String> {
+            Ok("https://go.jczhang.cc/art12345".to_string())
         }
     }
 
@@ -321,6 +330,40 @@ mod tests {
         assert_eq!(
             orders::find_by_id(&conn, order_id).unwrap().status,
             OrderStatus::Accepted
+        );
+    }
+
+    #[test]
+    fn send_order_artifacts_records_shortened_remote_urls() {
+        let conn = open_in_memory().unwrap();
+        let order_id = seed_order(&conn);
+        let artifact = write_temp_file("short.txt", "short");
+        let files = vec![artifact];
+        let uploader: Box<dyn Uploader> = Box::new(ShorteningUploader::new(
+            Box::new(RecordingUploader::default()),
+            Box::new(StaticShortLinker),
+        ));
+
+        let result = send_order_artifacts(
+            &conn,
+            order_id,
+            ArtifactSendInput {
+                files: &files,
+                uploaded_at: uploaded_at(),
+            },
+            uploader.as_ref(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            result.artifacts[0].remote_url.as_deref(),
+            Some("https://go.jczhang.cc/art12345")
+        );
+        assert_eq!(
+            delivery_artifacts::list_for_order(&conn, order_id).unwrap()[0]
+                .remote_url
+                .as_deref(),
+            Some("https://go.jczhang.cc/art12345")
         );
     }
 
