@@ -2,7 +2,7 @@ use crate::cli::ShowArgs;
 use crate::commands::resolve_order;
 use crate::ui;
 use gig_core::models::{Order, OrderWorkflow};
-use gig_core::repo::{delivery_packages, order_workflow, sources};
+use gig_core::repo::{order_workflow, sources};
 use gig_core::services::dashboard::order_next_action;
 use gig_core::services::lifecycle::{get_price_history, get_requirement_changes, list_tags};
 use gig_core::Result;
@@ -15,10 +15,7 @@ pub fn run(conn: &Connection, args: ShowArgs) -> Result<()> {
     let price_history = get_price_history(conn, order.id)?;
     let req_changes = get_requirement_changes(conn, order.id)?;
     let workflow = order_workflow::find_by_order_id(conn, order.id)?;
-    let latest_package_status = delivery_packages::list_for_order(conn, order.id)?
-        .first()
-        .map(|package| package.status);
-    let next_action = order_next_action(&order, workflow.as_ref(), latest_package_status);
+    let next_action = order_next_action(&order, workflow.as_ref());
 
     if args.json {
         print_order_json(&order, workflow.as_ref(), next_action);

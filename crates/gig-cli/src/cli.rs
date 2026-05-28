@@ -23,6 +23,7 @@ impl Cli {
             Command::Plan(args) => plan_wants_json(args),
             Command::Acceptance(args) => acceptance_wants_json(args),
             Command::Package(args) => package_wants_json(args),
+            Command::Artifact(args) => artifact_wants_json(args),
             _ => false,
         }
     }
@@ -39,9 +40,6 @@ pub enum Command {
 
     /// Show a single order in detail.
     Show(ShowArgs),
-
-    /// Legacy/manual project folder initialisation for accepted orders.
-    Init(InitArgs),
 
     /// Update the final price of an order.
     Price(PriceArgs),
@@ -76,12 +74,6 @@ pub enum Command {
     /// Run consistency checks on paths and data.
     Doctor(DoctorArgs),
 
-    /// Legacy/manual archive packing; workflow delivery uses package commands.
-    Pack(PackArgs),
-
-    /// Legacy/manual delivery; workflow delivery uses package check/record/mark-sent.
-    Deliver(DeliverArgs),
-
     /// Show income statistics.
     Stats(StatsArgs),
 
@@ -103,9 +95,6 @@ pub enum Command {
     /// Delete an order from the database.
     Delete(DeleteArgs),
 
-    /// Upload arbitrary files to the configured cloud storage.
-    Upload(UploadArgs),
-
     /// Snapshot the database to the backups directory.
     Backup,
 
@@ -126,13 +115,20 @@ pub enum Command {
 
     /// Client package validation subcommands.
     Package(PackageArgs),
+
+    /// Standalone order artifact upload subcommands.
+    Artifact(ArtifactArgs),
+}
+
+fn artifact_wants_json(args: &ArtifactArgs) -> bool {
+    match &args.command {
+        ArtifactCommand::Send(args) => args.json,
+    }
 }
 
 fn package_wants_json(args: &PackageArgs) -> bool {
     match &args.command {
-        PackageCommand::Check(args) => args.json,
-        PackageCommand::Record(args) => args.json,
-        PackageCommand::MarkSent(args) => args.json,
+        PackageCommand::Send(args) => args.json,
     }
 }
 
@@ -182,7 +178,7 @@ pub struct NewArgs {
     #[arg(long)]
     pub title: String,
 
-    /// Short slug (used as the folder name later by `gig init`).
+    /// Short slug used to identify the order.
     #[arg(long)]
     pub slug: Option<String>,
 
@@ -252,18 +248,12 @@ pub struct PackageArgs {
 
 #[derive(Subcommand, Debug)]
 pub enum PackageCommand {
-    /// Validate a workflow-created client package manifest and files.
-    Check(PackageCheckArgs),
-
-    /// Record existing client package metadata.
-    Record(PackageRecordArgs),
-
-    /// Mark a validated package as sent outside gig.
-    MarkSent(PackageMarkSentArgs),
+    /// Validate and upload workflow-created package, then mark sent.
+    Send(PackageSendArgs),
 }
 
 #[derive(clap::Args, Debug)]
-pub struct PackageCheckArgs {
+pub struct PackageSendArgs {
     /// Order id or slug.
     pub id_or_slug: String,
 
@@ -275,49 +265,39 @@ pub struct PackageCheckArgs {
     #[arg(long)]
     pub delivery_dir: std::path::PathBuf,
 
+    /// Uploader name (overrides config default_uploader).
+    #[arg(long)]
+    pub uploader: Option<String>,
+
     /// Emit stable machine-readable JSON.
     #[arg(long)]
     pub json: bool,
 }
 
 #[derive(clap::Args, Debug)]
-pub struct PackageRecordArgs {
+pub struct ArtifactArgs {
+    #[command(subcommand)]
+    pub command: ArtifactCommand,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ArtifactCommand {
+    /// Upload standalone files and record artifacts without changing order status.
+    Send(ArtifactSendArgs),
+}
+
+#[derive(clap::Args, Debug)]
+pub struct ArtifactSendArgs {
     /// Order id or slug.
     pub id_or_slug: String,
 
-    /// Delivery date for this package record.
-    #[arg(long)]
-    pub delivery_date: String,
+    /// Files to upload and attach to the order.
+    #[arg(required = true, num_args = 1..)]
+    pub files: Vec<std::path::PathBuf>,
 
-    /// Existing .gig delivery directory.
+    /// Uploader name (overrides config default_uploader).
     #[arg(long)]
-    pub delivery_dir: std::path::PathBuf,
-
-    /// Existing client-visible directory.
-    #[arg(long)]
-    pub client_dir: std::path::PathBuf,
-
-    /// Existing client manifest path.
-    #[arg(long)]
-    pub manifest_path: std::path::PathBuf,
-
-    /// Existing client package archive path, if workflow created one.
-    #[arg(long)]
-    pub package_path: Option<std::path::PathBuf>,
-
-    /// Package status to record: prepared or validated.
-    #[arg(long)]
-    pub status: String,
-
-    /// Emit stable machine-readable JSON.
-    #[arg(long)]
-    pub json: bool,
-}
-
-#[derive(clap::Args, Debug)]
-pub struct PackageMarkSentArgs {
-    /// Delivery package id.
-    pub package_id: i64,
+    pub uploader: Option<String>,
 
     /// Emit stable machine-readable JSON.
     #[arg(long)]
@@ -556,32 +536,6 @@ pub struct QuoteNewArgs {
 // ─── New commands ─────────────────────────────────────────────────────────────
 
 #[derive(clap::Args, Debug)]
-pub struct InitArgs {
-    /// Order id or slug. Omit to create a new order for the current directory.
-    pub id: Option<String>,
-
-    /// Override the slug / folder name used for the project directory.
-    #[arg(long)]
-    pub slug: Option<String>,
-
-    /// Order title (used when creating a new order without an id).
-    #[arg(long)]
-    pub title: Option<String>,
-
-    /// Quoted price in yuan (used when creating a new order).
-    #[arg(long)]
-    pub quoted_price: Option<String>,
-
-    /// Source name (used when creating a new order).
-    #[arg(long)]
-    pub source: Option<String>,
-
-    /// Interactive mode: prompt for order details.
-    #[arg(long, short = 'i')]
-    pub interactive: bool,
-}
-
-#[derive(clap::Args, Debug)]
 pub struct PriceArgs {
     /// Order id or slug (omit to use context from current directory).
     pub id: Option<String>,
@@ -678,46 +632,6 @@ pub struct ArchiveArgs {
 pub struct CdArgs {
     /// Order id or slug (omit to use context from current directory).
     pub id: Option<String>,
-}
-
-#[derive(clap::Args, Debug)]
-pub struct PackArgs {
-    /// Order id or slug (omit to use context from current directory).
-    pub id: Option<String>,
-
-    /// Archive format: "zip" (default) or "tar.zst".
-    #[arg(long, default_value = "zip")]
-    pub format: String,
-
-    /// Print the file list without creating the archive.
-    #[arg(long)]
-    pub dry_run: bool,
-
-    /// Override the output path (default: $TMPDIR/gig-<slug>.<ext>).
-    #[arg(long)]
-    pub output: Option<std::path::PathBuf>,
-}
-
-#[derive(clap::Args, Debug)]
-pub struct DeliverArgs {
-    /// Order id or slug (omit to use context from current directory).
-    pub id: Option<String>,
-
-    /// Uploader name (overrides config default_uploader).
-    #[arg(long)]
-    pub uploader: Option<String>,
-
-    /// Skip pack step and re-upload the most recent local archive.
-    #[arg(long)]
-    pub resend: bool,
-
-    /// Archive format used when packing: "zip" or "tar.zst" (defaults to config pack.default_format).
-    #[arg(long)]
-    pub format: Option<String>,
-
-    /// Print what would be packed/uploaded without actually doing it.
-    #[arg(long)]
-    pub dry_run: bool,
 }
 
 // ─── Lead subgroup ────────────────────────────────────────────────────────────
@@ -855,19 +769,6 @@ pub struct DoctorArgs {
     /// Attempt to fix broken paths by searching dev_root and archive_root.
     #[arg(long)]
     pub fix: bool,
-}
-
-// ─── Upload ─────────────────────────────────────────────────────────────────
-
-#[derive(clap::Args, Debug)]
-pub struct UploadArgs {
-    /// Files to upload.
-    #[arg(required = true)]
-    pub files: Vec<std::path::PathBuf>,
-
-    /// Override the uploader (e.g. s3:aliyun-hk, rclone:r2).
-    #[arg(long)]
-    pub uploader: Option<String>,
 }
 
 // ─── Delete ─────────────────────────────────────────────────────────────────

@@ -17,7 +17,6 @@ pub fn run(cli: Cli) -> Result<()> {
         Command::New(args) => commands::new::run(&conn, args),
         Command::Ls(args) => commands::ls::run(&conn, args),
         Command::Show(args) => commands::show::run(&conn, args),
-        Command::Init(args) => commands::init::run(&conn, args),
         Command::Price(args) => commands::price::run(&conn, args),
         Command::Change(args) => commands::change::run(&conn, args),
         Command::Note(args) => commands::note::run(&conn, args),
@@ -29,8 +28,6 @@ pub fn run(cli: Cli) -> Result<()> {
         Command::Lead(args) => commands::lead::run(&conn, args),
         Command::Cd(args) => commands::cd::run(&conn, args),
         Command::Doctor(args) => commands::doctor::run(&conn, args),
-        Command::Pack(args) => commands::pack::run(&conn, args),
-        Command::Deliver(args) => commands::deliver::run(&conn, args),
         Command::Stats(args) => commands::stats::run(&conn, args),
         Command::Export(args) => commands::export::run(&conn, args),
         Command::Client(args) => commands::client::run(&conn, args),
@@ -43,8 +40,8 @@ pub fn run(cli: Cli) -> Result<()> {
         Command::Plan(args) => commands::plan::run(&conn, args),
         Command::Acceptance(args) => commands::acceptance::run(&conn, args),
         Command::Package(args) => commands::package::run(&conn, args),
+        Command::Artifact(args) => commands::artifact::run(&conn, args),
         Command::Delete(args) => commands::delete::run(&conn, args),
-        Command::Upload(args) => commands::upload::run(args),
         Command::Completion(_) => unreachable!("completion is handled before DB bootstrap"),
     }
 }
