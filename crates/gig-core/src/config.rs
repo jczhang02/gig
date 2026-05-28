@@ -114,6 +114,8 @@ impl Default for PackConfig {
 pub struct DeliveryConfig {
     /// Name of the default uploader (e.g. "s3:aliyun-hk").
     pub default_uploader: String,
+    /// Optional short-link service used to wrap generated upload links.
+    pub short_link: ShortLinkConfig,
     /// Named S3-compatible uploader configurations.
     ///
     /// Keys are short names used after the `s3:` prefix in `default_uploader`.
@@ -129,6 +131,17 @@ pub struct DeliveryConfig {
     /// ```
     #[serde(default)]
     pub s3: HashMap<String, S3UploaderConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Default)]
+#[serde(default)]
+pub struct ShortLinkConfig {
+    /// Whether upload links should be shortened after backend upload.
+    pub enabled: bool,
+    /// API endpoint that accepts `{ url, ttl_seconds }` and returns `{ short_url }`.
+    pub endpoint: String,
+    /// Bearer token sent to the short-link API.
+    pub token: String,
 }
 
 /// Configuration for a single S3-compatible uploader.
@@ -248,6 +261,30 @@ mod tests {
         cfg.save(&path).unwrap();
         let loaded = Config::load_or_default(&path).unwrap();
         assert_eq!(cfg, loaded);
+    }
+
+    #[test]
+    fn config_loads_optional_short_link_delivery_settings() {
+        let cfg: Config = toml::from_str(
+            r#"
+            [delivery]
+            default_uploader = "s3:main"
+
+            [delivery.short_link]
+            enabled = true
+            endpoint = "https://go.jczhang.cc/api/links"
+            token = "secret-token"
+            "#,
+        )
+        .unwrap();
+
+        assert!(cfg.delivery.short_link.enabled);
+        assert_eq!(
+            cfg.delivery.short_link.endpoint,
+            "https://go.jczhang.cc/api/links"
+        );
+        assert_eq!(cfg.delivery.short_link.token, "secret-token");
+        assert!(!Config::default().delivery.short_link.enabled);
     }
 
     #[test]
