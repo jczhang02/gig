@@ -41,6 +41,11 @@ extra_ignore = []                    # 额外忽略规则（gitignore 语法）
 [delivery]
 default_uploader = "s3:aliyun-hk"    # 默认上传器
 
+[delivery.short_link]
+enabled = true
+endpoint = "https://go.jczhang.cc/api/links"
+token = "..."                        # Cloudflare Worker 的 SHORT_LINK_TOKEN
+
 [delivery.s3.aliyun-hk]
 bucket = "my-bucket"
 region = "cn-hongkong"
