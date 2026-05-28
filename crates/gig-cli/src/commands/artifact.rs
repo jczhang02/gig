@@ -1,8 +1,6 @@
 use crate::cli::{ArtifactArgs, ArtifactCommand, ArtifactSendArgs};
-use crate::commands::resolve_order;
+use crate::commands::{build_delivery_uploader, resolve_order};
 use gig_core::config::{Config, Paths};
-use gig_core::delivery::s3::S3Uploader;
-use gig_core::delivery::Uploader;
 use gig_core::models::DeliveryArtifact;
 use gig_core::services::artifact_send::{send_order_artifacts, ArtifactSendInput};
 use gig_core::{Error, Result};
@@ -34,7 +32,7 @@ fn send(conn: &Connection, args: ArtifactSendArgs) -> Result<()> {
     }
 
     let order = resolve_order(Some(args.id_or_slug), conn)?;
-    let uploader = build_uploader(uploader_name, &config)?;
+    let uploader = build_delivery_uploader(uploader_name, &config)?;
     let uploaded_at = OffsetDateTime::now_utc();
     let result = send_order_artifacts(
         conn,
@@ -83,18 +81,4 @@ fn print_artifacts_human(artifacts: &[DeliveryArtifact]) {
             println!("link: {remote_url}");
         }
     }
-}
-
-fn build_uploader(name: &str, config: &Config) -> Result<Box<dyn Uploader>> {
-    let s3_name = name.strip_prefix("s3:").ok_or_else(|| {
-        Error::Config(format!(
-            "unsupported uploader '{name}'; use 's3:<name>' format"
-        ))
-    })?;
-    let s3_cfg = config.delivery.s3.get(s3_name).ok_or_else(|| {
-        Error::Config(format!(
-            "no [delivery.s3.{s3_name}] section found in config.toml"
-        ))
-    })?;
-    Ok(Box::new(S3Uploader::new(name.to_string(), s3_cfg)?))
 }
