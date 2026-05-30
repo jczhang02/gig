@@ -67,7 +67,7 @@ fn legacy_delivery_routes_are_not_public_commands() {
 
 #[test]
 fn compatibility_package_routes_are_not_public_commands() {
-    let compatibility_routes = ["check", "record", "mark-sent"];
+    let compatibility_routes = ["record", "mark-sent"];
 
     for route in compatibility_routes {
         let output = Command::new(env!("CARGO_BIN_EXE_gig"))

@@ -38,6 +38,7 @@ pub fn run(cli: Cli) -> Result<()> {
         Command::Source(args) => commands::source::run(&conn, args),
         Command::Quote(args) => commands::quote::run(&conn, args),
         Command::Plan(args) => commands::plan::run(&conn, args),
+        Command::Work(args) => commands::work::run(&conn, args),
         Command::Acceptance(args) => commands::acceptance::run(&conn, args),
         Command::Package(args) => commands::package::run(&conn, args),
         Command::Artifact(args) => commands::artifact::run(&conn, args),

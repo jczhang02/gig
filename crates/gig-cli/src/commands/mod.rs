@@ -27,6 +27,7 @@ pub mod stats;
 pub mod status;
 pub mod tag;
 pub mod template;
+pub mod work;
 
 use gig_core::config::Config;
 use gig_core::context::resolve_context;

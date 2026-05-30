@@ -40,11 +40,11 @@ fn complete(conn: &Connection, args: AcceptanceCompleteArgs) -> Result<()> {
         },
     )?;
     if args.json {
-        print_workflow_json(&result, "send_package");
+        print_workflow_json(&result, "check_package");
     } else {
         println!("acceptance complete for order #{}", result.order.id);
         println!("status: {}", result.order.status.as_str());
-        println!("next_action: send_package");
+        println!("next_action: check_package");
     }
     Ok(())
 }

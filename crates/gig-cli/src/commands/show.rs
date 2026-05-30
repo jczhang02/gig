@@ -15,7 +15,7 @@ pub fn run(conn: &Connection, args: ShowArgs) -> Result<()> {
     let price_history = get_price_history(conn, order.id)?;
     let req_changes = get_requirement_changes(conn, order.id)?;
     let workflow = order_workflow::find_by_order_id(conn, order.id)?;
-    let next_action = order_next_action(&order, workflow.as_ref());
+    let next_action = order_next_action(conn, &order, workflow.as_ref())?;
 
     if args.json {
         print_order_json(&order, workflow.as_ref(), next_action);

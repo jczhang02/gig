@@ -21,6 +21,7 @@ impl Cli {
             Command::Show(args) => args.json,
             Command::Quote(args) => quote_wants_json(args),
             Command::Plan(args) => plan_wants_json(args),
+            Command::Work(args) => work_wants_json(args),
             Command::Acceptance(args) => acceptance_wants_json(args),
             Command::Package(args) => package_wants_json(args),
             Command::Artifact(args) => artifact_wants_json(args),
@@ -110,6 +111,9 @@ pub enum Command {
     /// Workflow plan gate subcommands.
     Plan(PlanArgs),
 
+    /// Workflow work-start gate subcommands.
+    Work(WorkArgs),
+
     /// Workflow acceptance gate subcommands.
     Acceptance(AcceptanceArgs),
 
@@ -128,7 +132,14 @@ fn artifact_wants_json(args: &ArtifactArgs) -> bool {
 
 fn package_wants_json(args: &PackageArgs) -> bool {
     match &args.command {
+        PackageCommand::Check(args) => args.json,
         PackageCommand::Send(args) => args.json,
+    }
+}
+
+fn work_wants_json(args: &WorkArgs) -> bool {
+    match &args.command {
+        WorkCommand::Start(args) => args.json,
     }
 }
 
@@ -248,8 +259,29 @@ pub struct PackageArgs {
 
 #[derive(Subcommand, Debug)]
 pub enum PackageCommand {
+    /// Validate workflow-created package without uploading.
+    Check(PackageCheckArgs),
+
     /// Validate and upload workflow-created package, then mark sent.
     Send(PackageSendArgs),
+}
+
+#[derive(clap::Args, Debug)]
+pub struct PackageCheckArgs {
+    /// Order id or slug.
+    pub id_or_slug: String,
+
+    /// Delivery date matching manifest.toml.
+    #[arg(long)]
+    pub delivery_date: String,
+
+    /// Existing .gig delivery directory.
+    #[arg(long)]
+    pub delivery_dir: std::path::PathBuf,
+
+    /// Emit stable machine-readable JSON.
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(clap::Args, Debug)]
@@ -383,6 +415,28 @@ pub struct PlanRejectArgs {
 
 #[derive(clap::Args, Debug)]
 pub struct PlanReadyArgs {
+    /// Order id or slug.
+    pub id_or_slug: String,
+
+    /// Emit stable machine-readable JSON.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct WorkArgs {
+    #[command(subcommand)]
+    pub command: WorkCommand,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum WorkCommand {
+    /// Start execution after the plan is approved.
+    Start(WorkStartArgs),
+}
+
+#[derive(clap::Args, Debug)]
+pub struct WorkStartArgs {
     /// Order id or slug.
     pub id_or_slug: String,
 

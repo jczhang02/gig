@@ -7,7 +7,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use gig_core::db;
 use gig_core::models::{DeliveryPackageStatus, OrderStatus, ProjectType, QuoteDraftStatus};
 use gig_core::repo::quote_drafts::{self, NewQuoteDraft};
-use gig_core::repo::{delivery_packages, order_workflow, orders};
+use gig_core::repo::{delivery_artifacts, delivery_packages, order_workflow, orders};
 use serde_json::Value;
 
 fn unique_temp_dir(name: &str) -> PathBuf {
@@ -222,6 +222,62 @@ fn package_send_json_missing_uploader_emits_machine_readable_error_to_stderr() {
 }
 
 #[test]
+fn package_check_json_validates_existing_package_without_upload_artifact() {
+    let (config_home, data_home, state_home) = isolated_homes("package-check-json");
+    let project_dir = unique_temp_dir("package-check-json-project");
+    let gig_dir = project_dir.join(".gig");
+    let delivery_dir = prepare_client_delivery(&gig_dir, true);
+    let order_id = seed_order_with_workflow(&data_home, OrderStatus::ReadyToDeliver, &gig_dir);
+
+    let output = gig_command(&config_home, &data_home, &state_home)
+        .args([
+            "package",
+            "check",
+            &order_id.to_string(),
+            "--delivery-date",
+            "2026-05-27",
+            "--delivery-dir",
+            delivery_dir.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "package check failed
+stdout:
+{}
+stderr:
+{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stderr.is_empty());
+    let json: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["status"], "validated");
+    assert_eq!(json["next_action"], "send_package");
+    assert_eq!(json["package"]["order_id"], order_id);
+    assert_eq!(json["package"]["status"], "validated");
+    assert_eq!(
+        json["paths"]["package_path"],
+        delivery_dir
+            .join("export/client-package.zip")
+            .to_string_lossy()
+            .as_ref()
+    );
+    assert!(!json.as_object().unwrap().contains_key("artifact"));
+
+    let conn = db::open(&data_home.join("gig/gig.db")).unwrap();
+    let packages = delivery_packages::list_for_order(&conn, order_id).unwrap();
+    assert_eq!(packages.len(), 1);
+    assert_eq!(packages[0].status, DeliveryPackageStatus::Validated);
+    assert!(delivery_artifacts::list_for_order(&conn, order_id)
+        .unwrap()
+        .is_empty());
+}
+
+#[test]
 fn artifact_send_json_missing_uploader_emits_machine_readable_error_to_stderr() {
     let (config_home, data_home, state_home) = isolated_homes("artifact-json-error");
     let project_dir = unique_temp_dir("artifact-json-error-project");
@@ -279,6 +335,31 @@ fn ls_json_includes_quote_and_order_decision_items() {
     assert_eq!(json["order_items"][0]["id"], order_id);
     assert_eq!(json["order_items"][0]["status"], "plan_ready");
     assert_eq!(json["order_items"][0]["next_action"], "approve_plan");
+}
+
+#[test]
+fn ls_json_marks_ready_to_deliver_without_validated_package_as_needing_package_check() {
+    let (config_home, data_home, state_home) = isolated_homes("ls-json-package-check");
+    let project_dir = unique_temp_dir("ls-json-package-check-project");
+    let gig_dir = project_dir.join(".gig");
+    let order_id = seed_order_with_workflow(&data_home, OrderStatus::ReadyToDeliver, &gig_dir);
+
+    let output = gig_command(&config_home, &data_home, &state_home)
+        .args(["ls", "--json"])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "ls --json failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let json: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["status"], "ok");
+    assert_eq!(json["order_items"][0]["id"], order_id);
+    assert_eq!(json["order_items"][0]["status"], "ready_to_deliver");
+    assert_eq!(json["order_items"][0]["next_action"], "check_package");
 }
 
 #[test]
@@ -781,11 +862,70 @@ fn quote_mark_sent_json_records_sent_timestamp_without_accepting() {
 }
 
 #[test]
+fn quote_accept_json_rejects_missing_workflow_index_before_promotion() {
+    let (config_home, data_home, state_home) = isolated_homes("quote-accept-missing-index");
+    let project_dir = unique_temp_dir("quote-accept-missing-index-project");
+    let gig_dir = project_dir.join(".gig");
+    std::fs::create_dir_all(&gig_dir).unwrap();
+    std::fs::write(gig_dir.join("JOB.md"), "workflow-created job").unwrap();
+    std::fs::write(gig_dir.join("QUOTE.md"), "workflow-created quote").unwrap();
+    seed_quote_draft(&data_home, "draft-1", "Build a crawler");
+
+    let price = gig_command(&config_home, &data_home, &state_home)
+        .args([
+            "quote",
+            "price",
+            "draft-1",
+            "--min",
+            "100",
+            "--recommended",
+            "150",
+            "--max",
+            "200",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(price.status.success());
+
+    let output = gig_command(&config_home, &data_home, &state_home)
+        .args([
+            "quote",
+            "accept",
+            "draft-1",
+            "--project-dir",
+            project_dir.to_str().unwrap(),
+            "--my-cut-ratio",
+            "0.6",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    let json: Value = serde_json::from_str(&stderr).unwrap();
+    assert_eq!(json["error"]["code"], "missing_workflow_file");
+    assert!(json["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("INDEX.html"));
+
+    let conn = db::open(&data_home.join("gig/gig.db")).unwrap();
+    let draft = quote_drafts::find_by_slug(&conn, "draft-1")
+        .unwrap()
+        .unwrap();
+    assert_eq!(draft.status, QuoteDraftStatus::Quoted);
+    assert_eq!(draft.promoted_order_id, None);
+}
+
+#[test]
 fn quote_accept_json_promotes_order_and_records_workflow_paths_without_generating_files() {
     let (config_home, data_home, state_home) = isolated_homes("quote-accept");
     let project_dir = unique_temp_dir("quote-accept-project");
     let gig_dir = project_dir.join(".gig");
     std::fs::create_dir_all(&gig_dir).unwrap();
+    std::fs::write(gig_dir.join("INDEX.html"), "workflow-created index").unwrap();
     std::fs::write(gig_dir.join("JOB.md"), "workflow-created job").unwrap();
     std::fs::write(gig_dir.join("QUOTE.md"), "workflow-created quote").unwrap();
     seed_quote_draft(&data_home, "draft-1", "Build a crawler");
@@ -954,6 +1094,88 @@ fn plan_approve_json_records_approval_without_creating_acceptance_file() {
 }
 
 #[test]
+fn work_start_json_records_started_timestamp_without_creating_acceptance_file() {
+    let (config_home, data_home, state_home) = isolated_homes("work-start");
+    let project_dir = unique_temp_dir("work-start-project");
+    let gig_dir = project_dir.join(".gig");
+    let plan_dir = gig_dir.join("plan");
+    std::fs::create_dir_all(&plan_dir).unwrap();
+    std::fs::write(plan_dir.join("PLAN.md"), "workflow-created plan").unwrap();
+    std::fs::write(plan_dir.join("PLAN.html"), "workflow-created plan html").unwrap();
+    let order_id = seed_order_with_workflow(&data_home, OrderStatus::Accepted, &gig_dir);
+    let ready = gig_command(&config_home, &data_home, &state_home)
+        .args(["plan", "ready", &order_id.to_string(), "--json"])
+        .output()
+        .unwrap();
+    assert!(ready.status.success());
+    let approved = gig_command(&config_home, &data_home, &state_home)
+        .args(["plan", "approve", &order_id.to_string(), "--json"])
+        .output()
+        .unwrap();
+    assert!(approved.status.success());
+
+    let output = gig_command(&config_home, &data_home, &state_home)
+        .args(["work", "start", &order_id.to_string(), "--json"])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "work start failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let json: Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(json["status"], "in_progress");
+    assert_eq!(json["next_action"], "complete_acceptance");
+    assert!(!gig_dir.join("acceptance/ACCEPTANCE.md").exists());
+
+    let conn = db::open(&data_home.join("gig/gig.db")).unwrap();
+    let order = orders::find_by_id(&conn, order_id).unwrap();
+    assert_eq!(order.status, OrderStatus::InProgress);
+    let workflow = order_workflow::find_by_order_id(&conn, order_id)
+        .unwrap()
+        .unwrap();
+    assert!(workflow.work_started_at.is_some());
+}
+
+#[test]
+fn work_start_json_rejects_order_before_plan_approval() {
+    let (config_home, data_home, state_home) = isolated_homes("work-start-before-approval");
+    let project_dir = unique_temp_dir("work-start-before-approval-project");
+    let gig_dir = project_dir.join(".gig");
+    std::fs::create_dir_all(&gig_dir).unwrap();
+    let order_id = seed_order_with_workflow(&data_home, OrderStatus::Accepted, &gig_dir);
+
+    let output = gig_command(&config_home, &data_home, &state_home)
+        .args(["work", "start", &order_id.to_string(), "--json"])
+        .output()
+        .unwrap();
+
+    assert!(
+        !output.status.success(),
+        "work start unexpectedly succeeded\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    let json: Value = serde_json::from_str(&stderr).unwrap();
+    assert_eq!(json["status"], "error");
+    assert_eq!(json["error"]["code"], "invalid_transition");
+
+    let conn = db::open(&data_home.join("gig/gig.db")).unwrap();
+    let order = orders::find_by_id(&conn, order_id).unwrap();
+    assert_eq!(order.status, OrderStatus::Accepted);
+    let workflow = order_workflow::find_by_order_id(&conn, order_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(workflow.work_started_at, None);
+}
+
+#[test]
 fn plan_reject_json_records_reason_and_returns_order_to_accepted_without_rewriting_plan() {
     let (config_home, data_home, state_home) = isolated_homes("plan-reject");
     let project_dir = unique_temp_dir("plan-reject-project");
@@ -1054,6 +1276,74 @@ fn acceptance_check_json_validates_existing_acceptance_file_without_transition()
 }
 
 #[test]
+fn acceptance_check_json_rejects_incomplete_acceptance_item_without_transition() {
+    let (config_home, data_home, state_home) = isolated_homes("acceptance-check-incomplete");
+    let project_dir = unique_temp_dir("acceptance-check-incomplete-project");
+    let gig_dir = project_dir.join(".gig");
+    let acceptance_dir = gig_dir.join("acceptance");
+    std::fs::create_dir_all(&acceptance_dir).unwrap();
+    std::fs::write(
+        acceptance_dir.join("ACCEPTANCE.md"),
+        "| 验收项 | 方法 | 证据 | 结论 |\n| --- | --- | --- | --- |\n| crawler runs | run command |  | pass |",
+    )
+    .unwrap();
+    let order_id = seed_order_with_workflow(&data_home, OrderStatus::InProgress, &gig_dir);
+
+    let output = gig_command(&config_home, &data_home, &state_home)
+        .args(["acceptance", "check", &order_id.to_string(), "--json"])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    let json: Value = serde_json::from_str(&stderr).unwrap();
+    assert_eq!(json["error"]["code"], "acceptance_incomplete");
+    assert!(json["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("acceptance item incomplete"));
+
+    let conn = db::open(&data_home.join("gig/gig.db")).unwrap();
+    let order = orders::find_by_id(&conn, order_id).unwrap();
+    assert_eq!(order.status, OrderStatus::InProgress);
+}
+
+#[test]
+fn acceptance_check_json_rejects_blocked_acceptance_conclusion_without_transition() {
+    let (config_home, data_home, state_home) = isolated_homes("acceptance-blocked-conclusion");
+    let project_dir = unique_temp_dir("acceptance-blocked-conclusion-project");
+    let gig_dir = project_dir.join(".gig");
+    let acceptance_dir = gig_dir.join("acceptance");
+    std::fs::create_dir_all(&acceptance_dir).unwrap();
+    std::fs::write(
+        acceptance_dir.join("ACCEPTANCE.md"),
+        "| 验收项 | 方法 | 证据 | 结论 |
+| --- | --- | --- | --- |
+| crawler runs | run command | log | blocked |",
+    )
+    .unwrap();
+    let order_id = seed_order_with_workflow(&data_home, OrderStatus::InProgress, &gig_dir);
+
+    let output = gig_command(&config_home, &data_home, &state_home)
+        .args(["acceptance", "check", &order_id.to_string(), "--json"])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    let json: Value = serde_json::from_str(&stderr).unwrap();
+    assert_eq!(json["error"]["code"], "acceptance_incomplete");
+    assert!(json["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("conclusion must be pass-like"));
+
+    let conn = db::open(&data_home.join("gig/gig.db")).unwrap();
+    let order = orders::find_by_id(&conn, order_id).unwrap();
+    assert_eq!(order.status, OrderStatus::InProgress);
+}
+
+#[test]
 fn acceptance_complete_json_sets_ready_to_deliver_without_creating_delivery_files() {
     let (config_home, data_home, state_home) = isolated_homes("acceptance-complete");
     let project_dir = unique_temp_dir("acceptance-complete-project");
@@ -1082,7 +1372,7 @@ fn acceptance_complete_json_sets_ready_to_deliver_without_creating_delivery_file
     let stdout = String::from_utf8(output.stdout).unwrap();
     let json: Value = serde_json::from_str(&stdout).unwrap();
     assert_eq!(json["status"], "ready_to_deliver");
-    assert_eq!(json["next_action"], "send_package");
+    assert_eq!(json["next_action"], "check_package");
     assert!(!gig_dir.join("delivery").exists());
 
     let conn = db::open(&data_home.join("gig/gig.db")).unwrap();
@@ -1122,7 +1412,15 @@ fn write_zip<const N: usize>(path: &Path, entries: [(&str, &str); N]) {
 fn prepare_client_delivery(gig_dir: &Path, with_zip: bool) -> PathBuf {
     let delivery_dir = gig_dir.join("delivery/2026-05-27");
     let client_dir = delivery_dir.join("client");
+    let internal_dir = delivery_dir.join("internal");
     std::fs::create_dir_all(&client_dir).unwrap();
+    std::fs::create_dir_all(&internal_dir).unwrap();
+    std::fs::write(delivery_dir.join("DELIVERY.md"), "delivery source").unwrap();
+    std::fs::write(
+        internal_dir.join("DELIVERY_INTERNAL.html"),
+        "internal delivery html",
+    )
+    .unwrap();
     std::fs::write(client_dir.join("DELIVERY_CLIENT.html"), "client html").unwrap();
     std::fs::write(client_dir.join("DELIVERY_CLIENT.pdf"), "client pdf").unwrap();
     write_client_manifest(

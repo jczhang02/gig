@@ -1,8 +1,10 @@
-use crate::cli::{PackageArgs, PackageCommand, PackageSendArgs};
+use crate::cli::{PackageArgs, PackageCheckArgs, PackageCommand, PackageSendArgs};
 use crate::commands::{build_delivery_uploader, resolve_order};
 use gig_core::config::{Config, Paths};
 use gig_core::models::{DeliveryArtifact, DeliveryPackage, DeliveryPackageStatus};
-use gig_core::services::client_package::{send_client_package, PackageSendInput};
+use gig_core::services::client_package::{
+    check_client_package, send_client_package, PackageCheckInput, PackageSendInput,
+};
 use gig_core::{Error, Result};
 use rusqlite::Connection;
 use serde_json::json;
@@ -11,8 +13,30 @@ use time::OffsetDateTime;
 
 pub fn run(conn: &Connection, args: PackageArgs) -> Result<()> {
     match args.command {
+        PackageCommand::Check(args) => check(conn, args),
         PackageCommand::Send(args) => send(conn, args),
     }
+}
+
+fn check(conn: &Connection, args: PackageCheckArgs) -> Result<()> {
+    let order = resolve_order(Some(args.id_or_slug), conn)?;
+    let checked_at = now_rfc3339();
+    let package = check_client_package(
+        conn,
+        order.id,
+        PackageCheckInput {
+            delivery_date: &args.delivery_date,
+            delivery_dir: &args.delivery_dir,
+            checked_at: &checked_at,
+        },
+    )?;
+
+    if args.json {
+        print_checked_package_json(&package);
+    } else {
+        print_package_human(&package);
+    }
+    Ok(())
 }
 
 fn send(conn: &Connection, args: PackageSendArgs) -> Result<()> {
@@ -57,11 +81,15 @@ fn send(conn: &Connection, args: PackageSendArgs) -> Result<()> {
     Ok(())
 }
 
+fn print_checked_package_json(package: &DeliveryPackage) {
+    println!("{}", package_check_json(package));
+}
+
 fn print_package_json(package: &DeliveryPackage, artifact: &DeliveryArtifact) {
     println!("{}", package_json(package, artifact));
 }
 
-fn package_json(package: &DeliveryPackage, artifact: &DeliveryArtifact) -> serde_json::Value {
+fn package_check_json(package: &DeliveryPackage) -> serde_json::Value {
     json!({
         "status": package.status.as_str(),
         "next_action": next_action(package.status),
@@ -76,8 +104,15 @@ fn package_json(package: &DeliveryPackage, artifact: &DeliveryArtifact) -> serde
             "client_dir": package.client_dir,
             "manifest_path": package.manifest_path,
             "package_path": package.package_path,
-        },
-        "artifact": {
+        }
+    })
+}
+
+fn package_json(package: &DeliveryPackage, artifact: &DeliveryArtifact) -> serde_json::Value {
+    let mut output = package_check_json(package);
+    output.as_object_mut().unwrap().insert(
+        "artifact".to_string(),
+        json!({
             "id": artifact.id,
             "order_id": artifact.order_id,
             "local_path": artifact.local_path,
@@ -85,8 +120,9 @@ fn package_json(package: &DeliveryPackage, artifact: &DeliveryArtifact) -> serde
             "remote_url": artifact.remote_url,
             "expires_at": artifact.expires_at,
             "uploaded_at": artifact.uploaded_at,
-        }
-    })
+        }),
+    );
+    output
 }
 
 fn print_package_human(package: &DeliveryPackage) {

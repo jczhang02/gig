@@ -50,9 +50,14 @@ fn classify_invalid_error(message: &str) -> &'static str {
         "invalid_project_type"
     } else if lower.contains("unsafe package path") {
         "unsafe_package_path"
-    } else if lower.contains("client-package.zip") || lower.contains("package artifact") {
+    } else if lower.contains("client-package.zip")
+        || lower.contains("package artifact")
+        || lower.contains("package zip entry")
+    {
         "missing_package_artifact"
-    } else if lower.contains("acceptance headings missing") {
+    } else if lower.contains("acceptance headings missing")
+        || lower.contains("acceptance item incomplete")
+    {
         "acceptance_incomplete"
     } else if lower.contains("missing order_workflow") || lower.contains("missing expected") {
         "legacy_workflow_metadata_missing"
@@ -68,5 +73,17 @@ fn classify_invalid_error(message: &str) -> &'static str {
         "invalid_transition"
     } else {
         "missing_required_field"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn package_zip_entry_errors_are_package_artifact_errors() {
+        let error = Error::Invalid("missing package zip entry: DELIVERY_CLIENT.html".to_string());
+
+        assert_eq!(workflow_error_code(&error), "missing_package_artifact");
     }
 }
