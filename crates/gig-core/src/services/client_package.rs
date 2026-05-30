@@ -866,7 +866,6 @@ mod tests {
         let order_id = ready_order(&conn);
         let root = tempfile::tempdir().unwrap();
         let delivery_dir = delivery_layout(root.path());
-        let client_dir = delivery_dir.join("client");
         let export_dir = delivery_dir.join("export");
         let package_path = export_dir.join("client-package.zip");
         fs::create_dir_all(&export_dir).unwrap();
@@ -945,7 +944,6 @@ mod tests {
         let order_id = ready_order(&conn);
         let root = tempfile::tempdir().unwrap();
         let delivery_dir = delivery_layout(root.path());
-        let client_dir = delivery_dir.join("client");
         let export_dir = delivery_dir.join("export");
         let package_path = export_dir.join("client-package.zip");
         fs::create_dir_all(&export_dir).unwrap();
@@ -997,7 +995,6 @@ mod tests {
         let order_id = ready_order(&conn);
         let root = tempfile::tempdir().unwrap();
         let delivery_dir = delivery_layout(root.path());
-        let client_dir = delivery_dir.join("client");
         let export_dir = delivery_dir.join("export");
         let package_path = export_dir.join("client-package.zip");
         fs::create_dir_all(&export_dir).unwrap();
@@ -1071,7 +1068,6 @@ mod tests {
         let order_id = ready_order(&conn);
         let root = tempfile::tempdir().unwrap();
         let delivery_dir = delivery_layout(root.path());
-        let client_dir = delivery_dir.join("client");
         let export_dir = delivery_dir.join("export");
         let package_path = export_dir.join("client-package.zip");
         fs::create_dir_all(&export_dir).unwrap();
@@ -1127,7 +1123,6 @@ mod tests {
         let order_id = ready_order(&conn);
         let root = tempfile::tempdir().unwrap();
         let delivery_dir = delivery_layout(root.path());
-        let client_dir = delivery_dir.join("client");
         let export_dir = delivery_dir.join("export");
         let package_path = export_dir.join("client-package.zip");
         fs::create_dir_all(&export_dir).unwrap();
@@ -1306,7 +1301,6 @@ mod tests {
         let order_id = ready_order(&conn);
         let root = tempfile::tempdir().unwrap();
         let delivery_dir = delivery_layout(root.path());
-        let client_dir = delivery_dir.join("client");
         let export_dir = delivery_dir.join("export");
         let outside_export_dir = root.path().join("outside-export");
         fs::create_dir_all(&outside_export_dir).unwrap();
@@ -1347,7 +1341,6 @@ mod tests {
         let order_id = ready_order(&conn);
         let root = tempfile::tempdir().unwrap();
         let delivery_dir = delivery_layout(root.path());
-        let client_dir = delivery_dir.join("client");
         let export_dir = delivery_dir.join("export");
         fs::create_dir_all(&export_dir).unwrap();
         write_required_delivery_docs(&delivery_dir);
@@ -1387,7 +1380,6 @@ mod tests {
         let order_id = ready_order(&conn);
         let root = tempfile::tempdir().unwrap();
         let delivery_dir = delivery_layout(root.path());
-        let client_dir = delivery_dir.join("client");
         let export_dir = delivery_dir.join("export");
         fs::create_dir_all(&export_dir).unwrap();
         write_required_delivery_docs(&delivery_dir);
@@ -1427,7 +1419,6 @@ mod tests {
         let order_id = ready_order(&conn);
         let root = tempfile::tempdir().unwrap();
         let delivery_dir = delivery_layout(root.path());
-        let client_dir = delivery_dir.join("client");
         let export_dir = delivery_dir.join("export");
         fs::create_dir_all(&export_dir).unwrap();
         write_required_delivery_docs(&delivery_dir);

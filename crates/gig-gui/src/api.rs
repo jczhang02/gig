@@ -226,7 +226,9 @@ async fn dashboard_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Json<DashboardResponse>, Response> {
-    require_auth(&headers, &state)?;
+    if let Some(response) = unauthorized_response(&headers, &state) {
+        return Err(response);
+    }
     let paths = state.paths.clone();
     let now = OffsetDateTime::now_utc().unix_timestamp();
     let dashboard = run_blocking(move || {
@@ -241,7 +243,9 @@ async fn orders_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Json<OrdersResponse>, Response> {
-    require_auth(&headers, &state)?;
+    if let Some(response) = unauthorized_response(&headers, &state) {
+        return Err(response);
+    }
     let paths = state.paths.clone();
     let orders = run_blocking(move || {
         let conn = gig_core::db::open(&paths.db_file).map_err(|err| err.to_string())?;
@@ -260,7 +264,9 @@ async fn order_handler(
     headers: HeaderMap,
     AxumPath(id): AxumPath<i64>,
 ) -> Result<Json<OrderResponse>, Response> {
-    require_auth(&headers, &state)?;
+    if let Some(response) = unauthorized_response(&headers, &state) {
+        return Err(response);
+    }
     let paths = state.paths.clone();
     let order = run_blocking(move || {
         let conn = gig_core::db::open(&paths.db_file).map_err(|err| err.to_string())?;
@@ -275,15 +281,17 @@ async fn config_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Json<RedactedConfigResponse>, Response> {
-    require_auth(&headers, &state)?;
+    if let Some(response) = unauthorized_response(&headers, &state) {
+        return Err(response);
+    }
     Ok(Json(redacted_config(&state.paths, &state.config)))
 }
 
-fn require_auth(headers: &HeaderMap, state: &AppState) -> Result<(), Response> {
+fn unauthorized_response(headers: &HeaderMap, state: &AppState) -> Option<Response> {
     if token_is_valid(headers, &state.token) {
-        Ok(())
+        None
     } else {
-        Err(api_error(
+        Some(api_error(
             StatusCode::UNAUTHORIZED,
             "unauthorized",
             "missing or invalid bearer token",

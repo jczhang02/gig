@@ -6,21 +6,12 @@ use rand::{thread_rng, Rng};
 use std::net::{Ipv4Addr, SocketAddr};
 use tower_http::trace::TraceLayer;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct GuiOptions {
     /// Localhost port. Use 0 to let the OS assign a free port.
     pub port: u16,
     /// Print the URL without launching a browser.
     pub no_open: bool,
-}
-
-impl Default for GuiOptions {
-    fn default() -> Self {
-        Self {
-            port: 0,
-            no_open: false,
-        }
-    }
 }
 
 pub fn run(options: GuiOptions) -> Result<()> {
