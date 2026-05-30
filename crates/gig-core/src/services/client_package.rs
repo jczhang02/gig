@@ -49,6 +49,7 @@ pub fn send_client_package(
     ensure_package_send_status(order.status)?;
     let paths = validate_package_input(input.delivery_date, input.delivery_dir)?;
     let package_path = path_string(&paths.package_path);
+    require_validated_package_for_send(conn, order_id, input.delivery_date, &package_path)?;
     let sent_at = parse_rfc3339(input.sent_at)?;
     let uploaded_at = sent_at.unix_timestamp();
     let delivery_attempt = next_delivery_attempt(conn, order_id, input.delivery_date)?;
@@ -93,6 +94,29 @@ pub fn send_client_package(
     tx.commit()?;
 
     Ok(PackageSendResult { package, artifact })
+}
+
+fn require_validated_package_for_send(
+    conn: &Connection,
+    order_id: i64,
+    delivery_date: &str,
+    package_path: &str,
+) -> Result<()> {
+    let has_validated_package = delivery_packages::list_for_order(conn, order_id)?
+        .into_iter()
+        .any(|package| {
+            package.status == DeliveryPackageStatus::Validated
+                && package.delivery_date == delivery_date
+                && package.package_path.as_deref() == Some(package_path)
+        });
+
+    if has_validated_package {
+        return Ok(());
+    }
+
+    Err(Error::Invalid(format!(
+        "client package must be validated before send: run gig package check for {delivery_date}"
+    )))
 }
 
 pub fn check_client_package(
@@ -212,6 +236,12 @@ fn validate_package_contents(
         client_dir,
         "client dir",
     )?;
+    require_delivery_documents(
+        delivery_dir,
+        client_dir,
+        &canonical_delivery_dir,
+        &canonical_client_dir,
+    )?;
     require_workflow_file_inside_dir(&canonical_delivery_dir, manifest_path, "package manifest")?;
     let manifest = read_manifest(manifest_path)?;
     validate_manifest(delivery_date, &manifest)?;
@@ -227,6 +257,35 @@ fn validate_package_contents(
 
     require_workflow_file_inside_dir(&canonical_delivery_dir, package_path, "package artifact")?;
     validate_zip_package(package_path, &manifest.client_files)
+}
+
+fn require_delivery_documents(
+    delivery_dir: &Path,
+    client_dir: &Path,
+    canonical_delivery_dir: &Path,
+    canonical_client_dir: &Path,
+) -> Result<()> {
+    require_workflow_file_inside_dir(
+        canonical_delivery_dir,
+        &delivery_dir.join("DELIVERY.md"),
+        "delivery document",
+    )?;
+    require_workflow_file_inside_dir(
+        canonical_delivery_dir,
+        &delivery_dir.join("internal").join("DELIVERY_INTERNAL.html"),
+        "internal delivery document",
+    )?;
+    require_client_file_inside_dir(
+        canonical_client_dir,
+        &client_dir.join("DELIVERY_CLIENT.html"),
+        "client delivery document",
+    )?;
+    require_client_file_inside_dir(
+        canonical_client_dir,
+        &client_dir.join("DELIVERY_CLIENT.pdf"),
+        "client delivery document",
+    )?;
+    Ok(())
 }
 
 fn canonicalize_workflow_path(path: &Path, label: &str) -> Result<PathBuf> {
@@ -431,7 +490,9 @@ fn path_string(path: &Path) -> String {
 fn next_delivery_attempt(conn: &Connection, order_id: i64, delivery_date: &str) -> Result<usize> {
     let attempts = delivery_packages::list_for_order(conn, order_id)?
         .iter()
-        .filter(|package| package.delivery_date == delivery_date)
+        .filter(|package| {
+            package.delivery_date == delivery_date && package.status == DeliveryPackageStatus::Sent
+        })
         .count();
     Ok(attempts)
 }
@@ -601,6 +662,21 @@ mod tests {
             .join("2026-05-27")
     }
 
+    fn write_required_delivery_docs(delivery_dir: &Path) {
+        let client_dir = delivery_dir.join("client");
+        let internal_dir = delivery_dir.join("internal");
+        fs::create_dir_all(&client_dir).unwrap();
+        fs::create_dir_all(&internal_dir).unwrap();
+        fs::write(delivery_dir.join("DELIVERY.md"), "delivery source").unwrap();
+        fs::write(
+            internal_dir.join("DELIVERY_INTERNAL.html"),
+            "internal delivery html",
+        )
+        .unwrap();
+        fs::write(client_dir.join("DELIVERY_CLIENT.html"), "client html").unwrap();
+        fs::write(client_dir.join("DELIVERY_CLIENT.pdf"), "client pdf").unwrap();
+    }
+
     fn write_zip<const N: usize>(path: &Path, entries: [(&str, &str); N]) {
         let file = fs::File::create(path).unwrap();
         let mut zip = zip::ZipWriter::new(file);
@@ -613,6 +689,23 @@ mod tests {
         zip.finish().unwrap();
     }
 
+    fn validate_delivery_package(
+        conn: &rusqlite::Connection,
+        order_id: i64,
+        delivery_dir: &Path,
+    ) -> DeliveryPackage {
+        check_client_package(
+            conn,
+            order_id,
+            PackageCheckInput {
+                delivery_date: "2026-05-27",
+                delivery_dir,
+                checked_at: "2026-05-27T06:00:00Z",
+            },
+        )
+        .unwrap()
+    }
+
     #[test]
     fn check_client_package_validates_manifest_and_records_existing_zip() {
         let conn = open_in_memory().unwrap();
@@ -621,10 +714,8 @@ mod tests {
         let delivery_dir = delivery_layout(root.path());
         let client_dir = delivery_dir.join("client");
         let export_dir = delivery_dir.join("export");
-        fs::create_dir_all(&client_dir).unwrap();
         fs::create_dir_all(&export_dir).unwrap();
-        fs::write(client_dir.join("DELIVERY_CLIENT.html"), "client html").unwrap();
-        fs::write(client_dir.join("DELIVERY_CLIENT.pdf"), "client pdf").unwrap();
+        write_required_delivery_docs(&delivery_dir);
         write_zip(
             &export_dir.join("client-package.zip"),
             [
@@ -671,6 +762,105 @@ mod tests {
     }
 
     #[test]
+    fn check_client_package_rejects_missing_required_delivery_docs_without_recording() {
+        let cases = [
+            ("DELIVERY.md", "DELIVERY.md"),
+            ("DELIVERY_INTERNAL.html", "internal/DELIVERY_INTERNAL.html"),
+            ("DELIVERY_CLIENT.html", "client/DELIVERY_CLIENT.html"),
+            ("DELIVERY_CLIENT.pdf", "client/DELIVERY_CLIENT.pdf"),
+        ];
+
+        for (file_name, relative_path) in cases {
+            let conn = open_in_memory().unwrap();
+            let order_id = ready_order(&conn);
+            let root = tempfile::tempdir().unwrap();
+            let delivery_dir = delivery_layout(root.path());
+            let export_dir = delivery_dir.join("export");
+            fs::create_dir_all(&export_dir).unwrap();
+            write_required_delivery_docs(&delivery_dir);
+            write_zip(
+                &export_dir.join("client-package.zip"),
+                [
+                    ("DELIVERY_CLIENT.html", "client html"),
+                    ("DELIVERY_CLIENT.pdf", "client pdf"),
+                ],
+            );
+            write_manifest(
+                &delivery_dir,
+                ["DELIVERY_CLIENT.html", "DELIVERY_CLIENT.pdf"],
+            );
+            fs::remove_file(delivery_dir.join(relative_path)).unwrap();
+
+            let err = check_client_package(
+                &conn,
+                order_id,
+                PackageCheckInput {
+                    delivery_date: "2026-05-27",
+                    delivery_dir: &delivery_dir,
+                    checked_at: "2026-05-27T06:00:00Z",
+                },
+            )
+            .unwrap_err();
+
+            assert!(
+                err.to_string().contains(file_name),
+                "expected missing {file_name}, got {err}"
+            );
+            assert!(delivery_packages::list_for_order(&conn, order_id)
+                .unwrap()
+                .is_empty());
+        }
+    }
+
+    #[test]
+    fn send_client_package_requires_validated_package_before_upload() {
+        let conn = open_in_memory().unwrap();
+        let order_id = ready_order(&conn);
+        let root = tempfile::tempdir().unwrap();
+        let delivery_dir = delivery_layout(root.path());
+        let export_dir = delivery_dir.join("export");
+        fs::create_dir_all(&export_dir).unwrap();
+        write_required_delivery_docs(&delivery_dir);
+        write_zip(
+            &export_dir.join("client-package.zip"),
+            [
+                ("DELIVERY_CLIENT.html", "client html"),
+                ("DELIVERY_CLIENT.pdf", "client pdf"),
+            ],
+        );
+        write_manifest(
+            &delivery_dir,
+            ["DELIVERY_CLIENT.html", "DELIVERY_CLIENT.pdf"],
+        );
+        let uploader = RecordingUploader::default();
+
+        let err = send_client_package(
+            &conn,
+            order_id,
+            PackageSendInput {
+                delivery_date: "2026-05-27",
+                delivery_dir: &delivery_dir,
+                sent_at: "2026-05-27T07:00:00Z",
+            },
+            &uploader,
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("gig package check"));
+        assert!(uploader.uploaded_paths().is_empty());
+        assert!(delivery_packages::list_for_order(&conn, order_id)
+            .unwrap()
+            .is_empty());
+        assert!(delivery_artifacts::list_for_order(&conn, order_id)
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            orders::find_by_id(&conn, order_id).unwrap().status,
+            OrderStatus::ReadyToDeliver
+        );
+    }
+
+    #[test]
     fn send_client_package_uploads_zip_records_artifact_and_delivers_order() {
         let conn = open_in_memory().unwrap();
         let order_id = ready_order(&conn);
@@ -679,11 +869,20 @@ mod tests {
         let client_dir = delivery_dir.join("client");
         let export_dir = delivery_dir.join("export");
         let package_path = export_dir.join("client-package.zip");
-        fs::create_dir_all(&client_dir).unwrap();
         fs::create_dir_all(&export_dir).unwrap();
-        fs::write(client_dir.join("DELIVERY_CLIENT.html"), "client html").unwrap();
-        write_zip(&package_path, [("DELIVERY_CLIENT.html", "client html")]);
-        write_manifest(&delivery_dir, ["DELIVERY_CLIENT.html"]);
+        write_required_delivery_docs(&delivery_dir);
+        write_zip(
+            &package_path,
+            [
+                ("DELIVERY_CLIENT.html", "client html"),
+                ("DELIVERY_CLIENT.pdf", "client pdf"),
+            ],
+        );
+        write_manifest(
+            &delivery_dir,
+            ["DELIVERY_CLIENT.html", "DELIVERY_CLIENT.pdf"],
+        );
+        let validated = validate_delivery_package(&conn, order_id, &delivery_dir);
         let uploader = RecordingUploader::default();
 
         let sent = send_client_package(
@@ -732,7 +931,7 @@ mod tests {
         );
         assert_eq!(
             delivery_packages::list_for_order(&conn, order_id).unwrap(),
-            vec![sent.package]
+            vec![sent.package, validated]
         );
         assert_eq!(
             delivery_artifacts::list_for_order(&conn, order_id).unwrap(),
@@ -749,11 +948,20 @@ mod tests {
         let client_dir = delivery_dir.join("client");
         let export_dir = delivery_dir.join("export");
         let package_path = export_dir.join("client-package.zip");
-        fs::create_dir_all(&client_dir).unwrap();
         fs::create_dir_all(&export_dir).unwrap();
-        fs::write(client_dir.join("DELIVERY_CLIENT.html"), "client html").unwrap();
-        write_zip(&package_path, [("DELIVERY_CLIENT.html", "client html")]);
-        write_manifest(&delivery_dir, ["DELIVERY_CLIENT.html"]);
+        write_required_delivery_docs(&delivery_dir);
+        write_zip(
+            &package_path,
+            [
+                ("DELIVERY_CLIENT.html", "client html"),
+                ("DELIVERY_CLIENT.pdf", "client pdf"),
+            ],
+        );
+        write_manifest(
+            &delivery_dir,
+            ["DELIVERY_CLIENT.html", "DELIVERY_CLIENT.pdf"],
+        );
+        validate_delivery_package(&conn, order_id, &delivery_dir);
         let uploader: Box<dyn Uploader> = Box::new(ShorteningUploader::new(
             Box::new(RecordingUploader::default()),
             Box::new(StaticShortLinker),
@@ -792,11 +1000,20 @@ mod tests {
         let client_dir = delivery_dir.join("client");
         let export_dir = delivery_dir.join("export");
         let package_path = export_dir.join("client-package.zip");
-        fs::create_dir_all(&client_dir).unwrap();
         fs::create_dir_all(&export_dir).unwrap();
-        fs::write(client_dir.join("DELIVERY_CLIENT.html"), "client html").unwrap();
-        write_zip(&package_path, [("DELIVERY_CLIENT.html", "client html")]);
-        write_manifest(&delivery_dir, ["DELIVERY_CLIENT.html"]);
+        write_required_delivery_docs(&delivery_dir);
+        write_zip(
+            &package_path,
+            [
+                ("DELIVERY_CLIENT.html", "client html"),
+                ("DELIVERY_CLIENT.pdf", "client pdf"),
+            ],
+        );
+        write_manifest(
+            &delivery_dir,
+            ["DELIVERY_CLIENT.html", "DELIVERY_CLIENT.pdf"],
+        );
+        validate_delivery_package(&conn, order_id, &delivery_dir);
         let uploader = RecordingUploader::default();
 
         let first_sent = send_client_package(
@@ -857,11 +1074,20 @@ mod tests {
         let client_dir = delivery_dir.join("client");
         let export_dir = delivery_dir.join("export");
         let package_path = export_dir.join("client-package.zip");
-        fs::create_dir_all(&client_dir).unwrap();
         fs::create_dir_all(&export_dir).unwrap();
-        fs::write(client_dir.join("DELIVERY_CLIENT.html"), "client html").unwrap();
-        write_zip(&package_path, [("DELIVERY_CLIENT.html", "client html")]);
-        write_manifest(&delivery_dir, ["DELIVERY_CLIENT.html"]);
+        write_required_delivery_docs(&delivery_dir);
+        write_zip(
+            &package_path,
+            [
+                ("DELIVERY_CLIENT.html", "client html"),
+                ("DELIVERY_CLIENT.pdf", "client pdf"),
+            ],
+        );
+        write_manifest(
+            &delivery_dir,
+            ["DELIVERY_CLIENT.html", "DELIVERY_CLIENT.pdf"],
+        );
+        validate_delivery_package(&conn, order_id, &delivery_dir);
         let uploader = RecordingUploader::default();
 
         send_client_package(
@@ -904,11 +1130,20 @@ mod tests {
         let client_dir = delivery_dir.join("client");
         let export_dir = delivery_dir.join("export");
         let package_path = export_dir.join("client-package.zip");
-        fs::create_dir_all(&client_dir).unwrap();
         fs::create_dir_all(&export_dir).unwrap();
-        fs::write(client_dir.join("DELIVERY_CLIENT.html"), "client html").unwrap();
-        write_zip(&package_path, [("DELIVERY_CLIENT.html", "client html")]);
-        write_manifest(&delivery_dir, ["DELIVERY_CLIENT.html"]);
+        write_required_delivery_docs(&delivery_dir);
+        write_zip(
+            &package_path,
+            [
+                ("DELIVERY_CLIENT.html", "client html"),
+                ("DELIVERY_CLIENT.pdf", "client pdf"),
+            ],
+        );
+        write_manifest(
+            &delivery_dir,
+            ["DELIVERY_CLIENT.html", "DELIVERY_CLIENT.pdf"],
+        );
+        let validated = validate_delivery_package(&conn, order_id, &delivery_dir);
         let uploader = FailingUploader::default();
 
         let err = send_client_package(
@@ -925,9 +1160,10 @@ mod tests {
 
         assert!(err.to_string().contains("upload failed"));
         assert_eq!(uploader.uploaded_paths(), vec![package_path]);
-        assert!(delivery_packages::list_for_order(&conn, order_id)
-            .unwrap()
-            .is_empty());
+        assert_eq!(
+            delivery_packages::list_for_order(&conn, order_id).unwrap(),
+            vec![validated]
+        );
         assert!(delivery_artifacts::list_for_order(&conn, order_id)
             .unwrap()
             .is_empty());
@@ -943,9 +1179,7 @@ mod tests {
         let order_id = ready_order(&conn);
         let root = tempfile::tempdir().unwrap();
         let delivery_dir = delivery_layout(root.path());
-        let client_dir = delivery_dir.join("client");
-        fs::create_dir_all(&client_dir).unwrap();
-        fs::write(client_dir.join("DELIVERY_CLIENT.html"), "client html").unwrap();
+        write_required_delivery_docs(&delivery_dir);
         write_manifest(
             &delivery_dir,
             [
@@ -986,13 +1220,27 @@ mod tests {
         let export_dir = delivery_dir.join("export");
         fs::create_dir_all(&client_dir).unwrap();
         fs::create_dir_all(&export_dir).unwrap();
+        fs::create_dir_all(delivery_dir.join("internal")).unwrap();
+        fs::write(delivery_dir.join("DELIVERY.md"), "delivery source").unwrap();
+        fs::write(
+            delivery_dir.join("internal").join("DELIVERY_INTERNAL.html"),
+            "internal delivery html",
+        )
+        .unwrap();
+        fs::write(client_dir.join("DELIVERY_CLIENT.html"), "client html").unwrap();
         let secret = root.path().join("secret.pdf");
         fs::write(&secret, "not a package file").unwrap();
         std::os::unix::fs::symlink(&secret, client_dir.join("DELIVERY_CLIENT.pdf")).unwrap();
-        write_manifest(&delivery_dir, ["DELIVERY_CLIENT.pdf"]);
+        write_manifest(
+            &delivery_dir,
+            ["DELIVERY_CLIENT.html", "DELIVERY_CLIENT.pdf"],
+        );
         write_zip(
             &export_dir.join("client-package.zip"),
-            [("DELIVERY_CLIENT.pdf", "client pdf")],
+            [
+                ("DELIVERY_CLIENT.html", "client html"),
+                ("DELIVERY_CLIENT.pdf", "client pdf"),
+            ],
         );
 
         let err = check_client_package(
@@ -1061,14 +1309,19 @@ mod tests {
         let client_dir = delivery_dir.join("client");
         let export_dir = delivery_dir.join("export");
         let outside_export_dir = root.path().join("outside-export");
-        fs::create_dir_all(&client_dir).unwrap();
         fs::create_dir_all(&outside_export_dir).unwrap();
-        fs::write(client_dir.join("DELIVERY_CLIENT.html"), "client html").unwrap();
+        write_required_delivery_docs(&delivery_dir);
         std::os::unix::fs::symlink(&outside_export_dir, &export_dir).unwrap();
-        write_manifest(&delivery_dir, ["DELIVERY_CLIENT.html"]);
+        write_manifest(
+            &delivery_dir,
+            ["DELIVERY_CLIENT.html", "DELIVERY_CLIENT.pdf"],
+        );
         write_zip(
             &outside_export_dir.join("client-package.zip"),
-            [("DELIVERY_CLIENT.html", "client html")],
+            [
+                ("DELIVERY_CLIENT.html", "client html"),
+                ("DELIVERY_CLIENT.pdf", "client pdf"),
+            ],
         );
 
         let err = check_client_package(
@@ -1096,14 +1349,17 @@ mod tests {
         let delivery_dir = delivery_layout(root.path());
         let client_dir = delivery_dir.join("client");
         let export_dir = delivery_dir.join("export");
-        fs::create_dir_all(&client_dir).unwrap();
         fs::create_dir_all(&export_dir).unwrap();
-        fs::write(client_dir.join("DELIVERY_CLIENT.html"), "client html").unwrap();
-        write_manifest(&delivery_dir, ["DELIVERY_CLIENT.html"]);
+        write_required_delivery_docs(&delivery_dir);
+        write_manifest(
+            &delivery_dir,
+            ["DELIVERY_CLIENT.html", "DELIVERY_CLIENT.pdf"],
+        );
         write_zip(
             &export_dir.join("client-package.zip"),
             [
                 ("DELIVERY_CLIENT.html", "client html"),
+                ("DELIVERY_CLIENT.pdf", "client pdf"),
                 ("../secret.txt", "secret"),
             ],
         );
@@ -1133,14 +1389,17 @@ mod tests {
         let delivery_dir = delivery_layout(root.path());
         let client_dir = delivery_dir.join("client");
         let export_dir = delivery_dir.join("export");
-        fs::create_dir_all(&client_dir).unwrap();
         fs::create_dir_all(&export_dir).unwrap();
-        fs::write(client_dir.join("DELIVERY_CLIENT.html"), "client html").unwrap();
-        write_manifest(&delivery_dir, ["DELIVERY_CLIENT.html"]);
+        write_required_delivery_docs(&delivery_dir);
+        write_manifest(
+            &delivery_dir,
+            ["DELIVERY_CLIENT.html", "DELIVERY_CLIENT.pdf"],
+        );
         write_zip(
             &export_dir.join("client-package.zip"),
             [
                 ("DELIVERY_CLIENT.html", "client html"),
+                ("DELIVERY_CLIENT.pdf", "client pdf"),
                 ("secret.txt", "secret"),
             ],
         );
@@ -1170,14 +1429,17 @@ mod tests {
         let delivery_dir = delivery_layout(root.path());
         let client_dir = delivery_dir.join("client");
         let export_dir = delivery_dir.join("export");
-        fs::create_dir_all(&client_dir).unwrap();
         fs::create_dir_all(&export_dir).unwrap();
-        fs::write(client_dir.join("DELIVERY_CLIENT.html"), "client html").unwrap();
-        write_manifest(&delivery_dir, ["DELIVERY_CLIENT.html"]);
+        write_required_delivery_docs(&delivery_dir);
+        write_manifest(
+            &delivery_dir,
+            ["DELIVERY_CLIENT.html", "DELIVERY_CLIENT.pdf"],
+        );
         write_zip(
             &export_dir.join("client-package.zip"),
             [
                 ("DELIVERY_CLIENT.html", "client html"),
+                ("DELIVERY_CLIENT.pdf", "client pdf"),
                 (r"internal\notes.md", "secret"),
             ],
         );
@@ -1205,11 +1467,12 @@ mod tests {
         let order_id = ready_order(&conn);
         let root = tempfile::tempdir().unwrap();
         let delivery_dir = delivery_layout(root.path());
-        let client_dir = delivery_dir.join("client");
         let package_path = delivery_dir.join("export").join("client-package.zip");
-        fs::create_dir_all(&client_dir).unwrap();
-        fs::write(client_dir.join("DELIVERY_CLIENT.html"), "client html").unwrap();
-        write_manifest(&delivery_dir, ["DELIVERY_CLIENT.html"]);
+        write_required_delivery_docs(&delivery_dir);
+        write_manifest(
+            &delivery_dir,
+            ["DELIVERY_CLIENT.html", "DELIVERY_CLIENT.pdf"],
+        );
 
         let err = check_client_package(
             &conn,

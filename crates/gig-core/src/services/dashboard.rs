@@ -1,8 +1,10 @@
 //! Dashboard service: build the "today's focus" view for `gig ls`.
 
-use crate::models::{Order, OrderStatus, OrderWorkflow, QuoteDraft, QuoteDraftStatus};
+use crate::models::{
+    DeliveryPackageStatus, Order, OrderStatus, OrderWorkflow, QuoteDraft, QuoteDraftStatus,
+};
 use crate::repo::orders::{list, ListFilter};
-use crate::repo::{order_workflow, quote_drafts};
+use crate::repo::{delivery_packages, order_workflow, quote_drafts};
 use crate::{Error, Result};
 use rusqlite::Connection;
 
@@ -107,7 +109,7 @@ pub fn build_dashboard(conn: &Connection, now: i64) -> Result<Dashboard> {
         // Alert logic.
         let alert = compute_alert(order, conn, now)?;
         let workflow = order_workflow::find_by_order_id(conn, order.id)?;
-        let next_action = order_next_action(order, workflow.as_ref());
+        let next_action = order_next_action(conn, order, workflow.as_ref())?;
 
         // Include in focus list if it has an alert or is in an active state.
         let show = alert.is_some()
@@ -159,7 +161,11 @@ pub fn quote_next_action(draft: &QuoteDraft) -> Option<&'static str> {
     }
 }
 
-pub fn order_next_action(order: &Order, workflow: Option<&OrderWorkflow>) -> &'static str {
+pub fn order_next_action(
+    conn: &Connection,
+    order: &Order,
+    workflow: Option<&OrderWorkflow>,
+) -> Result<&'static str> {
     let workflow_required = matches!(
         order.status,
         OrderStatus::Accepted
@@ -169,22 +175,34 @@ pub fn order_next_action(order: &Order, workflow: Option<&OrderWorkflow>) -> &'s
             | OrderStatus::ReadyToDeliver
     );
     if workflow_required && workflow.is_none() {
-        return "legacy_workflow_metadata_missing";
+        return Ok("legacy_workflow_metadata_missing");
     }
 
-    match order.status {
+    let next_action = match order.status {
         OrderStatus::Lead => "qualify_lead",
         OrderStatus::Negotiating => "resolve_quote",
         OrderStatus::Accepted => "prepare_plan",
         OrderStatus::PlanReady => "approve_plan",
         OrderStatus::PlanApproved => "start_work",
         OrderStatus::InProgress => "complete_acceptance",
-        OrderStatus::ReadyToDeliver => "send_package",
+        OrderStatus::ReadyToDeliver => ready_to_deliver_next_action(conn, order.id)?,
         OrderStatus::Delivered => "collect_payment",
         OrderStatus::Revision => "complete_revision",
         OrderStatus::Paid => "archive_order",
         OrderStatus::Archived | OrderStatus::Cancelled => "none",
-    }
+    };
+    Ok(next_action)
+}
+
+fn ready_to_deliver_next_action(conn: &Connection, order_id: i64) -> Result<&'static str> {
+    let has_validated_package = delivery_packages::list_for_order(conn, order_id)?
+        .into_iter()
+        .any(|package| package.status == DeliveryPackageStatus::Validated);
+    Ok(if has_validated_package {
+        "send_package"
+    } else {
+        "check_package"
+    })
 }
 
 fn compute_alert(order: &Order, conn: &Connection, now: i64) -> Result<Option<String>> {
