@@ -70,4 +70,4 @@ auth_dashboard=200
 
 ## Next phase
 
-Phase C should introduce executable read actions through the shared action layer, starting with `dashboard.get`, `orders.list`, and `orders.get_detail`. Keep the CLI output unchanged and route the GUI read endpoints through the same core execution path only after tests pin the existing JSON/human behavior.
+Completed by `docs/superpowers/plans/2026-05-30-gig-gui-phase-c-pre-gui-backend.md`: executable read actions now cover `dashboard.get`, `orders.list`, `orders.get_detail`, and `config.redacted.get`; existing GUI read endpoints route through the same core action path while CLI behavior remains unchanged.

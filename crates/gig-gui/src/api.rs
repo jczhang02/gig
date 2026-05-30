@@ -1,23 +1,25 @@
 use crate::auth::token_is_valid;
+use axum::body::Bytes;
 use axum::extract::{Path as AxumPath, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{Html, IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::{Json, Router};
-use gig_core::actions::{self, ActionMeta};
+use gig_core::actions::{
+    self, execute_read_action, is_read_action, preflight_action, ActionContext, ActionMeta,
+    ActionPreflight, DashboardResponse, OrderResponse, OrdersResponse, ReadActionInput,
+    ReadActionOutput, RedactedConfigResponse,
+};
 use gig_core::config::{Config, Paths};
-use gig_core::models::{Order, OrderWorkflow, QuoteDraft};
-use gig_core::repo::orders::ListFilter;
-use gig_core::repo::{order_workflow, orders};
-use gig_core::services::dashboard::{self, Dashboard, DashboardItem, DashboardQuoteItem};
-use serde::Serialize;
-use std::collections::BTreeMap;
+use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 use time::OffsetDateTime;
 
 #[derive(Clone)]
 pub struct AppState {
     pub paths: Paths,
     pub config: Config,
+    pub cwd: PathBuf,
     pub token: String,
 }
 
@@ -39,166 +41,17 @@ struct HealthResponse {
     app: &'static str,
 }
 
-#[derive(Debug, Serialize)]
-struct DashboardResponse {
-    summary: DashboardSummaryView,
-    quotes: Vec<QuoteDashboardView>,
-    focus: Vec<DashboardOrderView>,
+#[derive(Debug, Deserialize)]
+struct ExecuteActionRequest {
+    #[serde(default)]
+    input: ReadActionInput,
 }
 
 #[derive(Debug, Serialize)]
-struct DashboardSummaryView {
-    this_month_income: i64,
-    orders_count: usize,
-    pending_count: usize,
-}
-
-#[derive(Debug, Serialize)]
-struct QuoteDashboardView {
-    draft: QuoteDraftView,
-    next_action: &'static str,
-}
-
-#[derive(Debug, Serialize)]
-struct DashboardOrderView {
-    order: OrderView,
-    workflow: Option<WorkflowView>,
-    next_action: &'static str,
-    alert: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-struct OrdersResponse {
-    orders: Vec<OrderWithWorkflowView>,
-}
-
-#[derive(Debug, Serialize)]
-struct OrderResponse {
-    order: OrderWithWorkflowView,
-}
-
-#[derive(Debug, Serialize)]
-struct OrderWithWorkflowView {
-    order: OrderView,
-    workflow: Option<WorkflowView>,
-    next_action: &'static str,
-}
-
-#[derive(Debug, Serialize)]
-struct OrderView {
-    id: i64,
-    slug: Option<String>,
-    title: String,
-    status: String,
-    project_type: Option<String>,
-    quoted_price: Option<i64>,
-    final_price: Option<i64>,
-    my_cut_amount: Option<i64>,
-    currency: String,
-    dev_path: Option<String>,
-    archive_path: Option<String>,
-    created_at: i64,
-    accepted_at: Option<i64>,
-    delivered_at: Option<i64>,
-    paid_at: Option<i64>,
-    archived_at: Option<i64>,
-}
-
-#[derive(Debug, Serialize)]
-struct WorkflowView {
-    order_id: i64,
-    project_type: Option<String>,
-    gig_dir: Option<String>,
-    index_path: Option<String>,
-    job_path: Option<String>,
-    quote_path: Option<String>,
-    plan_md_path: Option<String>,
-    plan_html_path: Option<String>,
-    plan_ready_at: Option<String>,
-    plan_approved_at: Option<String>,
-    plan_rejected_at: Option<String>,
-    work_started_at: Option<String>,
-    plan_rejection_reason: Option<String>,
-    acceptance_path: Option<String>,
-    acceptance_completed_at: Option<String>,
-    latest_delivery_dir: Option<String>,
-    latest_client_package_path: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-struct QuoteDraftView {
-    id: i64,
-    slug: String,
-    title: String,
-    client_label: Option<String>,
-    source_org: Option<String>,
-    project_type: String,
-    status: String,
-    summary: String,
-    quote_min: Option<i64>,
-    quote_recommended: Option<i64>,
-    quote_max: Option<i64>,
-    currency: String,
-    created_at: String,
-    updated_at: String,
-    quoted_at: Option<String>,
-    sent_at: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-struct RedactedConfigResponse {
-    general: RedactedGeneral,
-    pack: RedactedPack,
-    delivery: RedactedDelivery,
-    paths: RedactedPaths,
-}
-
-#[derive(Debug, Serialize)]
-struct RedactedGeneral {
-    dev_root: String,
-    archive_root: String,
-    default_cut_ratio: f64,
-    default_currency: String,
-}
-
-#[derive(Debug, Serialize)]
-struct RedactedPack {
-    default_format: String,
-    extra_ignore: Vec<String>,
-}
-
-#[derive(Debug, Serialize)]
-struct RedactedDelivery {
-    default_uploader: String,
-    short_link: RedactedShortLink,
-    s3: BTreeMap<String, RedactedS3>,
-}
-
-#[derive(Debug, Serialize)]
-struct RedactedShortLink {
-    enabled: bool,
-    endpoint: String,
-    token_set: bool,
-}
-
-#[derive(Debug, Serialize)]
-struct RedactedS3 {
-    bucket: String,
-    region: String,
-    endpoint: String,
-    download_endpoint: Option<String>,
-    access_key_set: bool,
-    secret_key_set: bool,
-    link_ttl_seconds: u32,
-    path_style: bool,
-}
-
-#[derive(Debug, Serialize)]
-struct RedactedPaths {
-    data_dir: String,
-    config_file: String,
-    db_file: String,
-    state_dir: String,
+struct ActionPreviewResponse {
+    action: &'static ActionMeta,
+    preflight: ActionPreflight,
+    executable: bool,
 }
 
 pub fn router(state: AppState) -> Router {
@@ -206,6 +59,8 @@ pub fn router(state: AppState) -> Router {
         .route("/", get(index))
         .route("/api/health", get(health))
         .route("/api/actions", get(actions_handler))
+        .route("/api/actions/:id/preview", post(action_preview_handler))
+        .route("/api/actions/:id/execute", post(action_execute_handler))
         .route("/api/dashboard", get(dashboard_handler))
         .route("/api/orders", get(orders_handler))
         .route("/api/orders/:id", get(order_handler))
@@ -234,6 +89,50 @@ async fn actions_handler(
     Ok(Json(actions::all()))
 }
 
+async fn action_preview_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxumPath(action_id): AxumPath<String>,
+) -> Result<Json<ActionPreviewResponse>, Response> {
+    if let Some(response) = unauthorized_response(&headers, &state) {
+        return Err(response);
+    }
+    let action =
+        action_meta_or_404(&action_id).ok_or_else(|| unknown_action_response(&action_id))?;
+    let preflight = preflight_action(&action_id).map_err(core_error_response)?;
+    Ok(Json(ActionPreviewResponse {
+        action,
+        preflight,
+        executable: is_read_action(&action_id),
+    }))
+}
+
+async fn action_execute_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxumPath(action_id): AxumPath<String>,
+    body: Bytes,
+) -> Result<Json<ReadActionOutput>, Response> {
+    if let Some(response) = unauthorized_response(&headers, &state) {
+        return Err(response);
+    }
+    action_meta_or_404(&action_id).ok_or_else(|| unknown_action_response(&action_id))?;
+    if !is_read_action(&action_id) {
+        return Err(unsupported_action_response(&action_id));
+    }
+    let request = parse_action_request(&body).map_err(|err| {
+        api_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_request",
+            format!("invalid action request JSON: {err}"),
+        )
+    })?;
+    let action_id: &'static str =
+        read_action_id(&action_id).ok_or_else(|| unsupported_action_response(&action_id))?;
+    let output = run_read_action(state, action_id, request.input).await?;
+    Ok(Json(output))
+}
+
 async fn dashboard_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -241,14 +140,15 @@ async fn dashboard_handler(
     if let Some(response) = unauthorized_response(&headers, &state) {
         return Err(response);
     }
-    let paths = state.paths.clone();
-    let now = OffsetDateTime::now_utc().unix_timestamp();
-    let dashboard = run_blocking(move || {
-        let conn = gig_core::db::open(&paths.db_file).map_err(|err| err.to_string())?;
-        dashboard::build_dashboard(&conn, now).map_err(|err| err.to_string())
-    })
-    .await?;
-    Ok(Json(dashboard_response(dashboard)))
+    let output = run_read_action(state, "dashboard.get", ReadActionInput::Empty).await?;
+    match output {
+        ReadActionOutput::Dashboard(dashboard) => Ok(Json(*dashboard)),
+        other => Err(api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "action_output_mismatch",
+            format!("dashboard.get returned {other:?}"),
+        )),
+    }
 }
 
 async fn orders_handler(
@@ -258,17 +158,20 @@ async fn orders_handler(
     if let Some(response) = unauthorized_response(&headers, &state) {
         return Err(response);
     }
-    let paths = state.paths.clone();
-    let orders = run_blocking(move || {
-        let conn = gig_core::db::open(&paths.db_file).map_err(|err| err.to_string())?;
-        let rows =
-            orders::list(&conn, &ListFilter { status: None }).map_err(|err| err.to_string())?;
-        rows.into_iter()
-            .map(|order| order_with_workflow_view(&conn, order))
-            .collect::<Result<Vec<_>, String>>()
-    })
+    let output = run_read_action(
+        state,
+        "orders.list",
+        ReadActionInput::OrdersList { status: None },
+    )
     .await?;
-    Ok(Json(OrdersResponse { orders }))
+    match output {
+        ReadActionOutput::Orders(orders) => Ok(Json(*orders)),
+        other => Err(api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "action_output_mismatch",
+            format!("orders.list returned {other:?}"),
+        )),
+    }
 }
 
 async fn order_handler(
@@ -279,14 +182,20 @@ async fn order_handler(
     if let Some(response) = unauthorized_response(&headers, &state) {
         return Err(response);
     }
-    let paths = state.paths.clone();
-    let order = run_blocking(move || {
-        let conn = gig_core::db::open(&paths.db_file).map_err(|err| err.to_string())?;
-        let order = orders::find_by_id(&conn, id).map_err(|err| err.to_string())?;
-        order_with_workflow_view(&conn, order)
-    })
+    let output = run_read_action(
+        state,
+        "orders.get_detail",
+        ReadActionInput::OrderDetail { id },
+    )
     .await?;
-    Ok(Json(OrderResponse { order }))
+    match output {
+        ReadActionOutput::Order(order) => Ok(Json(*order)),
+        other => Err(api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "action_output_mismatch",
+            format!("orders.get_detail returned {other:?}"),
+        )),
+    }
 }
 
 async fn config_handler(
@@ -296,7 +205,15 @@ async fn config_handler(
     if let Some(response) = unauthorized_response(&headers, &state) {
         return Err(response);
     }
-    Ok(Json(redacted_config(&state.paths, &state.config)))
+    let output = run_read_action(state, "config.redacted.get", ReadActionInput::Empty).await?;
+    match output {
+        ReadActionOutput::Config(config) => Ok(Json(*config)),
+        other => Err(api_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "action_output_mismatch",
+            format!("config.redacted.get returned {other:?}"),
+        )),
+    }
 }
 
 fn unauthorized_response(headers: &HeaderMap, state: &AppState) -> Option<Response> {
@@ -309,6 +226,70 @@ fn unauthorized_response(headers: &HeaderMap, state: &AppState) -> Option<Respon
             "missing or invalid bearer token",
         ))
     }
+}
+
+fn action_meta_or_404(action_id: &str) -> Option<&'static ActionMeta> {
+    actions::find_by_id(action_id)
+}
+
+fn unknown_action_response(action_id: &str) -> Response {
+    api_error(
+        StatusCode::NOT_FOUND,
+        "unknown_action",
+        format!("unknown action id: {action_id}"),
+    )
+}
+
+fn read_action_id(action_id: &str) -> Option<&'static str> {
+    match action_id {
+        "dashboard.get" => Some("dashboard.get"),
+        "orders.list" => Some("orders.list"),
+        "orders.get_detail" => Some("orders.get_detail"),
+        "config.redacted.get" => Some("config.redacted.get"),
+        _ => None,
+    }
+}
+
+fn unsupported_action_response(action_id: &str) -> Response {
+    api_error(
+        StatusCode::BAD_REQUEST,
+        "unsupported_action",
+        format!("action {action_id} is not executable through the read-only GUI API"),
+    )
+}
+
+fn parse_action_request(body: &Bytes) -> Result<ExecuteActionRequest, serde_json::Error> {
+    if body.is_empty() {
+        return Ok(ExecuteActionRequest {
+            input: ReadActionInput::Empty,
+        });
+    }
+    serde_json::from_slice(body)
+}
+
+fn core_error_response(err: gig_core::Error) -> Response {
+    api_error(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "core_error",
+        err.to_string(),
+    )
+}
+
+async fn run_read_action(
+    state: AppState,
+    action_id: &'static str,
+    input: ReadActionInput,
+) -> Result<ReadActionOutput, Response> {
+    let paths = state.paths;
+    let config = state.config;
+    let cwd = state.cwd;
+    let now = OffsetDateTime::now_utc().unix_timestamp();
+    run_blocking(move || {
+        let conn = gig_core::db::open(&paths.db_file).map_err(|err| err.to_string())?;
+        let ctx = ActionContext::new(&conn, &paths, &config, &cwd, now);
+        execute_read_action(&ctx, action_id, input).map_err(|err| err.to_string())
+    })
+    .await
 }
 
 async fn run_blocking<T, F>(work: F) -> Result<T, Response>
@@ -340,179 +321,6 @@ fn api_error(status: StatusCode, code: &'static str, message: impl Into<String>)
         }),
     )
         .into_response()
-}
-
-fn dashboard_response(dashboard: Dashboard) -> DashboardResponse {
-    DashboardResponse {
-        summary: DashboardSummaryView {
-            this_month_income: dashboard.summary.this_month_income,
-            orders_count: dashboard.summary.orders_count,
-            pending_count: dashboard.summary.pending_count,
-        },
-        quotes: dashboard
-            .quote_items
-            .into_iter()
-            .map(quote_dashboard_view)
-            .collect(),
-        focus: dashboard
-            .focus_items
-            .into_iter()
-            .map(dashboard_order_view)
-            .collect(),
-    }
-}
-
-fn quote_dashboard_view(item: DashboardQuoteItem) -> QuoteDashboardView {
-    QuoteDashboardView {
-        draft: quote_draft_view(item.draft),
-        next_action: item.next_action,
-    }
-}
-
-fn dashboard_order_view(item: DashboardItem) -> DashboardOrderView {
-    DashboardOrderView {
-        order: order_view(item.order),
-        workflow: item.workflow.map(workflow_view),
-        next_action: item.next_action,
-        alert: item.alert,
-    }
-}
-
-fn order_with_workflow_view(
-    conn: &rusqlite::Connection,
-    order: Order,
-) -> Result<OrderWithWorkflowView, String> {
-    let workflow =
-        order_workflow::find_by_order_id(conn, order.id).map_err(|err| err.to_string())?;
-    let next_action = dashboard::order_next_action(conn, &order, workflow.as_ref())
-        .map_err(|err| err.to_string())?;
-    Ok(OrderWithWorkflowView {
-        order: order_view(order),
-        workflow: workflow.map(workflow_view),
-        next_action,
-    })
-}
-
-fn order_view(order: Order) -> OrderView {
-    let my_cut_amount = order.my_cut_amount();
-    OrderView {
-        id: order.id,
-        slug: order.slug,
-        title: order.title,
-        status: order.status.as_str().to_string(),
-        project_type: order.project_type.map(|value| value.as_str().to_string()),
-        quoted_price: order.quoted_price,
-        final_price: order.final_price,
-        my_cut_amount,
-        currency: order.currency,
-        dev_path: order.dev_path,
-        archive_path: order.archive_path,
-        created_at: order.created_at,
-        accepted_at: order.accepted_at,
-        delivered_at: order.delivered_at,
-        paid_at: order.paid_at,
-        archived_at: order.archived_at,
-    }
-}
-
-fn workflow_view(workflow: OrderWorkflow) -> WorkflowView {
-    WorkflowView {
-        order_id: workflow.order_id,
-        project_type: workflow
-            .project_type
-            .map(|value| value.as_str().to_string()),
-        gig_dir: workflow.gig_dir,
-        index_path: workflow.index_path,
-        job_path: workflow.job_path,
-        quote_path: workflow.quote_path,
-        plan_md_path: workflow.plan_md_path,
-        plan_html_path: workflow.plan_html_path,
-        plan_ready_at: workflow.plan_ready_at,
-        plan_approved_at: workflow.plan_approved_at,
-        plan_rejected_at: workflow.plan_rejected_at,
-        work_started_at: workflow.work_started_at,
-        plan_rejection_reason: workflow.plan_rejection_reason,
-        acceptance_path: workflow.acceptance_path,
-        acceptance_completed_at: workflow.acceptance_completed_at,
-        latest_delivery_dir: workflow.latest_delivery_dir,
-        latest_client_package_path: workflow.latest_client_package_path,
-    }
-}
-
-fn quote_draft_view(draft: QuoteDraft) -> QuoteDraftView {
-    QuoteDraftView {
-        id: draft.id,
-        slug: draft.slug,
-        title: draft.title,
-        client_label: draft.client_label,
-        source_org: draft.source_org,
-        project_type: draft.project_type.as_str().to_string(),
-        status: draft.status.as_str().to_string(),
-        summary: draft.summary,
-        quote_min: draft.quote_min,
-        quote_recommended: draft.quote_recommended,
-        quote_max: draft.quote_max,
-        currency: draft.currency,
-        created_at: draft.created_at,
-        updated_at: draft.updated_at,
-        quoted_at: draft.quoted_at,
-        sent_at: draft.sent_at,
-    }
-}
-
-fn redacted_config(paths: &Paths, config: &Config) -> RedactedConfigResponse {
-    let s3 = config
-        .delivery
-        .s3
-        .iter()
-        .map(|(name, cfg)| {
-            (
-                name.clone(),
-                RedactedS3 {
-                    bucket: cfg.bucket.clone(),
-                    region: cfg.region.clone(),
-                    endpoint: cfg.endpoint.clone(),
-                    download_endpoint: cfg.download_endpoint.clone(),
-                    access_key_set: !cfg.access_key.trim().is_empty(),
-                    secret_key_set: !cfg.secret_key.trim().is_empty(),
-                    link_ttl_seconds: cfg.link_ttl_seconds,
-                    path_style: cfg.path_style,
-                },
-            )
-        })
-        .collect();
-
-    RedactedConfigResponse {
-        general: RedactedGeneral {
-            dev_root: paths_string(&config.general.dev_root),
-            archive_root: paths_string(&config.general.archive_root),
-            default_cut_ratio: config.general.default_cut_ratio,
-            default_currency: config.general.default_currency.clone(),
-        },
-        pack: RedactedPack {
-            default_format: config.pack.default_format.clone(),
-            extra_ignore: config.pack.extra_ignore.clone(),
-        },
-        delivery: RedactedDelivery {
-            default_uploader: config.delivery.default_uploader.clone(),
-            short_link: RedactedShortLink {
-                enabled: config.delivery.short_link.enabled,
-                endpoint: config.delivery.short_link.endpoint.clone(),
-                token_set: !config.delivery.short_link.token.trim().is_empty(),
-            },
-            s3,
-        },
-        paths: RedactedPaths {
-            data_dir: paths_string(&paths.data_dir),
-            config_file: paths_string(&paths.config_file),
-            db_file: paths_string(&paths.db_file),
-            state_dir: paths_string(&paths.state_dir),
-        },
-    }
-}
-
-fn paths_string(path: &std::path::Path) -> String {
-    path.to_string_lossy().into_owned()
 }
 
 const INDEX_HTML: &str = r#"<!doctype html>
@@ -678,6 +486,7 @@ mod tests {
         let app = router(AppState {
             paths,
             config: test_config(),
+            cwd: tmp.path().to_path_buf(),
             token: TEST_TOKEN.into(),
         });
         (app, tmp)
@@ -689,6 +498,24 @@ mod tests {
             request = request.header(AUTHORIZATION, format!("Bearer {token}"));
         }
         app.oneshot(request.body(Body::empty()).unwrap())
+            .await
+            .unwrap()
+    }
+
+    async fn post_body(
+        app: Router,
+        uri: &str,
+        token: Option<&str>,
+        body: &'static str,
+    ) -> Response {
+        let mut request = Request::builder()
+            .method("POST")
+            .uri(uri)
+            .header("content-type", "application/json");
+        if let Some(token) = token {
+            request = request.header(AUTHORIZATION, format!("Bearer {token}"));
+        }
+        app.oneshot(request.body(Body::from(body)).unwrap())
             .await
             .unwrap()
     }
@@ -763,6 +590,69 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn action_preview_requires_token() {
+        let (app, _tmp) = test_router();
+
+        let response = post_body(app, "/api/actions/orders.delete/preview", None, "{}").await;
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn action_preview_returns_preflight_metadata() {
+        let (app, _tmp) = test_router();
+
+        let response = post_body(
+            app,
+            "/api/actions/orders.delete/preview",
+            Some(TEST_TOKEN),
+            "{}",
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = json_body(response).await;
+        assert_eq!(body["action"]["id"], "orders.delete");
+        assert_eq!(body["preflight"]["confirmation"]["type"], "required");
+        assert_eq!(body["executable"], false);
+    }
+
+    #[tokio::test]
+    async fn read_action_execute_runs_dashboard() {
+        let (app, _tmp) = test_router();
+
+        let response = post_body(
+            app,
+            "/api/actions/dashboard.get/execute",
+            Some(TEST_TOKEN),
+            "{}",
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = json_body(response).await;
+        assert_eq!(body["type"], "dashboard");
+        assert_eq!(body["data"]["summary"]["orders_count"], 0);
+    }
+
+    #[tokio::test]
+    async fn mutating_action_execute_is_rejected() {
+        let (app, _tmp) = test_router();
+
+        let response = post_body(
+            app,
+            "/api/actions/orders.delete/execute",
+            Some(TEST_TOKEN),
+            "{}",
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = json_body(response).await;
+        assert_eq!(body["error"]["code"], "unsupported_action");
+    }
+
+    #[tokio::test]
     async fn config_api_redacts_secrets() {
         let (app, _tmp) = test_router();
 
@@ -779,18 +669,5 @@ mod tests {
         assert_eq!(body["delivery"]["short_link"]["token_set"], true);
         assert_eq!(body["delivery"]["s3"]["main"]["access_key_set"], true);
         assert_eq!(body["delivery"]["s3"]["main"]["secret_key_set"], true);
-    }
-
-    #[test]
-    fn redacted_config_hides_secrets() {
-        let paths = Paths::under_root(tempfile::tempdir().unwrap().path());
-
-        let redacted = redacted_config(&paths, &test_config());
-
-        assert!(redacted.delivery.short_link.token_set);
-        let text = serde_json::to_string(&redacted).unwrap();
-        assert!(!text.contains(SHORT_LINK_SECRET));
-        assert!(!text.contains(S3_ACCESS_SECRET));
-        assert!(!text.contains(S3_SECRET_SECRET));
     }
 }

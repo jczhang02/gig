@@ -257,6 +257,32 @@ static ACTIONS: &[ActionMeta] = &[
         json: true,
         workflow: false,
     ),
+    ActionMeta {
+        id: ActionId::new("orders.list"),
+        cli_path: &[],
+        label: "List Orders",
+        description: "Read Orders for GUI and action API adapters.",
+        kind: ActionKind::Read,
+        fields: DASHBOARD_FIELDS,
+        confirmation: NONE,
+        side_effects: effects![ReadsDatabase],
+        output: ActionOutputKind::Json,
+        json_supported: true,
+        workflow_critical: true,
+    },
+    ActionMeta {
+        id: ActionId::new("config.redacted.get"),
+        cli_path: &[],
+        label: "Read Redacted Config",
+        description: "Read local config and paths with secret values redacted.",
+        kind: ActionKind::Read,
+        fields: EMPTY_FIELDS,
+        confirmation: NONE,
+        side_effects: effects![ReadsFiles],
+        output: ActionOutputKind::Json,
+        json_supported: true,
+        workflow_critical: false,
+    },
     action!(
         "orders.price.update",
         ["price"],
@@ -885,11 +911,13 @@ mod tests {
 
         for action in all() {
             assert!(ids.insert(action.id.as_str()), "duplicate id {}", action.id);
-            assert!(
-                cli_paths.insert(action.cli_path.join(" ")),
-                "duplicate cli path {:?}",
-                action.cli_path
-            );
+            if !action.cli_path.is_empty() {
+                assert!(
+                    cli_paths.insert(action.cli_path.join(" ")),
+                    "duplicate cli path {:?}",
+                    action.cli_path
+                );
+            }
         }
     }
 
@@ -913,6 +941,14 @@ mod tests {
         let dashboard = find_by_id("dashboard.get").unwrap();
         assert!(dashboard.workflow_critical);
         assert!(dashboard.json_supported);
+
+        let list = find_by_id("orders.list").unwrap();
+        assert!(list.cli_path.is_empty());
+        assert_eq!(list.kind, ActionKind::Read);
+
+        let config = find_by_id("config.redacted.get").unwrap();
+        assert!(config.cli_path.is_empty());
+        assert_eq!(config.kind, ActionKind::Read);
     }
 
     #[test]

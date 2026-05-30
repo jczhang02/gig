@@ -22,7 +22,7 @@
 
 ## TODO 2: Build the `gig gui` companion
 
-**Status:** Phase A and Phase B checkpoints completed on 2026-05-30. Phase A delivered the isolated read-only `crates/gig-gui` localhost companion and root `CONTEXT.md` glossary. Phase B added the `gig-core::actions` metadata skeleton, catalog coverage tests, and protected `GET /api/actions`. Existing CLI command handlers, outputs, and JSON semantics stay untouched. TODO 2 remains open; next phase is executable read actions through the shared action layer. See `docs/superpowers/plans/2026-05-30-gig-gui-phase-a-checkpoint.md` and `docs/superpowers/plans/2026-05-30-gig-gui-phase-b-actions.md`.
+**Status:** Phase A, Phase B, and Phase C pre-GUI backend checkpoints completed on 2026-05-30. Phase A delivered the isolated read-only `crates/gig-gui` localhost companion and root `CONTEXT.md` glossary. Phase B added the `gig-core::actions` metadata skeleton, catalog coverage tests, and protected `GET /api/actions`. Phase C added request-scoped `ActionContext`, executable read actions, preflight/execute API skeletons, and routed existing GUI read endpoints through core actions. Existing CLI command handlers, outputs, and JSON semantics stay untouched. TODO 2 remains open for formal frontend GUI development next. See `docs/superpowers/plans/2026-05-30-gig-gui-phase-a-checkpoint.md`, `docs/superpowers/plans/2026-05-30-gig-gui-phase-b-actions.md`, and `docs/superpowers/plans/2026-05-30-gig-gui-phase-c-pre-gui-backend.md`.
 
 **Problem:** `gig` is now workflow-complete at the CLI layer, but daily operation still requires command-line sequencing and reading JSON/human output manually.
 

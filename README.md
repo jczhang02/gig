@@ -307,7 +307,7 @@ gig gui              # 打开 127.0.0.1 上的本地只读看板
 gig gui --no-open   # 只打印带 token 的本地 URL
 ```
 
-`gig gui` 只通过 `gig-core` 读取本地数据库、配置和 action metadata，不调用现有 CLI 命令；当前版本提供 dashboard、orders、actions 和脱敏 config 视图。
+`gig gui` 只通过 `gig-core` action layer 读取本地数据库、配置和 action metadata，不调用现有 CLI 命令；当前版本提供 dashboard、orders、actions 和脱敏 config 视图，并暴露只读 `POST /api/actions/:id/preview` / `POST /api/actions/:id/execute` 骨架。mutation / external I/O / dangerous actions 当前不会执行。
 
 ### 查看当前状态
 

@@ -26,6 +26,7 @@ async fn run_async(options: GuiOptions) -> Result<()> {
     let paths = Paths::from_env()?;
     paths.ensure_dirs()?;
     let config = Config::load_or_default(&paths.config_file)?;
+    let cwd = std::env::current_dir()?;
     let token = random_token();
 
     let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, options.port))
@@ -39,6 +40,7 @@ async fn run_async(options: GuiOptions) -> Result<()> {
     let app = router(AppState {
         paths,
         config,
+        cwd,
         token: token.clone(),
     })
     .layer(TraceLayer::new_for_http());
