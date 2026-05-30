@@ -3,6 +3,10 @@
 **/*.rs.bk
 Cargo.lock.bak
 
+# Python
+__pycache__/
+*.py[cod]
+
 # Editor
 .idea/
 .vscode/

@@ -50,6 +50,9 @@ token = "..."                        # Cloudflare Worker 的 SHORT_LINK_TOKEN
 bucket = "my-bucket"
 region = "cn-hongkong"
 endpoint = "https://s3.oss-cn-hongkong.aliyuncs.com"
+# Optional: use a faster presigned-download endpoint while uploads keep using endpoint.
+# Enable the target bucket's transfer acceleration/CDN support before setting this.
+# download_endpoint = "https://oss-accelerate.aliyuncs.com"
 access_key = "..."
 secret_key = "..."
 link_ttl_seconds = 604800            # 分享链接有效期：7 天

@@ -25,6 +25,7 @@ const PART_SIZE: usize = 8 * 1024 * 1024; // 8 MB
 pub struct S3Uploader {
     name: String,
     client: Client,
+    download_client: Client,
     rt: tokio::runtime::Runtime,
     bucket: String,
     link_ttl_seconds: u32,
@@ -38,26 +39,31 @@ impl S3Uploader {
             .build()
             .map_err(|e| Error::Invalid(format!("failed to create tokio runtime: {e}")))?;
 
-        let creds = Credentials::new(&cfg.access_key, &cfg.secret_key, None, None, "gig");
-
-        let s3_config = aws_sdk_s3::Config::builder()
-            .behavior_version(BehaviorVersion::latest())
-            .credentials_provider(creds)
-            .region(Region::new(cfg.region.clone()))
-            .endpoint_url(&cfg.endpoint)
-            .force_path_style(cfg.path_style)
-            .build();
-
-        let client = Client::from_conf(s3_config);
+        let client = make_client(cfg, &cfg.endpoint);
+        let download_endpoint = cfg.download_endpoint.as_deref().unwrap_or(&cfg.endpoint);
+        let download_client = make_client(cfg, download_endpoint);
 
         Ok(Self {
             name,
             client,
+            download_client,
             rt,
             bucket: cfg.bucket.clone(),
             link_ttl_seconds: cfg.link_ttl_seconds,
         })
     }
+}
+
+fn make_client(cfg: &S3UploaderConfig, endpoint: &str) -> Client {
+    let creds = Credentials::new(&cfg.access_key, &cfg.secret_key, None, None, "gig");
+    let s3_config = aws_sdk_s3::Config::builder()
+        .behavior_version(BehaviorVersion::latest())
+        .credentials_provider(creds)
+        .region(Region::new(cfg.region.clone()))
+        .endpoint_url(endpoint)
+        .force_path_style(cfg.path_style)
+        .build();
+    Client::from_conf(s3_config)
 }
 
 impl S3Uploader {
@@ -191,6 +197,23 @@ impl S3Uploader {
 
         Ok(())
     }
+
+    fn presigned_get_url(&self, object_key: &str, file_name: &str, ttl: u32) -> Result<String> {
+        let disposition = format!("attachment; filename=\"{file_name}\"");
+        let presigned = self.rt.block_on(async {
+            let presign_config = PresigningConfig::expires_in(Duration::from_secs(ttl as u64))
+                .map_err(|e| Error::Invalid(format!("presigning config error: {e}")))?;
+            self.download_client
+                .get_object()
+                .bucket(&self.bucket)
+                .key(object_key)
+                .response_content_disposition(&disposition)
+                .presigned(presign_config)
+                .await
+                .map_err(|e| Error::Invalid(format!("presigning failed: {e}")))
+        })?;
+        Ok(presigned.uri().to_string())
+    }
 }
 
 impl Uploader for S3Uploader {
@@ -222,26 +245,12 @@ impl Uploader for S3Uploader {
             .map(|d| d * 86_400)
             .unwrap_or(self.link_ttl_seconds);
 
-        let disposition = format!("attachment; filename=\"{file_name}\"");
-
-        let presigned = self.rt.block_on(async {
-            let presign_config = PresigningConfig::expires_in(Duration::from_secs(ttl as u64))
-                .map_err(|e| Error::Invalid(format!("presigning config error: {e}")))?;
-            self.client
-                .get_object()
-                .bucket(&self.bucket)
-                .key(object_key)
-                .response_content_disposition(&disposition)
-                .presigned(presign_config)
-                .await
-                .map_err(|e| Error::Invalid(format!("presigning failed: {e}")))
-        })?;
-
+        let url = self.presigned_get_url(object_key, &file_name, ttl)?;
         let now = OffsetDateTime::now_utc();
         let expires_at = now.unix_timestamp() + ttl as i64;
 
         Ok(UploadResult {
-            url: presigned.uri().to_string(),
+            url,
             expires_at: Some(expires_at),
             provider: self.name.clone(),
             file_size,
@@ -259,6 +268,7 @@ mod tests {
             bucket: "gig-delivery".into(),
             region: "cn-hongkong".into(),
             endpoint: "https://s3.oss-cn-hongkong.aliyuncs.com".into(),
+            download_endpoint: None,
             access_key: "AKIAIOSFODNN7EXAMPLE".into(),
             secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".into(),
             link_ttl_seconds: 604_800,
@@ -273,5 +283,21 @@ mod tests {
         assert_eq!(u.name(), "s3:test");
         assert_eq!(u.bucket, "gig-delivery");
         assert_eq!(u.link_ttl_seconds, 604_800);
+    }
+
+    #[test]
+    fn presigned_get_url_uses_download_endpoint_when_configured() {
+        let mut cfg = make_config();
+        cfg.download_endpoint = Some("https://oss-accelerate.aliyuncs.com".into());
+        let u = S3Uploader::new("s3:test".into(), &cfg).unwrap();
+
+        let url = u
+            .presigned_get_url("orders/1/client-package.zip", "client-package.zip", 3600)
+            .unwrap();
+
+        assert!(
+            url.starts_with("https://gig-delivery.oss-accelerate.aliyuncs.com/"),
+            "expected accelerated download host, got {url}"
+        );
     }
 }

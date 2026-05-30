@@ -91,6 +91,7 @@ mod tests {
             bucket: "gig-delivery".into(),
             region: "cn-hongkong".into(),
             endpoint: "https://s3.oss-cn-hongkong.aliyuncs.com".into(),
+            download_endpoint: None,
             access_key: "AKIAIOSFODNN7EXAMPLE".into(),
             secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".into(),
             link_ttl_seconds: 604_800,

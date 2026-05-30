@@ -2,7 +2,9 @@
 
 > Scope: post workflow-hardening backlog only. `gig` core workflow gates are implemented; these are the next product directions.
 
-## TODO 1: Improve short-link download speed
+## DONE 1: Improve short-link download speed
+
+**Status:** Completed on 2026-05-30. `gig` now supports a separate S3 `download_endpoint` for presigned GET links, the local config can point downloads at Alibaba Cloud OSS transfer acceleration, and `scripts/benchmark-short-link-download.py` documents the repeatable measurement path. See `docs/superpowers/plans/2026-05-29-gig-short-link-download-speed-notes.md`.
 
 **Problem:** The current `gig` short-link delivery path works, but client downloads are too slow.
 

@@ -154,6 +154,13 @@ pub struct S3UploaderConfig {
     /// Base endpoint URL without trailing slash
     /// (e.g. `"https://s3.oss-cn-hongkong.aliyuncs.com"`).
     pub endpoint: String,
+    /// Optional endpoint used only for generated download links.
+    ///
+    /// This lets uploads keep using the regional API endpoint while client links use
+    /// an accelerated or CDN-compatible endpoint that supports the same bucket and
+    /// signing scheme.
+    #[serde(default)]
+    pub download_endpoint: Option<String>,
     /// AWS / OSS access key ID.
     pub access_key: String,
     /// AWS / OSS secret access key.
@@ -285,6 +292,31 @@ mod tests {
         );
         assert_eq!(cfg.delivery.short_link.token, "secret-token");
         assert!(!Config::default().delivery.short_link.enabled);
+    }
+
+    #[test]
+    fn config_loads_optional_s3_download_endpoint() {
+        let cfg: Config = toml::from_str(
+            r#"
+            [delivery]
+            default_uploader = "s3:main"
+
+            [delivery.s3.main]
+            bucket = "gig-delivery"
+            region = "cn-hongkong"
+            endpoint = "https://s3.oss-cn-hongkong.aliyuncs.com"
+            download_endpoint = "https://oss-accelerate.aliyuncs.com"
+            access_key = "access"
+            secret_key = "secret"
+            "#,
+        )
+        .unwrap();
+
+        let s3 = cfg.delivery.s3.get("main").unwrap();
+        assert_eq!(
+            s3.download_endpoint.as_deref(),
+            Some("https://oss-accelerate.aliyuncs.com")
+        );
     }
 
     #[test]

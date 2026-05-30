@@ -8,6 +8,7 @@
 //! Optional:
 //!   GIG_TEST_S3_REGION (default: cn-hongkong)
 //!   GIG_TEST_S3_ENDPOINT (default: https://s3.oss-cn-hongkong.aliyuncs.com)
+//!   GIG_TEST_S3_DOWNLOAD_ENDPOINT (for transfer acceleration/CDN presigned links)
 
 use gig_core::config::S3UploaderConfig;
 use gig_core::delivery::s3::S3Uploader;
@@ -26,11 +27,13 @@ fn make_test_uploader() -> Option<S3Uploader> {
     let region = std::env::var("GIG_TEST_S3_REGION").unwrap_or_else(|_| "cn-hongkong".into());
     let endpoint = std::env::var("GIG_TEST_S3_ENDPOINT")
         .unwrap_or_else(|_| "https://s3.oss-cn-hongkong.aliyuncs.com".into());
+    let download_endpoint = std::env::var("GIG_TEST_S3_DOWNLOAD_ENDPOINT").ok();
 
     let cfg = S3UploaderConfig {
         bucket,
         region,
         endpoint,
+        download_endpoint,
         access_key,
         secret_key,
         link_ttl_seconds: 3600,
