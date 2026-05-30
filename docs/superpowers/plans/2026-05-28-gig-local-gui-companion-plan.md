@@ -1,5 +1,9 @@
 # gig Local GUI Companion Implementation Plan
 
+> **2026-05-30 scope update:** The GUI stays invoked as `gig gui`, but implementation must be isolated in `crates/gig-gui`. `crates/gig-cli` may only add a thin subcommand/dispatch entrypoint. Existing CLI command handlers, output rendering, JSON error semantics, and workflow gates must not be migrated as part of the first GUI slice. Phase A is read-only and may use shared `gig-core` services/repos directly before a full typed-action migration.
+
+> **2026-05-30 Phase A checkpoint:** Read-only `gig gui` is now implemented and hardened with API/security tests. See `docs/superpowers/plans/2026-05-30-gig-gui-phase-a-checkpoint.md`. Next phase is the `gig-core::actions` skeleton and catalog; do not add GUI mutations before that shared action layer exists.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:test-driven-development` for behavior changes, `superpowers:verification-before-completion` before claiming completion, and `coding-standards` for Rust/TypeScript edits. Frontend implementation must use `design-taste-frontend`, `vercel-react-best-practices`, and `vercel-composition-patterns`.
 
 ## Goal

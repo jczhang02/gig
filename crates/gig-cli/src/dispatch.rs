@@ -8,6 +8,12 @@ pub fn run(cli: Cli) -> Result<()> {
     if let Command::Completion(args) = cli.command {
         return commands::completion::run(args);
     }
+    if let Command::Gui(args) = cli.command {
+        return gig_gui::run(gig_gui::GuiOptions {
+            port: args.port,
+            no_open: args.no_open,
+        });
+    }
 
     let paths = Paths::from_env()?;
     paths.ensure_dirs()?;
@@ -44,5 +50,6 @@ pub fn run(cli: Cli) -> Result<()> {
         Command::Artifact(args) => commands::artifact::run(&conn, args),
         Command::Delete(args) => commands::delete::run(&conn, args),
         Command::Completion(_) => unreachable!("completion is handled before DB bootstrap"),
+        Command::Gui(_) => unreachable!("gui is handled before DB bootstrap"),
     }
 }

@@ -22,6 +22,8 @@
 
 ## TODO 2: Build the `gig gui` companion
 
+**Status:** Phase A checkpoint completed on 2026-05-30 with an isolated `crates/gig-gui` library and a thin `gig gui` CLI entrypoint. Current scope is read-only: localhost token server, dashboard/orders/config APIs, config secret redaction tests, an embedded cockpit page, and root `CONTEXT.md` glossary. Existing CLI command handlers, outputs, and JSON semantics stay untouched. TODO 2 remains open; next phase is the `gig-core::actions` skeleton. See `docs/superpowers/plans/2026-05-30-gig-gui-phase-a-checkpoint.md`.
+
 **Problem:** `gig` is now workflow-complete at the CLI layer, but daily operation still requires command-line sequencing and reading JSON/human output manually.
 
 **Goal:** Build a local GUI companion for operating `gig` without replacing the CLI or reimplementing workflow rules.
@@ -31,6 +33,8 @@
 **Core constraints:**
 
 - The GUI must call typed `gig-core` actions or shared service surfaces, not shell-composed `gig` commands.
+- The GUI must be invoked as `gig gui`, not as a standalone binary; only a thin CLI entrypoint may depend on `gig-gui`.
+- Existing CLI command handlers, outputs, JSON error semantics, and workflow gates must remain isolated from GUI work.
 - It must preserve the same workflow gates: quote draft, quote acceptance, plan ready/approve, `work start`, acceptance check/complete, package check/send, paid/archive.
 - It must not generate workflow artifacts on behalf of `gig`; external workflow/agents still create `.gig` files and delivery packages.
 - It should make the current `next_action` and required missing files obvious to JC.

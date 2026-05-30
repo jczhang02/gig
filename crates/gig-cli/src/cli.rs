@@ -122,6 +122,20 @@ pub enum Command {
 
     /// Standalone order artifact upload subcommands.
     Artifact(ArtifactArgs),
+
+    /// Start the local read-only GUI companion.
+    Gui(GuiArgs),
+}
+
+#[derive(clap::Args, Debug)]
+pub struct GuiArgs {
+    /// Do not open a browser; only print the local URL.
+    #[arg(long)]
+    pub no_open: bool,
+
+    /// Localhost port to bind. Use 0 for a random free port.
+    #[arg(long, default_value_t = 0)]
+    pub port: u16,
 }
 
 fn artifact_wants_json(args: &ArtifactArgs) -> bool {

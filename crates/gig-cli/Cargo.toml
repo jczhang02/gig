@@ -11,6 +11,7 @@ path = "src/main.rs"
 
 [dependencies]
 gig-core = { path = "../gig-core" }
+gig-gui = { path = "../gig-gui" }
 clap = { workspace = true }
 clap_complete = { workspace = true }
 comfy-table = { workspace = true }

@@ -300,6 +300,15 @@ gig archive 1 --purge
 
 ## 日常管理
 
+### 本地 GUI（只读）
+
+```bash
+gig gui              # 打开 127.0.0.1 上的本地只读看板
+gig gui --no-open   # 只打印带 token 的本地 URL
+```
+
+`gig gui` 只通过 `gig-core` 读取本地数据库和配置，不调用现有 CLI 命令；当前版本提供 dashboard、orders 和脱敏 config 视图。
+
 ### 查看当前状态
 
 ```bash

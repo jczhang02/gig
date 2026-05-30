@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/gig-core",
     "crates/gig-cli",
+    "crates/gig-gui",
 ]
 
 [workspace.package]
@@ -32,6 +33,11 @@ minijinja = "2"
 ignore = "0.4"
 arboard = "3"
 aws-sdk-s3 = "1"
-tokio = { version = "1", features = ["rt-multi-thread"] }
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal", "time"] }
+axum = "0.7"
+rand = "0.8"
+tower-http = { version = "0.6", features = ["trace"] }
+tower = { version = "0.5", features = ["util"] }
+webbrowser = "1"
 zip = { version = "0.6", default-features = false, features = ["deflate"] }
 ureq = { version = "2", features = ["json"] }
