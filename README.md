@@ -101,15 +101,22 @@ gig quote accept crawler-a --project-dir ~/dev/partjobs/crawler-a
 ```bash
 gig plan ready crawler-a       # 校验 .gig/plan/PLAN.md 和 PLAN.html
 gig plan approve crawler-a     # plan_ready → plan_approved
-gig status crawler-a in_progress
+gig work start crawler-a       # plan_approved → in_progress
 gig acceptance complete crawler-a
+
+# 外部 workflow 先准备 .gig/delivery/2026-05-27/ 下的交付文档和客户包
+gig package check crawler-a \
+  --delivery-date 2026-05-27 \
+  --delivery-dir ~/dev/partjobs/crawler-a/.gig/delivery/2026-05-27
 
 gig package send crawler-a \
   --delivery-date 2026-05-27 \
   --delivery-dir ~/dev/partjobs/crawler-a/.gig/delivery/2026-05-27
 ```
 
-客户端交付包必须由外部工作流创建为 `.gig/delivery/<YYYY-MM-DD>/export/client-package.zip`。`gig package send` 会先执行严格安全校验，再用配置好的 uploader 上传 zip，并记录 delivery artifact 与 sent 状态。允许交付的文件必须写在 `manifest.toml` 的 `client_files` 中；`.gig/`、`internal/`、`prompts/`、`ACCEPTANCE.md`、`DELIVERY_INTERNAL.html` 等路径会被拒绝，避免把内部材料泄露给客户。
+`gig package check` 是 `ReadyToDeliver` 后的交付门禁。外部 workflow 必须先准备 `.gig/delivery/<YYYY-MM-DD>/DELIVERY.md`、`internal/DELIVERY_INTERNAL.html`、`client/DELIVERY_CLIENT.html`、`client/DELIVERY_CLIENT.pdf`，以及 `export/client-package.zip`。`gig package check` 会执行严格安全校验并记录 validated package；只有存在该订单的 validated package 后，`gig ls` / `gig show` 的下一步才会变成 `send_package`。允许交付的文件必须写在 `manifest.toml` 的 `client_files` 中；`.gig/`、`internal/`、`prompts/`、`ACCEPTANCE.md`、`DELIVERY_INTERNAL.html` 等路径会被拒绝，避免把内部材料泄露给客户。
+
+`gig package send` 会再次校验并用配置好的 uploader 上传 zip，记录 delivery artifact 与 sent 状态。
 
 旧订单可以没有 `order_workflow` 行和 `project_type`。它们仍可 `list`、`show`、`export`、`archive`；机器可读输出会把需要工作流元数据的下一步标为 `legacy_workflow_metadata_missing`。后续如果要补齐旧订单类型，核心库提供了 `orders::update_project_type`，可以由迁移脚本或未来 CLI 助手调用；本阶段不强制回填。
 
@@ -203,17 +210,21 @@ gig show 1 --json
 
 ### 6. 交付
 
-支持层交付统一使用 `package send`：
+支持层交付先校验客户包，再发送：
 
 ```bash
+gig package check 1 \
+  --delivery-date 2026-05-27 \
+  --delivery-dir ~/dev/partjobs/crawler-a/.gig/delivery/2026-05-27
+
 gig package send 1 \
   --delivery-date 2026-05-27 \
   --delivery-dir ~/dev/partjobs/crawler-a/.gig/delivery/2026-05-27
 ```
 
-该命令会：
+`package check` 会校验 `manifest.toml` 与 `client-package.zip`（严格 allowlist），并记录 validated package。`package send` 要求已存在匹配的 validated package，随后会：
 
-- 校验 `manifest.toml` 与 `client-package.zip`（严格 allowlist）；
+- 再次校验交付目录和客户包；
 - 通过配置的 uploader 上传 zip；
 - 写入 `delivery_artifacts`；
 - 把 package 置为 `sent`，订单置为 `delivered`。
@@ -235,9 +246,13 @@ gig status 1 revision
 # delivered → revision
 ```
 
-修改完成后外部 workflow 重新生成 `.gig/delivery/<date>/` 内容，再次执行：
+修改完成后外部 workflow 重新生成 `.gig/delivery/<date>/` 内容，先校验客户包，再发送：
 
 ```bash
+gig package check 1 \
+  --delivery-date 2026-05-28 \
+  --delivery-dir ~/dev/partjobs/crawler-a/.gig/delivery/2026-05-28
+
 gig package send 1 \
   --delivery-date 2026-05-28 \
   --delivery-dir ~/dev/partjobs/crawler-a/.gig/delivery/2026-05-28
@@ -325,7 +340,7 @@ gig backup          # 备份数据库
 
 ## 命令迁移说明
 
-旧的公开交付入口已从命令面移除。客户交付统一使用 `gig package send`；单独文件上传使用 `gig artifact send`，不改变订单状态。
+旧的公开交付入口已从命令面移除。客户交付统一使用 `gig package check` 后接 `gig package send`；单独文件上传使用 `gig artifact send`，不改变订单状态。
 
 ## OSS 费用参考（香港区）
 
