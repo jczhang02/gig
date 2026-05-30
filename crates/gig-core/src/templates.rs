@@ -21,17 +21,28 @@ Here is my quote for the project you described:
 
 - Project: {{ title }}
 - Quote: {{ quoted_price }} {{ currency }}
-- Delivery timeline: TBD
+- Delivery timeline: confirmed in the workflow plan after quote acceptance
 
 Feel free to reach out with any questions.
 "#;
 
 const DEFAULT_DELIVERY_CHECKLIST: &str = r#"# Delivery Checklist — {{ title }}
 
-- [ ] Code tested
-- [ ] Documentation updated
-- [ ] Delivery package generated
-- [ ] Link sent to client
+Prepare these workflow-created files before running `gig package check`:
+
+- [ ] .gig/delivery/<YYYY-MM-DD>/DELIVERY.md
+- [ ] .gig/delivery/<YYYY-MM-DD>/internal/DELIVERY_INTERNAL.html
+- [ ] .gig/delivery/<YYYY-MM-DD>/client/DELIVERY_CLIENT.html
+- [ ] .gig/delivery/<YYYY-MM-DD>/client/DELIVERY_CLIENT.pdf
+- [ ] .gig/delivery/<YYYY-MM-DD>/manifest.toml
+- [ ] .gig/delivery/<YYYY-MM-DD>/export/client-package.zip
+
+Then run:
+
+```bash
+gig package check {{ slug }} --delivery-date <YYYY-MM-DD> --delivery-dir .gig/delivery/<YYYY-MM-DD>
+gig package send {{ slug }} --delivery-date <YYYY-MM-DD> --delivery-dir .gig/delivery/<YYYY-MM-DD>
+```
 "#;
 
 /// Default project README template embedded in the binary.
@@ -41,6 +52,10 @@ const DEFAULT_PROJECT_README: &str = r#"# {{ title }}
 **Quoted price:** {{ quoted_price }}
 **Currency:** {{ currency }}
 {% if source_org %}**Source org:** {{ source_org }}{% endif %}
+
+## Workflow
+
+Project workflow control files live under `.gig/`; keep the project root for real work files.
 
 ## Notes
 
@@ -96,6 +111,63 @@ mod tests {
             delivered_at: None,
             paid_at: None,
             archived_at: None,
+        }
+    }
+
+    #[test]
+    fn embedded_templates_do_not_expose_workflow_artifact_generators() {
+        let names: Vec<&str> = EMBEDDED_TEMPLATES.iter().map(|(name, _)| *name).collect();
+        for forbidden in [
+            "workflow-job",
+            "workflow-quote",
+            "workflow-index",
+            "workflow-plan",
+            "workflow-acceptance",
+            "delivery-summary",
+            "delivery-internal",
+            "delivery-client",
+            "delivery-manifest",
+        ] {
+            assert!(
+                !names.contains(&forbidden),
+                "workflow artifact template leaked: {forbidden}"
+            );
+        }
+    }
+
+    #[test]
+    fn quote_reply_no_longer_promises_tbd_delivery_timeline() {
+        let quote = EMBEDDED_TEMPLATES
+            .iter()
+            .find(|(name, _)| *name == "quote-reply")
+            .map(|(_, content)| *content)
+            .unwrap();
+
+        assert!(!quote.contains("Delivery timeline: TBD"));
+        assert!(quote.contains("workflow plan"));
+    }
+
+    #[test]
+    fn delivery_checklist_names_required_delivery_gate_files() {
+        let delivery_checklist = EMBEDDED_TEMPLATES
+            .iter()
+            .find(|(name, _)| *name == "delivery-checklist")
+            .map(|(_, content)| *content)
+            .unwrap();
+
+        for required in [
+            "DELIVERY.md",
+            "internal/DELIVERY_INTERNAL.html",
+            "client/DELIVERY_CLIENT.html",
+            "client/DELIVERY_CLIENT.pdf",
+            "manifest.toml",
+            "export/client-package.zip",
+            "gig package check",
+        ] {
+            assert!(
+                delivery_checklist.contains(required),
+                "missing required marker {required}"
+            );
         }
     }
 
