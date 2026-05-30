@@ -3,6 +3,7 @@
 //! This crate owns the SQLite schema, models, repositories, and services.
 //! It must not depend on any CLI or UI layer.
 
+pub mod actions;
 pub mod config;
 pub mod context;
 pub mod db;

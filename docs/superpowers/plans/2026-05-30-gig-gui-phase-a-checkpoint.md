@@ -60,18 +60,13 @@ unauth_dashboard=401
 auth_dashboard=200
 ```
 
-Known pre-existing clippy blockers, intentionally not fixed in this checkpoint:
+Follow-up cleanup after the initial checkpoint restored the clippy gate:
 
-```text
+```bash
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-fails on:
-
-- `crates/gig-core/src/services/client_package.rs`: unused `client_dir` variables in existing tests at lines 869, 948, 1000, 1074, 1130, 1309, 1350, 1390, and 1430.
-- `crates/gig-core/src/services/workflow.rs:200`: `Option::is_none_or` violates the workspace MSRV of Rust 1.75 because it stabilized in Rust 1.82.
-
-These are outside Phase A's GUI changes and should be handled as a separate cleanup before requiring workspace clippy as a release gate.
+The cleanup removed unused `client_dir` variables in existing `client_package.rs` tests, replaced the Rust 1.82-only `Option::is_none_or` call in `workflow.rs` with Rust 1.75-compatible code, and adjusted Phase A GUI code to satisfy clippy's strict warnings.
 
 ## Next phase
 

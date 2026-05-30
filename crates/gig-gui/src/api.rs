@@ -4,6 +4,7 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
+use gig_core::actions::{self, ActionMeta};
 use gig_core::config::{Config, Paths};
 use gig_core::models::{Order, OrderWorkflow, QuoteDraft};
 use gig_core::repo::orders::ListFilter;
@@ -204,6 +205,7 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/", get(index))
         .route("/api/health", get(health))
+        .route("/api/actions", get(actions_handler))
         .route("/api/dashboard", get(dashboard_handler))
         .route("/api/orders", get(orders_handler))
         .route("/api/orders/:id", get(order_handler))
@@ -220,6 +222,16 @@ async fn health() -> Json<HealthResponse> {
         status: "ok",
         app: "gig-gui",
     })
+}
+
+async fn actions_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<&'static [ActionMeta]>, Response> {
+    if let Some(response) = unauthorized_response(&headers, &state) {
+        return Err(response);
+    }
+    Ok(Json(actions::all()))
 }
 
 async fn dashboard_handler(
@@ -554,6 +566,11 @@ const INDEX_HTML: &str = r#"<!doctype html>
       <h2>Quotes</h2>
       <div class="card" id="quotes">Loading…</div>
     </section>
+
+    <section class="section">
+      <h2>Actions</h2>
+      <div class="card" id="actions">Loading…</div>
+    </section>
   </main>
 
   <script>
@@ -587,7 +604,7 @@ const INDEX_HTML: &str = r#"<!doctype html>
 
     async function boot() {
       if (!token) throw new Error('missing token in URL');
-      const data = await api('/api/dashboard');
+      const [data, actions] = await Promise.all([api('/api/dashboard'), api('/api/actions')]);
       authState.textContent = 'localhost token ok';
       document.getElementById('metrics').innerHTML = [
         ['This month', money(data.summary.this_month_income)],
@@ -596,6 +613,7 @@ const INDEX_HTML: &str = r#"<!doctype html>
       ].map(([label, value]) => `<div class="card"><div class="metric">${value}</div><div class="label">${label}</div></div>`).join('');
       document.getElementById('focus').innerHTML = rows(data.focus, 'order');
       document.getElementById('quotes').innerHTML = rows(data.quotes, 'quote');
+      document.getElementById('actions').innerHTML = `<p class="muted">${actions.length} core action metadata entries available. Next phase wires execution.</p>`;
     }
 
     boot().catch(err => {
@@ -603,6 +621,7 @@ const INDEX_HTML: &str = r#"<!doctype html>
       authState.classList.add('error');
       document.getElementById('focus').innerHTML = `<p class="alert">${escapeHtml(err.message)}</p>`;
       document.getElementById('quotes').innerHTML = '<p class="muted">Unavailable</p>';
+      document.getElementById('actions').innerHTML = '<p class="muted">Unavailable</p>';
     });
   </script>
 </body>
@@ -716,6 +735,31 @@ mod tests {
         assert_eq!(body["summary"]["pending_count"], 0);
         assert!(body["quotes"].as_array().unwrap().is_empty());
         assert!(body["focus"].as_array().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn actions_endpoint_returns_core_catalog() {
+        let (app, _tmp) = test_router();
+
+        let response = get(app, "/api/actions", Some(TEST_TOKEN)).await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = json_body(response).await;
+        let actions = body.as_array().unwrap();
+        assert!(actions.iter().any(|action| action["id"] == "dashboard.get"));
+        assert!(actions
+            .iter()
+            .any(|action| action["id"] == "delivery.package.send"));
+        assert!(actions.iter().any(|action| action["id"] == "orders.delete"));
+    }
+
+    #[tokio::test]
+    async fn actions_endpoint_rejects_missing_token() {
+        let (app, _tmp) = test_router();
+
+        let response = get(app, "/api/actions", None).await;
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     }
 
     #[tokio::test]
