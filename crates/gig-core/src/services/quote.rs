@@ -134,8 +134,10 @@ pub fn accept_quote_draft(
     input: QuoteAcceptInput<'_>,
 ) -> Result<QuoteAcceptResult> {
     let gig_dir = input.project_dir.join(".gig");
+    let index_path = gig_dir.join("INDEX.html");
     let job_path = gig_dir.join("JOB.md");
     let quote_path = gig_dir.join("QUOTE.md");
+    require_workflow_created_file(&index_path, "INDEX.html")?;
     require_workflow_created_file(&job_path, "JOB.md")?;
     require_workflow_created_file(&quote_path, "QUOTE.md")?;
 
@@ -151,8 +153,9 @@ pub fn accept_quote_draft(
         .quote_recommended
         .or(draft.quote_min)
         .or(draft.quote_max);
+    let tx = conn.unchecked_transaction()?;
     let order = orders::insert(
-        conn,
+        &tx,
         &NewOrder {
             slug: Some(draft.slug.as_str()),
             external_id: None,
@@ -174,7 +177,7 @@ pub fn accept_quote_draft(
 
     let workflow_paths = WorkflowPaths::new(&gig_dir);
     let workflow = order_workflow::insert(
-        conn,
+        &tx,
         &NewOrderWorkflow {
             order_id: order.id,
             project_type: Some(draft.project_type),
@@ -189,7 +192,8 @@ pub fn accept_quote_draft(
             updated_at: input.accepted_at,
         },
     )?;
-    let quote_draft = quote_drafts::mark_accepted(conn, id, order.id, input.accepted_at)?;
+    let quote_draft = quote_drafts::mark_accepted(&tx, id, order.id, input.accepted_at)?;
+    tx.commit()?;
 
     Ok(QuoteAcceptResult {
         quote_draft,
@@ -414,6 +418,7 @@ mod tests {
         let project_dir = root.path().join("accepted-gated-project");
         let gig_dir = project_dir.join(".gig");
         std::fs::create_dir_all(&gig_dir).unwrap();
+        std::fs::write(gig_dir.join("INDEX.html"), "workflow-created index").unwrap();
         std::fs::write(gig_dir.join("JOB.md"), "workflow-created job").unwrap();
         std::fs::write(gig_dir.join("QUOTE.md"), "workflow-created quote").unwrap();
         let accepted = accept_quote_draft(
@@ -474,6 +479,7 @@ mod tests {
         let project_dir = root.path().join("accepted-project");
         let gig_dir = project_dir.join(".gig");
         std::fs::create_dir_all(&gig_dir).unwrap();
+        std::fs::write(gig_dir.join("INDEX.html"), "workflow-created index").unwrap();
         std::fs::write(gig_dir.join("JOB.md"), "workflow-created job").unwrap();
         std::fs::write(gig_dir.join("QUOTE.md"), "workflow-created quote").unwrap();
 
@@ -536,6 +542,47 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(stored_workflow, accepted.workflow);
+    }
+
+    #[test]
+    fn accept_quote_draft_requires_workflow_created_index_before_promotion() {
+        let root = tempfile::tempdir().unwrap();
+        let paths = Paths::under_root(root.path());
+        let conn = open_in_memory().unwrap();
+        let draft = record_quote_draft(&conn, &paths, &input()).unwrap();
+        let priced = price_quote_draft(
+            &conn,
+            draft.id,
+            QuotePriceInput {
+                quote_min: 10_000,
+                quote_recommended: 15_000,
+                quote_max: 20_000,
+                updated_at: "2026-05-27T01:00:00Z",
+            },
+        )
+        .unwrap();
+        let project_dir = root.path().join("missing-index-project");
+        let gig_dir = project_dir.join(".gig");
+        std::fs::create_dir_all(&gig_dir).unwrap();
+        std::fs::write(gig_dir.join("JOB.md"), "workflow-created job").unwrap();
+        std::fs::write(gig_dir.join("QUOTE.md"), "workflow-created quote").unwrap();
+
+        let err = accept_quote_draft(
+            &conn,
+            priced.id,
+            QuoteAcceptInput {
+                project_dir: &project_dir,
+                accepted_at: "2026-05-27T02:00:00Z",
+                accepted_at_unix: 1_700_000_000,
+                my_cut_ratio: 0.6,
+            },
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("INDEX.html"));
+        let stored = quote_drafts::find_by_id(&conn, priced.id).unwrap();
+        assert_eq!(stored.status, QuoteDraftStatus::Quoted);
+        assert_eq!(stored.promoted_order_id, None);
     }
 
     #[test]

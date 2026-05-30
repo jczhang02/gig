@@ -13,6 +13,7 @@ pub struct OrderWorkflow {
     pub plan_ready_at: Option<String>,
     pub plan_approved_at: Option<String>,
     pub plan_rejected_at: Option<String>,
+    pub work_started_at: Option<String>,
     pub plan_rejection_reason: Option<String>,
     pub acceptance_path: Option<String>,
     pub acceptance_completed_at: Option<String>,

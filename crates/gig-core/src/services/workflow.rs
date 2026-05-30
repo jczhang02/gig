@@ -63,9 +63,11 @@ pub fn mark_plan_ready(
     require_workflow_created_file(Path::new(plan_md_path), "plan markdown")?;
     require_workflow_created_file(Path::new(plan_html_path), "plan html")?;
 
-    orders::update_status(conn, order_id, OrderStatus::PlanReady, None, None)?;
-    let order = orders::find_by_id(conn, order_id)?;
-    let workflow = order_workflow::record_plan_ready(conn, order_id, input.ready_at)?;
+    let tx = conn.unchecked_transaction()?;
+    orders::update_status(&tx, order_id, OrderStatus::PlanReady, None, None)?;
+    let order = orders::find_by_id(&tx, order_id)?;
+    let workflow = order_workflow::record_plan_ready(&tx, order_id, input.ready_at)?;
+    tx.commit()?;
     Ok(WorkflowResult { order, workflow })
 }
 
@@ -75,9 +77,11 @@ pub fn approve_plan(
     input: PlanApprovalInput<'_>,
 ) -> Result<WorkflowResult> {
     require_order_status(conn, order_id, OrderStatus::PlanReady)?;
-    orders::update_status(conn, order_id, OrderStatus::PlanApproved, None, None)?;
-    let order = orders::find_by_id(conn, order_id)?;
-    let workflow = order_workflow::record_plan_approval(conn, order_id, input.approved_at)?;
+    let tx = conn.unchecked_transaction()?;
+    orders::update_status(&tx, order_id, OrderStatus::PlanApproved, None, None)?;
+    let order = orders::find_by_id(&tx, order_id)?;
+    let workflow = order_workflow::record_plan_approval(&tx, order_id, input.approved_at)?;
+    tx.commit()?;
     Ok(WorkflowResult { order, workflow })
 }
 
@@ -94,10 +98,11 @@ pub fn reject_plan(
     }
 
     require_order_status(conn, order_id, OrderStatus::PlanReady)?;
-    let workflow =
-        order_workflow::record_plan_rejection(conn, order_id, reason, input.rejected_at)?;
-    orders::update_status(conn, order_id, OrderStatus::Accepted, None, None)?;
-    let order = orders::find_by_id(conn, order_id)?;
+    let tx = conn.unchecked_transaction()?;
+    let workflow = order_workflow::record_plan_rejection(&tx, order_id, reason, input.rejected_at)?;
+    orders::update_status(&tx, order_id, OrderStatus::Accepted, None, None)?;
+    let order = orders::find_by_id(&tx, order_id)?;
+    tx.commit()?;
     Ok(WorkflowResult { order, workflow })
 }
 
@@ -107,9 +112,11 @@ pub fn start_work(
     input: WorkflowStartInput<'_>,
 ) -> Result<WorkflowResult> {
     require_order_status(conn, order_id, OrderStatus::PlanApproved)?;
-    orders::update_status(conn, order_id, OrderStatus::InProgress, None, None)?;
-    let order = orders::find_by_id(conn, order_id)?;
-    let workflow = order_workflow::record_work_started(conn, order_id, input.started_at)?;
+    let tx = conn.unchecked_transaction()?;
+    orders::update_status(&tx, order_id, OrderStatus::InProgress, None, None)?;
+    let order = orders::find_by_id(&tx, order_id)?;
+    let workflow = order_workflow::record_work_started(&tx, order_id, input.started_at)?;
+    tx.commit()?;
     Ok(WorkflowResult { order, workflow })
 }
 
@@ -137,7 +144,7 @@ pub fn check_acceptance(conn: &Connection, order_id: i64) -> Result<WorkflowResu
     let path = Path::new(acceptance_path);
     require_workflow_created_file(path, "acceptance")?;
     let contents = std::fs::read_to_string(path)?;
-    require_acceptance_headings(&contents)?;
+    require_acceptance_items(&contents)?;
 
     Ok(WorkflowResult { order, workflow })
 }
@@ -148,29 +155,181 @@ pub fn complete_acceptance(
     input: AcceptanceCompleteInput<'_>,
 ) -> Result<WorkflowResult> {
     check_acceptance(conn, order_id)?;
-    let workflow = order_workflow::record_acceptance_completed(conn, order_id, input.completed_at)?;
-    orders::update_status(conn, order_id, OrderStatus::ReadyToDeliver, None, None)?;
-    let order = orders::find_by_id(conn, order_id)?;
+    let tx = conn.unchecked_transaction()?;
+    let workflow = order_workflow::record_acceptance_completed(&tx, order_id, input.completed_at)?;
+    orders::update_status(&tx, order_id, OrderStatus::ReadyToDeliver, None, None)?;
+    let order = orders::find_by_id(&tx, order_id)?;
+    tx.commit()?;
     Ok(WorkflowResult { order, workflow })
 }
 
-fn require_acceptance_headings(contents: &str) -> Result<()> {
-    let lower = contents.to_ascii_lowercase();
-    let has_chinese = ["验收项", "方法", "证据", "结论"]
-        .iter()
-        .all(|heading| contents.contains(heading));
-    let has_english = ["item", "method", "evidence", "conclusion"]
-        .iter()
-        .all(|heading| lower.contains(heading));
+fn require_acceptance_items(contents: &str) -> Result<()> {
+    let mut rows_after_header = contents.lines().skip_while(|line| {
+        let cells = markdown_table_cells(line);
+        acceptance_column_indices(&cells).is_none()
+    });
 
-    if has_chinese || has_english {
-        Ok(())
-    } else {
-        Err(Error::Invalid(
+    let header = rows_after_header.next().ok_or_else(|| {
+        Error::Invalid(
             "acceptance headings missing: require 验收项/方法/证据/结论 or English item/method/evidence/conclusion"
                 .to_string(),
-        ))
+        )
+    })?;
+    let header_cells = markdown_table_cells(header);
+    let columns = acceptance_column_indices(&header_cells).ok_or_else(|| {
+        Error::Invalid(
+            "acceptance headings missing: require 验收项/方法/证据/结论 or English item/method/evidence/conclusion"
+                .to_string(),
+        )
+    })?;
+
+    let mut item_count = 0;
+    for line in rows_after_header {
+        let cells = markdown_table_cells(line);
+        if cells.is_empty() || is_markdown_separator_row(&cells) {
+            continue;
+        }
+
+        item_count += 1;
+        for (label, index) in [
+            ("item", columns[0]),
+            ("method", columns[1]),
+            ("evidence", columns[2]),
+            ("conclusion", columns[3]),
+        ] {
+            if cells.get(index).is_none_or(|cell| cell.trim().is_empty()) {
+                return Err(Error::Invalid(format!(
+                    "acceptance item incomplete: {label} is required"
+                )));
+            }
+        }
+
+        let conclusion = cells
+            .get(columns[3])
+            .map(String::as_str)
+            .unwrap_or_default();
+        if !acceptance_conclusion_is_pass_like(conclusion) {
+            return Err(Error::Invalid(
+                "acceptance item incomplete: conclusion must be pass-like and not blocked"
+                    .to_string(),
+            ));
+        }
     }
+
+    if item_count == 0 {
+        return Err(Error::Invalid(
+            "acceptance item incomplete: at least one acceptance item is required".to_string(),
+        ));
+    }
+
+    Ok(())
+}
+
+fn markdown_table_cells(line: &str) -> Vec<String> {
+    let trimmed = line.trim();
+    if !trimmed.starts_with('|') {
+        return Vec::new();
+    }
+
+    trimmed
+        .trim_matches('|')
+        .split('|')
+        .map(|cell| cell.trim().to_string())
+        .collect()
+}
+
+fn acceptance_column_indices(cells: &[String]) -> Option<[usize; 4]> {
+    let normalized = cells
+        .iter()
+        .map(|cell| cell.trim().to_ascii_lowercase())
+        .collect::<Vec<_>>();
+    let item = find_heading(cells, &normalized, "验收项", "item")?;
+    let method = find_heading(cells, &normalized, "方法", "method")?;
+    let evidence = find_heading(cells, &normalized, "证据", "evidence")?;
+    let conclusion = find_heading(cells, &normalized, "结论", "conclusion")?;
+    Some([item, method, evidence, conclusion])
+}
+
+fn find_heading(
+    cells: &[String],
+    normalized: &[String],
+    chinese: &str,
+    english: &str,
+) -> Option<usize> {
+    cells
+        .iter()
+        .zip(normalized.iter())
+        .position(|(cell, lower)| cell.trim() == chinese || lower == english)
+}
+
+fn is_markdown_separator_row(cells: &[String]) -> bool {
+    cells.iter().all(|cell| {
+        let trimmed = cell.trim();
+        !trimmed.is_empty() && trimmed.chars().all(|ch| matches!(ch, '-' | ':' | ' '))
+    })
+}
+
+fn acceptance_conclusion_is_pass_like(conclusion: &str) -> bool {
+    let lower = conclusion.trim().to_ascii_lowercase();
+    let blocked_terms = [
+        "blocked",
+        "block",
+        "fail",
+        "failed",
+        "failing",
+        "not pass",
+        "not passed",
+        "not ok",
+        "not ready",
+        "not done",
+        "not complete",
+        "not completed",
+        "not success",
+        "not successful",
+        "not accepted",
+        "no pass",
+        "pending",
+        "todo",
+        "reject",
+        "rejected",
+        "incomplete",
+        "未通过",
+        "不通过",
+        "失败",
+        "阻塞",
+        "待定",
+        "未完成",
+        "不合格",
+        "未成功",
+        "未验收",
+    ];
+    if blocked_terms
+        .iter()
+        .any(|term| lower.contains(term) || conclusion.contains(term))
+    {
+        return false;
+    }
+
+    let pass_terms = [
+        "pass",
+        "passed",
+        "ok",
+        "done",
+        "complete",
+        "completed",
+        "success",
+        "successful",
+        "accepted",
+        "ready",
+        "通过",
+        "完成",
+        "合格",
+        "成功",
+        "已验收",
+    ];
+    pass_terms
+        .iter()
+        .any(|term| lower.contains(term) || conclusion.contains(term))
 }
 
 fn require_workflow_created_file(path: &Path, label: &str) -> Result<()> {
@@ -431,10 +590,34 @@ mod tests {
         .unwrap();
 
         assert_eq!(started.order.status, OrderStatus::InProgress);
+        assert_eq!(
+            started.workflow.work_started_at.as_deref(),
+            Some("2026-05-27T04:45:00Z")
+        );
         assert_eq!(started.workflow.updated_at, "2026-05-27T04:45:00Z");
         assert!(gig_dir.join("plan/PLAN.md").exists());
         assert!(gig_dir.join("plan/PLAN.html").exists());
         assert!(!gig_dir.join("acceptance/ACCEPTANCE.md").exists());
+    }
+
+    #[test]
+    fn start_work_rolls_back_status_when_workflow_metadata_is_missing() {
+        let conn = open_in_memory().unwrap();
+        let order_id = accepted_order(&conn);
+        orders::update_status(&conn, order_id, OrderStatus::PlanApproved, None, None).unwrap();
+
+        let err = start_work(
+            &conn,
+            order_id,
+            WorkflowStartInput {
+                started_at: "2026-05-27T04:45:00Z",
+            },
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("order_workflow"));
+        let order = orders::find_by_id(&conn, order_id).unwrap();
+        assert_eq!(order.status, OrderStatus::PlanApproved);
     }
 
     #[test]
@@ -527,6 +710,81 @@ mod tests {
         let err = check_acceptance(&conn, order_id).unwrap_err();
 
         assert!(err.to_string().contains("acceptance headings"));
+        let order = orders::find_by_id(&conn, order_id).unwrap();
+        assert_eq!(order.status, OrderStatus::InProgress);
+    }
+
+    #[test]
+    fn check_acceptance_rejects_incomplete_item_rows() {
+        let root = tempfile::tempdir().unwrap();
+        let conn = open_in_memory().unwrap();
+        let order_id = in_progress_order(&conn);
+        let gig_dir = root.path().join("project/.gig");
+        let acceptance_dir = gig_dir.join("acceptance");
+        std::fs::create_dir_all(&acceptance_dir).unwrap();
+        std::fs::write(
+            acceptance_dir.join("ACCEPTANCE.md"),
+            "| 验收项 | 方法 | 证据 | 结论 |
+| --- | --- | --- | --- |
+| crawler runs | run command |  | pass |
+",
+        )
+        .unwrap();
+        workflow_row(&conn, order_id, &gig_dir);
+
+        let err = check_acceptance(&conn, order_id).unwrap_err();
+
+        assert!(err.to_string().contains("acceptance item incomplete"));
+        let order = orders::find_by_id(&conn, order_id).unwrap();
+        assert_eq!(order.status, OrderStatus::InProgress);
+    }
+
+    #[test]
+    fn check_acceptance_rejects_blocked_conclusions() {
+        let root = tempfile::tempdir().unwrap();
+        let conn = open_in_memory().unwrap();
+        let order_id = in_progress_order(&conn);
+        let gig_dir = root.path().join("project/.gig");
+        let acceptance_dir = gig_dir.join("acceptance");
+        std::fs::create_dir_all(&acceptance_dir).unwrap();
+        std::fs::write(
+            acceptance_dir.join("ACCEPTANCE.md"),
+            "| 验收项 | 方法 | 证据 | 结论 |
+| --- | --- | --- | --- |
+| crawler runs | run command | log | blocked |
+",
+        )
+        .unwrap();
+        workflow_row(&conn, order_id, &gig_dir);
+
+        let err = check_acceptance(&conn, order_id).unwrap_err();
+
+        assert!(err.to_string().contains("conclusion must be pass-like"));
+        let order = orders::find_by_id(&conn, order_id).unwrap();
+        assert_eq!(order.status, OrderStatus::InProgress);
+    }
+
+    #[test]
+    fn check_acceptance_rejects_negated_pass_like_conclusions() {
+        let root = tempfile::tempdir().unwrap();
+        let conn = open_in_memory().unwrap();
+        let order_id = in_progress_order(&conn);
+        let gig_dir = root.path().join("project/.gig");
+        let acceptance_dir = gig_dir.join("acceptance");
+        std::fs::create_dir_all(&acceptance_dir).unwrap();
+        std::fs::write(
+            acceptance_dir.join("ACCEPTANCE.md"),
+            "| 验收项 | 方法 | 证据 | 结论 |
+| --- | --- | --- | --- |
+| crawler runs | run command | log | not ready |
+",
+        )
+        .unwrap();
+        workflow_row(&conn, order_id, &gig_dir);
+
+        let err = check_acceptance(&conn, order_id).unwrap_err();
+
+        assert!(err.to_string().contains("conclusion must be pass-like"));
         let order = orders::find_by_id(&conn, order_id).unwrap();
         assert_eq!(order.status, OrderStatus::InProgress);
     }

@@ -80,6 +80,18 @@ mod tests {
             )
             .unwrap();
         assert_eq!(project_type_cols, 1, "orders.project_type should exist");
+
+        let work_started_cols: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('order_workflow') WHERE name = 'work_started_at'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            work_started_cols, 1,
+            "order_workflow.work_started_at should exist"
+        );
     }
 
     #[test]

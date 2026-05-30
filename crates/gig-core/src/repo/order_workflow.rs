@@ -6,7 +6,8 @@ use std::str::FromStr;
 
 const ALL_COLS: &str = "order_id, project_type, gig_dir, index_path, job_path, quote_path, \
      plan_md_path, plan_html_path, plan_ready_at, plan_approved_at, plan_rejected_at, \
-     plan_rejection_reason, acceptance_path, acceptance_completed_at, latest_delivery_dir, \
+     work_started_at, plan_rejection_reason, acceptance_path, acceptance_completed_at, \
+     latest_delivery_dir, \
      latest_client_package_path, created_at, updated_at";
 
 pub struct NewOrderWorkflow<'a> {
@@ -50,6 +51,7 @@ fn map_row(row: &Row<'_>) -> rusqlite::Result<OrderWorkflow> {
         plan_ready_at: row.get("plan_ready_at")?,
         plan_approved_at: row.get("plan_approved_at")?,
         plan_rejected_at: row.get("plan_rejected_at")?,
+        work_started_at: row.get("work_started_at")?,
         plan_rejection_reason: row.get("plan_rejection_reason")?,
         acceptance_path: row.get("acceptance_path")?,
         acceptance_completed_at: row.get("acceptance_completed_at")?,
@@ -165,7 +167,7 @@ pub fn record_work_started(
 ) -> Result<OrderWorkflow> {
     let changed = conn.execute(
         "UPDATE order_workflow \
-         SET updated_at = ?2 \
+         SET work_started_at = ?2, updated_at = ?2 \
          WHERE order_id = ?1",
         (order_id, updated_at),
     )?;
