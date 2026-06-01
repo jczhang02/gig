@@ -61,7 +61,7 @@ async fn run_async(options: GuiOptions) -> Result<()> {
         .map_err(|err| Error::Invalid(format!("gig gui server failed: {err}")))
 }
 
-fn require_localhost(addr: SocketAddr) -> Result<()> {
+pub(crate) fn require_localhost(addr: SocketAddr) -> Result<()> {
     if addr.ip().is_loopback() {
         Ok(())
     } else {
@@ -71,7 +71,7 @@ fn require_localhost(addr: SocketAddr) -> Result<()> {
     }
 }
 
-fn random_token() -> String {
+pub(crate) fn random_token() -> String {
     thread_rng()
         .sample_iter(&Alphanumeric)
         .take(32)
@@ -79,7 +79,7 @@ fn random_token() -> String {
         .collect()
 }
 
-async fn shutdown_signal() {
+pub(crate) async fn shutdown_signal() {
     let _ = tokio::signal::ctrl_c().await;
 }
 

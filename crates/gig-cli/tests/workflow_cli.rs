@@ -1,8 +1,10 @@
 use std::fs;
-use std::io::Write;
+use std::io::{BufRead, BufReader, Read, Write};
+use std::net::TcpStream;
 use std::path::{Path, PathBuf};
-use std::process::Command;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::process::{Child, Command, Stdio};
+use std::sync::mpsc;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use gig_core::db;
 use gig_core::models::{DeliveryPackageStatus, OrderStatus, ProjectType, QuoteDraftStatus};
@@ -1407,6 +1409,132 @@ fn write_zip<const N: usize>(path: &Path, entries: [(&str, &str); N]) {
         zip.write_all(contents.as_bytes()).unwrap();
     }
     zip.finish().unwrap();
+}
+
+#[test]
+fn serve_workflow_gig_dir_prints_local_url_and_serves_index() {
+    let (config_home, data_home, state_home) = isolated_homes("serve-workflow-gig-dir");
+    let project_dir = unique_temp_dir("serve-workflow-gig-dir-project");
+    let gig_dir = project_dir.join(".gig");
+    fs::create_dir_all(&gig_dir).unwrap();
+    fs::write(gig_dir.join("INDEX.html"), "<h1>hello from gig serve</h1>").unwrap();
+    fs::write(
+        project_dir.join("secret.txt"),
+        "do not serve parent project files",
+    )
+    .unwrap();
+    seed_order_with_workflow(&data_home, OrderStatus::Accepted, &gig_dir);
+
+    let mut child = gig_command(&config_home, &data_home, &state_home)
+        .args(["serve", "workflow-order", "--port", "0"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+
+    let stdout = child.stdout.take().unwrap();
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        for line in BufReader::new(stdout).lines() {
+            if tx.send(line.unwrap()).is_err() {
+                break;
+            }
+        }
+    });
+
+    let url_line = read_child_line_containing(&mut child, &rx, "URL :");
+    let path_line = read_child_line_containing(&mut child, &rx, "Path:");
+    let url = url_line
+        .split_once("URL :")
+        .map(|(_, value)| value.trim())
+        .unwrap();
+
+    assert!(url.starts_with("http://127.0.0.1:"), "url line: {url_line}");
+    assert!(url.ends_with("/INDEX.html"), "url line: {url_line}");
+    let (port, path_after_port) = url
+        .strip_prefix("http://127.0.0.1:")
+        .unwrap()
+        .split_once('/')
+        .unwrap();
+    let token = path_after_port.split('/').next().unwrap();
+    assert_eq!(
+        path_after_port.split('/').count(),
+        2,
+        "URL should include token prefix: {url}"
+    );
+    assert!(path_line.contains(gig_dir.join("INDEX.html").to_str().unwrap()));
+
+    let body = fetch_local_http_body(url);
+    assert!(
+        body.contains("hello from gig serve"),
+        "unexpected response body:\n{body}"
+    );
+
+    let traversal_url = format!("http://127.0.0.1:{port}/{token}/../secret.txt");
+    let traversal_response = fetch_local_http_response(&traversal_url);
+    assert!(
+        traversal_response.starts_with("HTTP/1.1 404 Not Found")
+            || traversal_response.starts_with("HTTP/1.0 404 Not Found"),
+        "parent project file should not be served:\n{traversal_response}"
+    );
+
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+fn read_child_line_containing(
+    child: &mut Child,
+    rx: &mpsc::Receiver<String>,
+    needle: &str,
+) -> String {
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while std::time::Instant::now() < deadline {
+        match rx.recv_timeout(Duration::from_millis(100)) {
+            Ok(line) if line.contains(needle) => return line,
+            Ok(_) => {}
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                if let Some(status) = child.try_wait().unwrap() {
+                    let mut stderr = String::new();
+                    if let Some(mut pipe) = child.stderr.take() {
+                        let _ = pipe.read_to_string(&mut stderr);
+                    }
+                    panic!("child exited before printing {needle}: {status}\nstderr:\n{stderr}");
+                }
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+        }
+    }
+
+    let _ = child.kill();
+    let mut stderr = String::new();
+    if let Some(mut pipe) = child.stderr.take() {
+        let _ = pipe.read_to_string(&mut stderr);
+    }
+    panic!("timed out waiting for {needle}\nstderr:\n{stderr}");
+}
+
+fn fetch_local_http_body(url: &str) -> String {
+    let response = fetch_local_http_response(url);
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK") || response.starts_with("HTTP/1.0 200 OK"),
+        "unexpected response:\n{response}"
+    );
+    response
+}
+
+fn fetch_local_http_response(url: &str) -> String {
+    let rest = url.strip_prefix("http://127.0.0.1:").unwrap();
+    let (port, path) = rest.split_once('/').unwrap();
+    let port = port.parse::<u16>().unwrap();
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    write!(
+        stream,
+        "GET /{path} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
+    )
+    .unwrap();
+    let mut response = String::new();
+    stream.read_to_string(&mut response).unwrap();
+    response
 }
 
 fn prepare_client_delivery(gig_dir: &Path, with_zip: bool) -> PathBuf {

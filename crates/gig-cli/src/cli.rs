@@ -123,8 +123,25 @@ pub enum Command {
     /// Standalone order artifact upload subcommands.
     Artifact(ArtifactArgs),
 
+    /// Serve workflow artifacts over a localhost URL.
+    Serve(ServeArgs),
+
     /// Start the local read-only GUI companion.
     Gui(GuiArgs),
+}
+
+#[derive(clap::Args, Debug)]
+pub struct ServeArgs {
+    /// Order id or slug.
+    pub id_or_slug: String,
+
+    /// Localhost port to bind. Use 0 for a random free port.
+    #[arg(long, default_value_t = 0)]
+    pub port: u16,
+
+    /// Open the printed URL in the default browser.
+    #[arg(long)]
+    pub open: bool,
 }
 
 #[derive(clap::Args, Debug)]

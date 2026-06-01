@@ -105,6 +105,11 @@ const ARTIFACT_SEND_FIELDS: &[ActionField] = &[
     ActionField::repeated("files", "Files", ActionFieldKind::PathList),
     ActionField::optional("uploader", "Uploader", ActionFieldKind::String),
 ];
+const SERVE_FIELDS: &[ActionField] = &[
+    ActionField::required("id_or_slug", "Order id or slug", ActionFieldKind::String),
+    ActionField::optional("port", "Localhost port", ActionFieldKind::Integer),
+    ActionField::optional("open", "Open browser", ActionFieldKind::Boolean),
+];
 const QUOTE_CREATE_FIELDS: &[ActionField] = &[
     ActionField::required("slug", "Slug", ActionFieldKind::String),
     ActionField::required("title", "Title", ActionFieldKind::String),
@@ -870,6 +875,19 @@ static ACTIONS: &[ActionMeta] = &[
         [ReadsFiles, WritesDatabase, ExternalNetwork, UploadsFiles],
         Json,
         json: true,
+        workflow: false,
+    ),
+    action!(
+        "workflow.artifacts.serve",
+        ["serve"],
+        "Serve Workflow Artifacts",
+        "Serve an Order's workflow artifacts over a localhost URL.",
+        Read,
+        SERVE_FIELDS,
+        NONE,
+        [ReadsDatabase, ReadsFiles, StartsLocalServer],
+        LocalServer,
+        json: false,
         workflow: false,
     ),
     action!(

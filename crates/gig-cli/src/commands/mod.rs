@@ -21,6 +21,7 @@ pub mod paid;
 pub mod plan;
 pub mod price;
 pub mod quote;
+pub mod serve;
 pub mod show;
 pub mod source;
 pub mod stats;

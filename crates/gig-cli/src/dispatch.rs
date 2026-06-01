@@ -48,6 +48,7 @@ pub fn run(cli: Cli) -> Result<()> {
         Command::Acceptance(args) => commands::acceptance::run(&conn, args),
         Command::Package(args) => commands::package::run(&conn, args),
         Command::Artifact(args) => commands::artifact::run(&conn, args),
+        Command::Serve(args) => commands::serve::run(&conn, args),
         Command::Delete(args) => commands::delete::run(&conn, args),
         Command::Completion(_) => unreachable!("completion is handled before DB bootstrap"),
         Command::Gui(_) => unreachable!("gui is handled before DB bootstrap"),

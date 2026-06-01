@@ -7,5 +7,7 @@
 pub mod api;
 pub mod auth;
 pub mod server;
+pub mod static_server;
 
 pub use server::{run, GuiOptions};
+pub use static_server::{serve_static, StaticServeOptions};
