@@ -109,6 +109,26 @@ fn seed_order_with_workflow(data_home: &Path, status: OrderStatus, gig_dir: &Pat
     order.id
 }
 
+fn write_file(path: &Path, contents: &str) {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).unwrap();
+    }
+    fs::write(path, contents).unwrap();
+}
+
+fn write_workflow_files(gig_dir: &Path) {
+    for path in [
+        gig_dir.join("INDEX.html"),
+        gig_dir.join("JOB.md"),
+        gig_dir.join("QUOTE.md"),
+        gig_dir.join("plan/PLAN.md"),
+        gig_dir.join("plan/PLAN.html"),
+        gig_dir.join("acceptance/ACCEPTANCE.md"),
+    ] {
+        write_file(&path, "ok");
+    }
+}
+
 fn seed_legacy_order_without_workflow(data_home: &Path, status: OrderStatus, slug: &str) -> i64 {
     let conn = db::open(&data_home.join("gig/gig.db")).unwrap();
     orders::insert(
@@ -483,6 +503,113 @@ fn doctor_reports_missing_workflow_files_and_package_artifacts() {
     assert!(stdout.contains("PLAN.md"));
     assert!(stdout.contains("missing package artifact"));
     assert!(stdout.contains("client-package.zip"));
+}
+
+#[test]
+fn doctor_resolves_relative_package_paths_against_order_paths() {
+    let (config_home, data_home, state_home) = isolated_homes("doctor-relative-package");
+    let project_dir = unique_temp_dir("doctor-relative-package-project");
+    let gig_dir = project_dir.join(".gig");
+    write_workflow_files(&gig_dir);
+    let order_id = seed_order_with_workflow(&data_home, OrderStatus::ReadyToDeliver, &gig_dir);
+    let relative_package_path = Path::new(".gig/delivery/2026-05-27/export/client-package.zip");
+    write_file(&project_dir.join(relative_package_path), "zip bytes");
+    {
+        let conn = db::open(&data_home.join("gig/gig.db")).unwrap();
+        orders::update_dev_path(&conn, order_id, Some(project_dir.to_str().unwrap())).unwrap();
+        delivery_packages::insert(
+            &conn,
+            &delivery_packages::NewDeliveryPackage {
+                order_id,
+                delivery_date: "2026-05-27",
+                delivery_dir: ".gig/delivery/2026-05-27",
+                client_dir: ".gig/delivery/2026-05-27/client",
+                manifest_path: ".gig/delivery/2026-05-27/manifest.toml",
+                package_path: Some(relative_package_path.to_str().unwrap()),
+                status: DeliveryPackageStatus::Validated,
+                created_at: "2026-05-27T06:00:00Z",
+                updated_at: "2026-05-27T06:00:00Z",
+            },
+        )
+        .unwrap();
+    }
+
+    let output = gig_command(&config_home, &data_home, &state_home)
+        .args(["doctor"])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(
+        !stdout.contains("missing package artifact"),
+        "doctor should resolve relative package paths against order paths\n{stdout}"
+    );
+}
+
+#[test]
+fn doctor_suppresses_archived_workflow_and_package_noise() {
+    let (config_home, data_home, state_home) = isolated_homes("doctor-archived-noise");
+    let project_dir = unique_temp_dir("doctor-archived-noise-project");
+    let gig_dir = project_dir.join(".gig");
+    let order_id = seed_order_with_workflow(&data_home, OrderStatus::Archived, &gig_dir);
+    {
+        let conn = db::open(&data_home.join("gig/gig.db")).unwrap();
+        conn.execute(
+            "UPDATE orders SET archived_at = ?1 WHERE id = ?2",
+            rusqlite::params![1_700_000_123_i64, order_id],
+        )
+        .unwrap();
+        orders::update_archive_path(
+            &conn,
+            order_id,
+            Some(project_dir.join("missing-archive").to_str().unwrap()),
+        )
+        .unwrap();
+        delivery_packages::insert(
+            &conn,
+            &delivery_packages::NewDeliveryPackage {
+                order_id,
+                delivery_date: "2026-05-27",
+                delivery_dir: gig_dir.join("delivery/2026-05-27").to_str().unwrap(),
+                client_dir: gig_dir.join("delivery/2026-05-27/client").to_str().unwrap(),
+                manifest_path: gig_dir
+                    .join("delivery/2026-05-27/manifest.toml")
+                    .to_str()
+                    .unwrap(),
+                package_path: Some(
+                    gig_dir
+                        .join("delivery/2026-05-27/export/client-package.zip")
+                        .to_str()
+                        .unwrap(),
+                ),
+                status: DeliveryPackageStatus::Sent,
+                created_at: "2026-05-27T06:00:00Z",
+                updated_at: "2026-05-27T06:00:00Z",
+            },
+        )
+        .unwrap();
+    }
+
+    let output = gig_command(&config_home, &data_home, &state_home)
+        .args(["doctor"])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(
+        !stdout.contains("missing: order"),
+        "archived missing paths should not warn\n{stdout}"
+    );
+    assert!(
+        !stdout.contains("missing workflow file"),
+        "archived workflow files should not warn\n{stdout}"
+    );
+    assert!(
+        !stdout.contains("missing package artifact"),
+        "archived package artifacts should not warn\n{stdout}"
+    );
 }
 
 #[test]

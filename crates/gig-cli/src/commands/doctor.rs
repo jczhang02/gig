@@ -1,8 +1,8 @@
 use crate::cli::DoctorArgs;
 use gig_core::config::{Config, Paths};
 use gig_core::context::{doctor_fix_paths, doctor_path_checks};
-use gig_core::models::DeliveryPackageStatus;
-use gig_core::repo::{delivery_packages, order_workflow};
+use gig_core::models::{DeliveryPackageStatus, Order, OrderStatus};
+use gig_core::repo::{delivery_packages, order_workflow, orders};
 use gig_core::Result;
 use owo_colors::OwoColorize;
 use rusqlite::Connection;
@@ -54,6 +54,11 @@ fn append_workflow_file_diagnostics(
     diagnostics: &mut Vec<String>,
 ) -> Result<()> {
     for workflow in order_workflow::list(conn)? {
+        let order = orders::find_by_id(conn, workflow.order_id)?;
+        if !requires_live_workflow_files(order.status) {
+            continue;
+        }
+
         for (label, path) in [
             ("index_path", workflow.index_path.as_deref()),
             ("job_path", workflow.job_path.as_deref()),
@@ -84,27 +89,65 @@ fn append_package_artifact_diagnostics(
             package.status,
             DeliveryPackageStatus::Validated | DeliveryPackageStatus::Sent
         );
+        if !requires_artifact {
+            continue;
+        }
 
-        if let Some(path) = package.package_path.as_deref() {
-            if has_unsafe_path_components(Path::new(path)) {
+        let order = orders::find_by_id(conn, package.order_id)?;
+        let Some(path) = package.package_path.as_deref() else {
+            if requires_live_package_artifact(order.status) {
                 diagnostics.push(format!(
-                    "unsafe package path: order #{} package #{} package_path={path}",
-                    package.order_id, package.id
-                ));
-            } else if requires_artifact && fs::metadata(path).is_err() {
-                diagnostics.push(format!(
-                    "missing package artifact: order #{} package #{} package_path={path}",
+                    "missing package artifact: order #{} package #{} package_path is not recorded",
                     package.order_id, package.id
                 ));
             }
-        } else if requires_artifact {
+            continue;
+        };
+
+        let path = Path::new(path);
+        if has_unsafe_path_components(path) {
             diagnostics.push(format!(
-                "missing package artifact: order #{} package #{} package_path is not recorded",
-                package.order_id, package.id
+                "unsafe package path: order #{} package #{} package_path={}",
+                package.order_id,
+                package.id,
+                path.display()
+            ));
+        } else if requires_live_package_artifact(order.status) && !package_path_exists(path, &order)
+        {
+            diagnostics.push(format!(
+                "missing package artifact: order #{} package #{} package_path={}",
+                package.order_id,
+                package.id,
+                path.display()
             ));
         }
     }
     Ok(())
+}
+
+fn requires_live_workflow_files(status: OrderStatus) -> bool {
+    !matches!(
+        status,
+        OrderStatus::Paid | OrderStatus::Archived | OrderStatus::Cancelled
+    )
+}
+
+fn requires_live_package_artifact(status: OrderStatus) -> bool {
+    requires_live_workflow_files(status)
+}
+
+fn package_path_exists(path: &Path, order: &Order) -> bool {
+    if fs::metadata(path).is_ok() {
+        return true;
+    }
+    if path.is_absolute() {
+        return false;
+    }
+
+    [order.dev_path.as_deref(), order.archive_path.as_deref()]
+        .into_iter()
+        .flatten()
+        .any(|base| fs::metadata(Path::new(base).join(path)).is_ok())
 }
 
 fn has_unsafe_path_components(path: &Path) -> bool {

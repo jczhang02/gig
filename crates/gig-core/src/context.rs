@@ -2,6 +2,7 @@
 //!
 //! See spec §5.7 for invariants and algorithm.
 
+use crate::models::OrderStatus;
 use crate::{Error, Result};
 use rusqlite::Connection;
 use std::path::{Path, PathBuf};
@@ -79,15 +80,20 @@ pub fn doctor_path_checks(conn: &Connection) -> Result<Vec<String>> {
     let mut diagnostics = Vec::new();
 
     let mut stmt = conn.prepare(
-        "SELECT id, slug, dev_path, archive_path FROM orders
+        "SELECT id, slug, dev_path, archive_path, status FROM orders
          WHERE dev_path IS NOT NULL OR archive_path IS NOT NULL",
     )?;
     let rows = stmt.query_map([], |r| {
+        let status: String = r.get(4)?;
+        let status = status.parse::<OrderStatus>().map_err(|err| {
+            rusqlite::Error::FromSqlConversionFailure(4, rusqlite::types::Type::Text, Box::new(err))
+        })?;
         Ok((
             r.get::<_, i64>(0)?,
             r.get::<_, Option<String>>(1)?,
             r.get::<_, Option<String>>(2)?,
             r.get::<_, Option<String>>(3)?,
+            status,
         ))
     })?;
 
@@ -95,7 +101,7 @@ pub fn doctor_path_checks(conn: &Connection) -> Result<Vec<String>> {
     let mut canonical_paths: Vec<(i64, String, PathBuf)> = Vec::new();
 
     for row in rows {
-        let (id, slug, dev, arch) = row?;
+        let (id, slug, dev, arch, status) = row?;
         let label = slug.unwrap_or_else(|| format!("#{id}"));
 
         for (kind, path_str) in [("dev_path", dev), ("archive_path", arch)] {
@@ -113,10 +119,12 @@ pub fn doctor_path_checks(conn: &Connection) -> Result<Vec<String>> {
                         canonical_paths.push((id, format!("{label}/{kind}"), canon));
                     }
                     Err(e) => {
-                        diagnostics.push(format!(
-                            "missing: order #{id} ({label}) {kind}={} ({e})",
-                            p.display()
-                        ));
+                        if requires_live_order_paths(status) {
+                            diagnostics.push(format!(
+                                "missing: order #{id} ({label}) {kind}={} ({e})",
+                                p.display()
+                            ));
+                        }
                     }
                 }
             }
@@ -147,6 +155,13 @@ pub fn doctor_path_checks(conn: &Connection) -> Result<Vec<String>> {
     doctor_orphan_clients(conn, &mut diagnostics)?;
 
     Ok(diagnostics)
+}
+
+fn requires_live_order_paths(status: OrderStatus) -> bool {
+    !matches!(
+        status,
+        OrderStatus::Paid | OrderStatus::Archived | OrderStatus::Cancelled
+    )
 }
 
 /// Attempt to fix broken dev_path / archive_path entries.

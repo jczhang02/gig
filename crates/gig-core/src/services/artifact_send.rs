@@ -107,7 +107,7 @@ fn artifact_object_key(
         })?
         .to_string_lossy();
     Ok(format!(
-        "orders/{order_id}/artifacts/{uploaded_at}/{send_attempt}-{index}-{basename}"
+        "artifacts/{order_id}/{uploaded_at}/{send_attempt}-{index}-{basename}"
     ))
 }
 
@@ -292,11 +292,11 @@ mod tests {
 
         assert_eq!(uploader.uploaded_paths(), files);
         let first_key = format!(
-            "orders/{order_id}/artifacts/1700000123000000000/0-0-{}",
+            "artifacts/{order_id}/1700000123000000000/0-0-{}",
             first.file_name().unwrap().to_string_lossy()
         );
         let second_key = format!(
-            "orders/{order_id}/artifacts/1700000123000000000/0-1-{}",
+            "artifacts/{order_id}/1700000123000000000/0-1-{}",
             second.file_name().unwrap().to_string_lossy()
         );
         assert_ne!(first_key, second_key);

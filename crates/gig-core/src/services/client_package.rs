@@ -505,7 +505,7 @@ fn client_package_object_key(
 ) -> String {
     let uploaded_at = uploaded_at.unix_timestamp_nanos();
     format!(
-        "orders/{order_id}/deliveries/{delivery_date}/{uploaded_at}-{delivery_attempt}-client-package.zip"
+        "deliveries/{order_id}/{delivery_date}/{uploaded_at}-{delivery_attempt}-client-package.zip"
     )
 }
 
@@ -900,7 +900,7 @@ mod tests {
         assert_eq!(
             uploader.uploaded_object_keys(),
             vec![Some(format!(
-                "orders/{order_id}/deliveries/2026-05-27/1779865200000000000-0-client-package.zip"
+                "deliveries/{order_id}/2026-05-27/1779865200000000000-0-client-package.zip"
             ))]
         );
         assert_eq!(sent.package.order_id, order_id);
@@ -1039,12 +1039,10 @@ mod tests {
         )
         .unwrap();
 
-        let first_key = format!(
-            "orders/{order_id}/deliveries/2026-05-27/1779865200000000000-0-client-package.zip"
-        );
-        let resend_key = format!(
-            "orders/{order_id}/deliveries/2026-05-27/1779951600000000000-1-client-package.zip"
-        );
+        let first_key =
+            format!("deliveries/{order_id}/2026-05-27/1779865200000000000-0-client-package.zip");
+        let resend_key =
+            format!("deliveries/{order_id}/2026-05-27/1779951600000000000-1-client-package.zip");
         assert_ne!(first_key, resend_key);
         assert_eq!(
             uploader.uploaded_paths(),
