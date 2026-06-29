@@ -97,6 +97,7 @@ mod tests {
             secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".into(),
             link_ttl_seconds: 604_800,
             path_style: false,
+            allow_insecure_http: false,
         }
     }
 

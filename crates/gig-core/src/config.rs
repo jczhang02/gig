@@ -27,6 +27,9 @@ impl Paths {
         let home =
             std::env::var_os("HOME").ok_or_else(|| Error::Config("HOME is not set".into()))?;
         let home = PathBuf::from(home);
+        if !home.is_absolute() {
+            return Err(Error::Config("HOME must be an absolute path".into()));
+        }
 
         let data_dir = xdg_dir("XDG_DATA_HOME", &home, ".local/share").join("gig");
         let config_dir = xdg_dir("XDG_CONFIG_HOME", &home, ".config").join("gig");
@@ -70,6 +73,7 @@ impl Paths {
             &self.backups_dir,
         ] {
             std::fs::create_dir_all(dir).map_err(|e| Error::PathUnavailable(dir.clone(), e))?;
+            secure_dir(dir)?;
         }
         Ok(())
     }
@@ -77,9 +81,28 @@ impl Paths {
 
 fn xdg_dir(env_var: &str, home: &Path, fallback: &str) -> PathBuf {
     match std::env::var_os(env_var) {
-        Some(v) if !v.is_empty() => PathBuf::from(v),
-        _ => home.join(fallback),
+        Some(v) if !v.is_empty() => {
+            let path = PathBuf::from(v);
+            if path.is_absolute() {
+                return path;
+            }
+        }
+        _ => {}
     }
+    home.join(fallback)
+}
+
+#[cfg(unix)]
+fn secure_dir(path: &Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
+        .map_err(|e| Error::PathUnavailable(path.to_path_buf(), e))
+}
+
+#[cfg(not(unix))]
+fn secure_dir(_path: &Path) -> Result<()> {
+    Ok(())
 }
 
 /// User-facing config loaded from `config_file`.
@@ -171,6 +194,12 @@ pub struct S3UploaderConfig {
     /// Use path-style URLs. Required for MinIO; set false for OSS/AWS.
     #[serde(default)]
     pub path_style: bool,
+    /// Allow plain HTTP endpoints for explicitly trusted local/dev S3-compatible stores.
+    ///
+    /// Production delivery endpoints should stay HTTPS. Loopback HTTP is always allowed
+    /// for local tests even when this is false.
+    #[serde(default)]
+    pub allow_insecure_http: bool,
 }
 
 fn default_link_ttl() -> u32 {
@@ -219,11 +248,40 @@ impl Config {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
                 .map_err(|e| Error::PathUnavailable(parent.to_path_buf(), e))?;
+            secure_dir(parent)?;
         }
         let text = toml::to_string_pretty(self)?;
-        std::fs::write(path, text).map_err(|e| Error::PathUnavailable(path.to_path_buf(), e))?;
+        write_secret_file(path, text.as_bytes())?;
         Ok(())
     }
+}
+
+#[cfg(unix)]
+fn write_secret_file(path: &Path, bytes: &[u8]) -> Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+
+    if path.exists() {
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+            .map_err(|e| Error::PathUnavailable(path.to_path_buf(), e))?;
+    }
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(path)
+        .map_err(|e| Error::PathUnavailable(path.to_path_buf(), e))?;
+    file.write_all(bytes)
+        .map_err(|e| Error::PathUnavailable(path.to_path_buf(), e))?;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+        .map_err(|e| Error::PathUnavailable(path.to_path_buf(), e))?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn write_secret_file(path: &Path, bytes: &[u8]) -> Result<()> {
+    std::fs::write(path, bytes).map_err(|e| Error::PathUnavailable(path.to_path_buf(), e))
 }
 
 #[cfg(test)]
@@ -252,6 +310,34 @@ mod tests {
         assert!(p.backups_dir.is_dir());
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn ensure_dirs_restricts_directory_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = TempDir::new().unwrap();
+        let p = Paths::under_root(tmp.path());
+        p.ensure_dirs().unwrap();
+
+        let mode = std::fs::metadata(&p.config_dir)
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o700);
+    }
+
+    #[test]
+    fn relative_xdg_env_values_fall_back_to_home() {
+        std::env::set_var("GIG_TEST_RELATIVE_XDG", "relative/path");
+        let home = Path::new("/home/test-user");
+
+        let resolved = xdg_dir("GIG_TEST_RELATIVE_XDG", home, ".config");
+
+        std::env::remove_var("GIG_TEST_RELATIVE_XDG");
+        assert_eq!(resolved, home.join(".config"));
+    }
+
     #[test]
     fn config_load_or_default_returns_default_when_missing() {
         let tmp = TempDir::new().unwrap();
@@ -268,6 +354,30 @@ mod tests {
         cfg.save(&path).unwrap();
         let loaded = Config::load_or_default(&path).unwrap();
         assert_eq!(cfg, loaded);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn config_save_restricts_file_permissions() {
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("cfg/config.toml");
+        Config::default().save(&path).unwrap();
+
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+
+        std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .mode(0o644)
+            .open(&path)
+            .unwrap();
+        Config::default().save(&path).unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
     }
 
     #[test]

@@ -1,5 +1,5 @@
 use super::catalog::find_by_id;
-use super::types::{ActionKind, ActionPreflight, ConfirmationPolicy};
+use super::types::{ActionKind, ActionPreflight, ConfirmationPolicy, SideEffect};
 use crate::{Error, Result};
 
 pub fn preflight_action(action_id: &str) -> Result<ActionPreflight> {
@@ -11,7 +11,7 @@ pub fn preflight_action(action_id: &str) -> Result<ActionPreflight> {
         ActionKind::Read => {}
         ActionKind::Mutate => preflight
             .warnings
-            .push("This action may mutate the local gig database.".into()),
+            .push("This action may mutate local gig state.".into()),
         ActionKind::ExternalIo => preflight
             .warnings
             .push("This action may perform external network or upload I/O.".into()),
@@ -20,6 +20,8 @@ pub fn preflight_action(action_id: &str) -> Result<ActionPreflight> {
             .push("This action can be destructive and requires explicit confirmation.".into()),
     }
 
+    add_side_effect_warnings(&mut preflight, meta.side_effects);
+
     if matches!(meta.confirmation, ConfirmationPolicy::Required { .. }) {
         preflight
             .warnings
@@ -27,6 +29,39 @@ pub fn preflight_action(action_id: &str) -> Result<ActionPreflight> {
     }
 
     Ok(preflight)
+}
+
+fn add_side_effect_warnings(preflight: &mut ActionPreflight, side_effects: &[SideEffect]) {
+    if side_effects.contains(&SideEffect::WritesDatabase) {
+        preflight
+            .warnings
+            .push("This action may write the local gig database.".into());
+    }
+    if side_effects.iter().any(|effect| {
+        matches!(
+            effect,
+            SideEffect::WritesFiles | SideEffect::MovesFiles | SideEffect::DeletesFiles
+        )
+    }) {
+        preflight
+            .warnings
+            .push("This action may change local files.".into());
+    }
+    if side_effects.iter().any(|effect| {
+        matches!(
+            effect,
+            SideEffect::ExternalNetwork | SideEffect::UploadsFiles
+        )
+    }) {
+        preflight
+            .warnings
+            .push("This action may use external network or upload I/O.".into());
+    }
+    if side_effects.contains(&SideEffect::OpensEditor) {
+        preflight
+            .warnings
+            .push("This action may open an editor.".into());
+    }
 }
 
 #[cfg(test)]
@@ -40,6 +75,21 @@ mod tests {
         assert_eq!(preflight.confirmation, ConfirmationPolicy::None);
         assert!(preflight.warnings.is_empty());
         assert_eq!(preflight.blocked_reason, None);
+    }
+
+    #[test]
+    fn mutating_action_preflight_mentions_database_writes() {
+        let preflight = preflight_action("delivery.package.check").unwrap();
+
+        assert_eq!(preflight.confirmation, ConfirmationPolicy::None);
+        assert!(preflight
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("local gig state")));
+        assert!(preflight
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("local gig database")));
     }
 
     #[test]

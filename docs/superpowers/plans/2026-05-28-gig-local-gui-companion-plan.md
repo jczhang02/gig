@@ -166,7 +166,7 @@ Stack:
 - `gig gui` binds only to `127.0.0.1`.
 - Use port `0` by default so the OS assigns a free localhost port; optionally allow `--port` later only for localhost.
 - Generate a per-process random token on startup.
-- Open browser with `http://127.0.0.1:<port>/?token=<token>`.
+- Open browser with `http://127.0.0.1:<port>/#token=<token>`; scrub token from address bar after storage.
 - Frontend stores token in memory/session storage and sends `Authorization: Bearer <token>`.
 - API rejects missing/wrong token with `401`.
 - Do not implement accounts, passwords, cookies, LAN binding, CORS permissive defaults, or remote access in v0.

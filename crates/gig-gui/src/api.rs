@@ -6,12 +6,14 @@ use axum::response::{Html, IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use gig_core::actions::{
-    self, execute_read_action, is_read_action, preflight_action, ActionContext, ActionMeta,
-    ActionPreflight, DashboardResponse, OrderResponse, OrdersResponse, ReadActionInput,
-    ReadActionOutput, RedactedConfigResponse,
+    self, execute_read_action, get_redacted_config_for_paths, is_read_action, preflight_action,
+    ActionContext, ActionMeta, ActionPreflight, DashboardResponse, OrderResponse, OrdersResponse,
+    ReadActionInput, ReadActionOutput, RedactedConfigResponse,
 };
 use gig_core::config::{Config, Paths};
+use gig_core::Error as CoreError;
 use serde::{Deserialize, Serialize};
+use std::io::ErrorKind;
 use std::path::PathBuf;
 use time::OffsetDateTime;
 
@@ -185,7 +187,9 @@ async fn order_handler(
     let output = run_read_action(
         state,
         "orders.get_detail",
-        ReadActionInput::OrderDetail { id },
+        ReadActionInput::OrderDetail {
+            id_or_slug: Some(id.to_string()),
+        },
     )
     .await?;
     match output {
@@ -267,12 +271,8 @@ fn parse_action_request(body: &Bytes) -> Result<ExecuteActionRequest, serde_json
     serde_json::from_slice(body)
 }
 
-fn core_error_response(err: gig_core::Error) -> Response {
-    api_error(
-        StatusCode::INTERNAL_SERVER_ERROR,
-        "core_error",
-        err.to_string(),
-    )
+fn core_error_response(err: CoreError) -> Response {
+    action_error_response(err)
 }
 
 async fn run_read_action(
@@ -284,10 +284,21 @@ async fn run_read_action(
     let config = state.config;
     let cwd = state.cwd;
     let now = OffsetDateTime::now_utc().unix_timestamp();
+    if action_id == "config.redacted.get" {
+        return run_blocking(move || match input {
+            ReadActionInput::Empty => get_redacted_config_for_paths(&paths)
+                .map(|output| ReadActionOutput::Config(Box::new(output))),
+            other => Err(CoreError::Invalid(format!(
+                "invalid input for config.redacted.get: {other:?}"
+            ))),
+        })
+        .await;
+    }
+
     run_blocking(move || {
-        let conn = gig_core::db::open(&paths.db_file).map_err(|err| err.to_string())?;
+        let conn = gig_core::db::open_readonly(&paths.db_file)?;
         let ctx = ActionContext::new(&conn, &paths, &config, &cwd, now);
-        execute_read_action(&ctx, action_id, input).map_err(|err| err.to_string())
+        execute_read_action(&ctx, action_id, input)
     })
     .await
 }
@@ -295,7 +306,7 @@ async fn run_read_action(
 async fn run_blocking<T, F>(work: F) -> Result<T, Response>
 where
     T: Send + 'static,
-    F: FnOnce() -> Result<T, String> + Send + 'static,
+    F: FnOnce() -> gig_core::Result<T> + Send + 'static,
 {
     tokio::task::spawn_blocking(work)
         .await
@@ -306,7 +317,21 @@ where
                 err.to_string(),
             )
         })?
-        .map_err(|message| api_error(StatusCode::INTERNAL_SERVER_ERROR, "core_error", message))
+        .map_err(action_error_response)
+}
+
+fn action_error_response(err: CoreError) -> Response {
+    let (status, code) = match &err {
+        CoreError::Invalid(_) | CoreError::InvalidTransition { .. } | CoreError::Config(_) => {
+            (StatusCode::BAD_REQUEST, "invalid_action_input")
+        }
+        CoreError::OrderNotFound(_) => (StatusCode::NOT_FOUND, "order_not_found"),
+        CoreError::PathUnavailable(_, source) if source.kind() == ErrorKind::NotFound => {
+            (StatusCode::NOT_FOUND, "path_not_found")
+        }
+        _ => (StatusCode::INTERNAL_SERVER_ERROR, "core_error"),
+    };
+    api_error(status, code, err.to_string())
 }
 
 fn api_error(status: StatusCode, code: &'static str, message: impl Into<String>) -> Response {
@@ -382,9 +407,12 @@ const INDEX_HTML: &str = r#"<!doctype html>
   </main>
 
   <script>
-    const params = new URLSearchParams(location.search);
-    const urlToken = params.get('token');
-    if (urlToken) sessionStorage.setItem('gigGuiToken', urlToken);
+    const hashParams = new URLSearchParams(location.hash.replace(/^#/, ''));
+    const urlToken = hashParams.get('token');
+    if (urlToken) {
+      sessionStorage.setItem('gigGuiToken', urlToken);
+      history.replaceState(null, '', location.pathname);
+    }
     const token = sessionStorage.getItem('gigGuiToken');
     const authState = document.getElementById('auth-state');
 
@@ -421,7 +449,7 @@ const INDEX_HTML: &str = r#"<!doctype html>
       ].map(([label, value]) => `<div class="card"><div class="metric">${value}</div><div class="label">${label}</div></div>`).join('');
       document.getElementById('focus').innerHTML = rows(data.focus, 'order');
       document.getElementById('quotes').innerHTML = rows(data.quotes, 'quote');
-      document.getElementById('actions').innerHTML = `<p class="muted">${actions.length} core action metadata entries available. Next phase wires execution.</p>`;
+      document.getElementById('actions').innerHTML = `<p class="muted">${actions.length} core action metadata entries available. Read action execution is wired.</p>`;
     }
 
     boot().catch(err => {
@@ -475,6 +503,7 @@ mod tests {
                 secret_key: S3_SECRET_SECRET.into(),
                 link_ttl_seconds: 604_800,
                 path_style: false,
+                allow_insecure_http: false,
             },
         );
         config
@@ -483,13 +512,31 @@ mod tests {
     fn test_router() -> (Router, tempfile::TempDir) {
         let tmp = tempfile::tempdir().unwrap();
         let paths = Paths::under_root(tmp.path());
+        paths.ensure_dirs().unwrap();
+        gig_core::db::open(&paths.db_file).unwrap();
+        test_config().save(&paths.config_file).unwrap();
         let app = router(AppState {
             paths,
-            config: test_config(),
+            config: Config::default(),
             cwd: tmp.path().to_path_buf(),
             token: TEST_TOKEN.into(),
         });
         (app, tmp)
+    }
+
+    fn test_router_without_db() -> (Router, tempfile::TempDir, PathBuf) {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = Paths::under_root(tmp.path());
+        paths.ensure_dirs().unwrap();
+        test_config().save(&paths.config_file).unwrap();
+        let db_file = paths.db_file.clone();
+        let app = router(AppState {
+            paths,
+            config: Config::default(),
+            cwd: tmp.path().to_path_buf(),
+            token: TEST_TOKEN.into(),
+        });
+        (app, tmp, db_file)
     }
 
     async fn get(app: Router, uri: &str, token: Option<&str>) -> Response {
@@ -562,6 +609,30 @@ mod tests {
         assert_eq!(body["summary"]["pending_count"], 0);
         assert!(body["quotes"].as_array().unwrap().is_empty());
         assert!(body["focus"].as_array().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn dashboard_does_not_create_missing_database() {
+        let (app, _tmp, db_file) = test_router_without_db();
+
+        let response = get(app, "/api/dashboard", Some(TEST_TOKEN)).await;
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        assert!(!db_file.exists());
+        let body = json_body(response).await;
+        assert_eq!(body["error"]["code"], "path_not_found");
+    }
+
+    #[tokio::test]
+    async fn config_does_not_require_database() {
+        let (app, _tmp, db_file) = test_router_without_db();
+
+        let response = get(app, "/api/config", Some(TEST_TOKEN)).await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(!db_file.exists());
+        let body = json_body(response).await;
+        assert_eq!(body["delivery"]["short_link"]["token_set"], true);
     }
 
     #[tokio::test]
@@ -650,6 +721,34 @@ mod tests {
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
         let body = json_body(response).await;
         assert_eq!(body["error"]["code"], "unsupported_action");
+    }
+
+    #[tokio::test]
+    async fn wrong_read_action_input_returns_bad_request() {
+        let (app, _tmp) = test_router();
+
+        let response = post_body(
+            app,
+            "/api/actions/dashboard.get/execute",
+            Some(TEST_TOKEN),
+            r#"{"input":{"type":"orders_list","status":"lead"}}"#,
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = json_body(response).await;
+        assert_eq!(body["error"]["code"], "invalid_action_input");
+    }
+
+    #[tokio::test]
+    async fn missing_order_returns_not_found() {
+        let (app, _tmp) = test_router();
+
+        let response = get(app, "/api/orders/999", Some(TEST_TOKEN)).await;
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        let body = json_body(response).await;
+        assert_eq!(body["error"]["code"], "order_not_found");
     }
 
     #[tokio::test]

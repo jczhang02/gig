@@ -3,7 +3,7 @@
 //! Works with AWS S3, Alibaba Cloud OSS, Cloudflare R2, MinIO,
 //! and any S3-compatible service.
 
-use super::{UploadOpts, UploadResult, Uploader};
+use super::{validate_https_or_allowed_http_url, UploadOpts, UploadResult, Uploader};
 use crate::config::S3UploaderConfig;
 use crate::{Error, Result};
 use aws_sdk_s3::config::{BehaviorVersion, Credentials, Region};
@@ -38,6 +38,15 @@ impl S3Uploader {
             .enable_all()
             .build()
             .map_err(|e| Error::Invalid(format!("failed to create tokio runtime: {e}")))?;
+
+        validate_https_or_allowed_http_url(&cfg.endpoint, "S3 endpoint", cfg.allow_insecure_http)?;
+        if let Some(download_endpoint) = &cfg.download_endpoint {
+            validate_https_or_allowed_http_url(
+                download_endpoint,
+                "S3 download_endpoint",
+                cfg.allow_insecure_http,
+            )?;
+        }
 
         let client = make_client(cfg, &cfg.endpoint);
         let download_endpoint = cfg.download_endpoint.as_deref().unwrap_or(&cfg.endpoint);
@@ -273,6 +282,7 @@ mod tests {
             secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".into(),
             link_ttl_seconds: 604_800,
             path_style: false,
+            allow_insecure_http: false,
         }
     }
 
@@ -283,6 +293,41 @@ mod tests {
         assert_eq!(u.name(), "s3:test");
         assert_eq!(u.bucket, "gig-delivery");
         assert_eq!(u.link_ttl_seconds, 604_800);
+    }
+
+    #[test]
+    fn rejects_plain_http_non_loopback_endpoint() {
+        let mut cfg = make_config();
+        cfg.endpoint = "http://oss.example.test".into();
+
+        let err = match S3Uploader::new("s3:test".into(), &cfg) {
+            Ok(_) => panic!("plain HTTP endpoint should be rejected"),
+            Err(err) => err.to_string(),
+        };
+
+        assert!(err.contains("https://"));
+    }
+
+    #[test]
+    fn accepts_plain_http_loopback_endpoint_for_local_s3() {
+        let mut cfg = make_config();
+        cfg.endpoint = "http://127.0.0.1:9000".into();
+        cfg.download_endpoint = Some("http://localhost:9000".into());
+
+        let uploader = S3Uploader::new("s3:test".into(), &cfg).unwrap();
+
+        assert_eq!(uploader.name(), "s3:test");
+    }
+
+    #[test]
+    fn accepts_explicitly_allowed_plain_http_s3_endpoint() {
+        let mut cfg = make_config();
+        cfg.endpoint = "http://minio:9000".into();
+        cfg.allow_insecure_http = true;
+
+        let uploader = S3Uploader::new("s3:test".into(), &cfg).unwrap();
+
+        assert_eq!(uploader.name(), "s3:test");
     }
 
     #[test]

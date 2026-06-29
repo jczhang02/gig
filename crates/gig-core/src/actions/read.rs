@@ -1,5 +1,6 @@
 use super::context::ActionContext;
 use crate::config::{Config, Paths};
+use crate::context::{canonical, resolve_context_for};
 use crate::models::{Order, OrderStatus, OrderWorkflow, QuoteDraft};
 use crate::repo::orders::ListFilter;
 use crate::repo::{order_workflow, orders};
@@ -17,7 +18,8 @@ pub enum ReadActionInput {
         status: Option<OrderStatus>,
     },
     OrderDetail {
-        id: i64,
+        #[serde(alias = "id")]
+        id_or_slug: Option<String>,
     },
 }
 
@@ -182,6 +184,7 @@ pub struct RedactedS3 {
     pub secret_key_set: bool,
     pub link_ttl_seconds: u32,
     pub path_style: bool,
+    pub allow_insecure_http: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -217,14 +220,16 @@ pub fn execute_read_action(
             list_orders(ctx, status).map(|output| ReadActionOutput::Orders(Box::new(output)))
         }
         "orders.get_detail" => {
-            let id = match input {
-                ReadActionInput::OrderDetail { id } => id,
+            let id_or_slug = match input {
+                ReadActionInput::Empty => None,
+                ReadActionInput::OrderDetail { id_or_slug } => id_or_slug,
                 other => return Err(invalid_input(action_id, other)),
             };
-            get_order_detail(ctx, id).map(|output| ReadActionOutput::Order(Box::new(output)))
+            get_order_detail(ctx, id_or_slug.as_deref())
+                .map(|output| ReadActionOutput::Order(Box::new(output)))
         }
         "config.redacted.get" => require_empty(action_id, input)
-            .map(|()| get_redacted_config(ctx))
+            .and_then(|()| get_redacted_config(ctx))
             .map(|output| ReadActionOutput::Config(Box::new(output))),
         other => Err(Error::Invalid(format!(
             "unknown or non-read action for read executor: {other}"
@@ -245,15 +250,37 @@ pub fn list_orders(ctx: &ActionContext<'_>, status: Option<OrderStatus>) -> Resu
     Ok(OrdersResponse { orders })
 }
 
-pub fn get_order_detail(ctx: &ActionContext<'_>, id: i64) -> Result<OrderResponse> {
-    let order = orders::find_by_id(ctx.conn, id)?;
+pub fn get_order_detail(
+    ctx: &ActionContext<'_>,
+    id_or_slug: Option<&str>,
+) -> Result<OrderResponse> {
+    let order = resolve_order(ctx, id_or_slug)?;
     Ok(OrderResponse {
         order: order_with_workflow_view(ctx.conn, order)?,
     })
 }
 
-pub fn get_redacted_config(ctx: &ActionContext<'_>) -> RedactedConfigResponse {
-    redacted_config(ctx.paths, ctx.config)
+pub fn get_redacted_config(ctx: &ActionContext<'_>) -> Result<RedactedConfigResponse> {
+    get_redacted_config_for_paths(ctx.paths)
+}
+
+pub fn get_redacted_config_for_paths(paths: &Paths) -> Result<RedactedConfigResponse> {
+    let config = Config::load_or_default(&paths.config_file)?;
+    Ok(redacted_config(paths, &config))
+}
+
+fn resolve_order(ctx: &ActionContext<'_>, id_or_slug: Option<&str>) -> Result<Order> {
+    if let Some(id_or_slug) = id_or_slug.filter(|value| !value.trim().is_empty()) {
+        return orders::find_by_id_or_slug(ctx.conn, id_or_slug);
+    }
+
+    let cwd = canonical(ctx.cwd)?;
+    let order_id = resolve_context_for(ctx.conn, &cwd)?.ok_or_else(|| {
+        Error::Invalid(
+            "not inside a gig project directory; pass an Order id_or_slug or cd into one".into(),
+        )
+    })?;
+    orders::find_by_id(ctx.conn, order_id)
 }
 
 fn require_empty(action_id: &str, input: ReadActionInput) -> Result<()> {
@@ -400,6 +427,7 @@ fn redacted_config(paths: &Paths, config: &Config) -> RedactedConfigResponse {
                     secret_key_set: !cfg.secret_key.trim().is_empty(),
                     link_ttl_seconds: cfg.link_ttl_seconds,
                     path_style: cfg.path_style,
+                    allow_insecure_http: cfg.allow_insecure_http,
                 },
             )
         })
@@ -480,8 +508,8 @@ mod tests {
         .id
     }
 
-    fn test_paths() -> Paths {
-        Paths::under_root(Path::new("/tmp/gig-actions-test"))
+    fn test_paths(root: &Path) -> Paths {
+        Paths::under_root(root)
     }
 
     fn secret_config() -> Config {
@@ -507,6 +535,7 @@ mod tests {
                 secret_key: S3_SECRET_SECRET.into(),
                 link_ttl_seconds: 604_800,
                 path_style: false,
+                allow_insecure_http: false,
             },
         );
         config
@@ -516,9 +545,10 @@ mod tests {
     fn dashboard_get_returns_summary_focus_and_quote_views() {
         let conn = open_in_memory().unwrap();
         insert_order(&conn);
-        let paths = test_paths();
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = test_paths(tmp.path());
         let config = Config::default();
-        let ctx = ActionContext::new(&conn, &paths, &config, Path::new("/tmp"), NOW);
+        let ctx = ActionContext::new(&conn, &paths, &config, tmp.path(), NOW);
         quote_drafts::insert(
             &conn,
             &NewQuoteDraft {
@@ -556,9 +586,10 @@ mod tests {
     fn orders_list_returns_order_and_next_action() {
         let conn = open_in_memory().unwrap();
         let order_id = insert_order(&conn);
-        let paths = test_paths();
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = test_paths(tmp.path());
         let config = Config::default();
-        let ctx = ActionContext::new(&conn, &paths, &config, Path::new("/tmp"), NOW);
+        let ctx = ActionContext::new(&conn, &paths, &config, tmp.path(), NOW);
 
         let output = execute_read_action(
             &ctx,
@@ -577,17 +608,27 @@ mod tests {
     }
 
     #[test]
-    fn orders_get_detail_requires_order_id_input() {
+    fn orders_get_detail_accepts_id_slug_and_context() {
         let conn = open_in_memory().unwrap();
         let order_id = insert_order(&conn);
-        let paths = test_paths();
+        let tmp = tempfile::tempdir().unwrap();
+        let project_dir = tmp.path().join("phase-c");
+        std::fs::create_dir_all(&project_dir).unwrap();
+        conn.execute(
+            "UPDATE orders SET dev_path = ?1 WHERE id = ?2",
+            (project_dir.to_string_lossy().as_ref(), order_id),
+        )
+        .unwrap();
+        let paths = test_paths(tmp.path());
         let config = Config::default();
-        let ctx = ActionContext::new(&conn, &paths, &config, Path::new("/tmp"), NOW);
+        let ctx = ActionContext::new(&conn, &paths, &config, &project_dir, NOW);
 
         let output = execute_read_action(
             &ctx,
             "orders.get_detail",
-            ReadActionInput::OrderDetail { id: order_id },
+            ReadActionInput::OrderDetail {
+                id_or_slug: Some(order_id.to_string()),
+            },
         )
         .unwrap();
         let ReadActionOutput::Order(detail) = output else {
@@ -595,18 +636,44 @@ mod tests {
         };
         assert_eq!(detail.order.order.slug.as_deref(), Some("phase-c"));
 
-        let err = execute_read_action(&ctx, "orders.get_detail", ReadActionInput::Empty)
-            .unwrap_err()
-            .to_string();
-        assert!(err.contains("invalid input for orders.get_detail"));
+        let legacy_id_input: ReadActionInput =
+            serde_json::from_str(r#"{"type":"order_detail","id":"phase-c"}"#).unwrap();
+        let output = execute_read_action(&ctx, "orders.get_detail", legacy_id_input).unwrap();
+        let ReadActionOutput::Order(detail) = output else {
+            panic!("expected order output");
+        };
+        assert_eq!(detail.order.order.id, order_id);
+
+        let output = execute_read_action(
+            &ctx,
+            "orders.get_detail",
+            ReadActionInput::OrderDetail {
+                id_or_slug: Some("phase-c".into()),
+            },
+        )
+        .unwrap();
+        let ReadActionOutput::Order(detail) = output else {
+            panic!("expected order output");
+        };
+        assert_eq!(detail.order.order.id, order_id);
+
+        let output =
+            execute_read_action(&ctx, "orders.get_detail", ReadActionInput::Empty).unwrap();
+        let ReadActionOutput::Order(detail) = output else {
+            panic!("expected order output");
+        };
+        assert_eq!(detail.order.order.id, order_id);
     }
 
     #[test]
     fn config_redaction_hides_secret_values() {
         let conn = open_in_memory().unwrap();
-        let paths = test_paths();
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = test_paths(tmp.path());
         let config = secret_config();
-        let ctx = ActionContext::new(&conn, &paths, &config, Path::new("/tmp"), NOW);
+        config.save(&paths.config_file).unwrap();
+        let default_config = Config::default();
+        let ctx = ActionContext::new(&conn, &paths, &default_config, tmp.path(), NOW);
 
         let output =
             execute_read_action(&ctx, "config.redacted.get", ReadActionInput::Empty).unwrap();

@@ -57,6 +57,7 @@ access_key = "..."
 secret_key = "..."
 link_ttl_seconds = 604800            # 分享链接有效期：7 天
 path_style = false
+# allow_insecure_http = true          # 仅用于可信本地/开发 MinIO；生产保持 HTTPS
 ```
 
 添加渠道（用于自动计算到手金额）：
@@ -304,10 +305,10 @@ gig archive 1 --purge
 
 ```bash
 gig gui              # 打开 127.0.0.1 上的本地只读看板
-gig gui --no-open   # 只打印带 token 的本地 URL
+gig gui --no-open   # 打印本地 URL 和一次性进程 token
 ```
 
-`gig gui` 只通过 `gig-core` action layer 读取本地数据库、配置和 action metadata，不调用现有 CLI 命令；当前版本提供 dashboard、orders、actions 和脱敏 config 视图，并暴露只读 `POST /api/actions/:id/preview` / `POST /api/actions/:id/execute` 骨架。mutation / external I/O / dangerous actions 当前不会执行。
+`gig gui` 只通过 `gig-core` action layer 读取本地数据库、配置和 action metadata，不调用现有 CLI 命令；请求使用只读 SQLite 连接，不会创建或迁移数据库。当前版本提供 dashboard、orders、actions 和脱敏 config 视图，并暴露只读 `POST /api/actions/:id/preview` / `POST /api/actions/:id/execute` 骨架。mutation / external I/O / dangerous actions 当前不会执行。
 
 ### 查看当前状态
 

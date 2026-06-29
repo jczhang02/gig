@@ -195,14 +195,16 @@ pub fn order_next_action(
 }
 
 fn ready_to_deliver_next_action(conn: &Connection, order_id: i64) -> Result<&'static str> {
-    let has_validated_package = delivery_packages::list_for_order(conn, order_id)?
+    let latest_package = delivery_packages::list_for_order(conn, order_id)?
         .into_iter()
-        .any(|package| package.status == DeliveryPackageStatus::Validated);
-    Ok(if has_validated_package {
-        "send_package"
-    } else {
-        "check_package"
-    })
+        .next();
+    Ok(
+        if latest_package.map(|package| package.status) == Some(DeliveryPackageStatus::Validated) {
+            "send_package"
+        } else {
+            "check_package"
+        },
+    )
 }
 
 fn compute_alert(order: &Order, conn: &Connection, now: i64) -> Result<Option<String>> {
@@ -315,7 +317,8 @@ fn ymd_to_unix(year: i64, month: i64, day: i64) -> i64 {
 mod tests {
     use super::*;
     use crate::db::open_in_memory;
-    use crate::models::OrderStatus;
+    use crate::models::{DeliveryPackageStatus, OrderStatus, OrderWorkflow};
+    use crate::repo::delivery_packages::{self, NewDeliveryPackage};
     use crate::repo::orders::{insert, NewOrder};
 
     fn new_order(status: OrderStatus, created_at: i64) -> NewOrder<'static> {
@@ -398,6 +401,85 @@ mod tests {
 
         let alert = compute_alert(&o, &conn, NOW).unwrap();
         assert!(alert.is_none());
+    }
+
+    fn workflow_fixture(order_id: i64) -> OrderWorkflow {
+        OrderWorkflow {
+            order_id,
+            project_type: None,
+            gig_dir: None,
+            index_path: None,
+            job_path: None,
+            quote_path: None,
+            plan_md_path: None,
+            plan_html_path: None,
+            plan_ready_at: None,
+            plan_approved_at: None,
+            plan_rejected_at: None,
+            work_started_at: None,
+            plan_rejection_reason: None,
+            acceptance_path: None,
+            acceptance_completed_at: None,
+            latest_delivery_dir: None,
+            latest_client_package_path: None,
+            created_at: "2026-05-30T00:00:00Z".into(),
+            updated_at: "2026-05-30T00:00:00Z".into(),
+        }
+    }
+
+    fn package_fixture(
+        order_id: i64,
+        delivery_date: &'static str,
+        status: DeliveryPackageStatus,
+    ) -> NewDeliveryPackage<'static> {
+        NewDeliveryPackage {
+            order_id,
+            delivery_date,
+            delivery_dir: "/work/project/.gig/delivery/date",
+            client_dir: "/work/project/.gig/delivery/date/client",
+            manifest_path: "/work/project/.gig/delivery/date/manifest.toml",
+            package_path: Some("/work/project/.gig/delivery/date/export/client-package.zip"),
+            status,
+            created_at: delivery_date,
+            updated_at: delivery_date,
+        }
+    }
+
+    #[test]
+    fn ready_to_deliver_uses_latest_package_gate() {
+        let conn = open_in_memory().unwrap();
+        let order = insert(&conn, &new_order(OrderStatus::ReadyToDeliver, NOW)).unwrap();
+        delivery_packages::insert(
+            &conn,
+            &package_fixture(order.id, "2026-05-01", DeliveryPackageStatus::Validated),
+        )
+        .unwrap();
+        delivery_packages::insert(
+            &conn,
+            &package_fixture(order.id, "2026-05-02", DeliveryPackageStatus::Prepared),
+        )
+        .unwrap();
+
+        let workflow = workflow_fixture(order.id);
+        let next_action = order_next_action(&conn, &order, Some(&workflow)).unwrap();
+
+        assert_eq!(next_action, "check_package");
+    }
+
+    #[test]
+    fn ready_to_deliver_sends_when_latest_package_validated() {
+        let conn = open_in_memory().unwrap();
+        let order = insert(&conn, &new_order(OrderStatus::ReadyToDeliver, NOW)).unwrap();
+        delivery_packages::insert(
+            &conn,
+            &package_fixture(order.id, "2026-05-02", DeliveryPackageStatus::Validated),
+        )
+        .unwrap();
+
+        let workflow = workflow_fixture(order.id);
+        let next_action = order_next_action(&conn, &order, Some(&workflow)).unwrap();
+
+        assert_eq!(next_action, "send_package");
     }
 
     #[test]

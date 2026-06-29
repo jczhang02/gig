@@ -38,6 +38,7 @@ fn make_test_uploader() -> Option<S3Uploader> {
         secret_key,
         link_ttl_seconds: 3600,
         path_style: false,
+        allow_insecure_http: false,
     };
 
     S3Uploader::new("s3:test".into(), &cfg).ok()

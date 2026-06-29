@@ -24,7 +24,6 @@ pub fn run(options: GuiOptions) -> Result<()> {
 
 async fn run_async(options: GuiOptions) -> Result<()> {
     let paths = Paths::from_env()?;
-    paths.ensure_dirs()?;
     let config = Config::load_or_default(&paths.config_file)?;
     let cwd = std::env::current_dir()?;
     let token = random_token();
@@ -45,14 +44,16 @@ async fn run_async(options: GuiOptions) -> Result<()> {
     })
     .layer(TraceLayer::new_for_http());
 
-    let url = format!("http://127.0.0.1:{}/?token={token}", addr.port());
+    let public_url = format!("http://127.0.0.1:{}/", addr.port());
+    let auth_url = format!("{public_url}#token={token}");
     println!("gig gui listening on http://127.0.0.1:{}", addr.port());
-    println!("open: {url}");
+    println!("open: {public_url}");
 
-    if !options.no_open {
-        if let Err(err) = webbrowser::open(&url) {
-            eprintln!("warning: failed to open browser: {err}");
-        }
+    if options.no_open {
+        println!("token: {token}");
+    } else if let Err(err) = webbrowser::open(&auth_url) {
+        eprintln!("warning: failed to open browser: {err}");
+        println!("token: {token}");
     }
 
     axum::serve(listener, app)

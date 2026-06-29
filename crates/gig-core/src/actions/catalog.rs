@@ -35,21 +35,23 @@ const ORDER_ID_OPTIONAL: &[ActionField] = &[ActionField::optional(
     "Order id or slug",
     ActionFieldKind::String,
 )];
+const ORDER_ID_OR_SLUG_OPTIONAL: &[ActionField] = &[ActionField::optional(
+    "id_or_slug",
+    "Order id or slug",
+    ActionFieldKind::String,
+)];
 const ORDER_ID_REQUIRED: &[ActionField] = &[ActionField::required(
     "id",
     "Order id or slug",
     ActionFieldKind::String,
 )];
-const DASHBOARD_FIELDS: &[ActionField] = &[
-    ActionField::optional(
-        "status",
-        "Status",
-        ActionFieldKind::Enum {
-            values: ORDER_STATUSES,
-        },
-    ),
-    ActionField::optional("all", "Include terminal orders", ActionFieldKind::Boolean),
-];
+const ORDER_LIST_FIELDS: &[ActionField] = &[ActionField::optional(
+    "status",
+    "Status",
+    ActionFieldKind::Enum {
+        values: ORDER_STATUSES,
+    },
+)];
 const ORDER_CREATE_FIELDS: &[ActionField] = &[
     ActionField::required("title", "Title", ActionFieldKind::String),
     ActionField::optional("slug", "Slug", ActionFieldKind::String),
@@ -159,6 +161,12 @@ const CONFIG_SET_FIELDS: &[ActionField] = &[
     ActionField::required("key", "Config key", ActionFieldKind::String),
     ActionField::required("value", "Value", ActionFieldKind::String),
 ];
+const SHELLS: &[&str] = &["zsh"];
+const COMPLETION_FIELDS: &[ActionField] = &[ActionField::required(
+    "shell",
+    "Shell",
+    ActionFieldKind::Enum { values: SHELLS },
+)];
 
 macro_rules! path {
     ($($segment:literal),+ $(,)?) => {
@@ -242,7 +250,7 @@ static ACTIONS: &[ActionMeta] = &[
         "Dashboard",
         "Read the workflow decision board used by gig ls.",
         Read,
-        DASHBOARD_FIELDS,
+        EMPTY_FIELDS,
         NONE,
         [ReadsDatabase],
         Json,
@@ -255,7 +263,7 @@ static ACTIONS: &[ActionMeta] = &[
         "Show Order",
         "Read a single Order with related workflow data.",
         Read,
-        ORDER_ID_OPTIONAL,
+        ORDER_ID_OR_SLUG_OPTIONAL,
         NONE,
         [ReadsDatabase],
         Json,
@@ -268,7 +276,7 @@ static ACTIONS: &[ActionMeta] = &[
         label: "List Orders",
         description: "Read Orders for GUI and action API adapters.",
         kind: ActionKind::Read,
-        fields: DASHBOARD_FIELDS,
+        fields: ORDER_LIST_FIELDS,
         confirmation: NONE,
         side_effects: effects![ReadsDatabase],
         output: ActionOutputKind::Json,
@@ -475,7 +483,7 @@ static ACTIONS: &[ActionMeta] = &[
         ["export"],
         "Export Orders",
         "Export Orders to CSV or JSON.",
-        Read,
+        Mutate,
         EMPTY_FIELDS,
         NONE,
         [ReadsDatabase, WritesFiles],
@@ -632,7 +640,7 @@ static ACTIONS: &[ActionMeta] = &[
         "Generate Completion",
         "Generate a shell completion script.",
         Read,
-        EMPTY_FIELDS,
+        COMPLETION_FIELDS,
         NONE,
         [PrintsCompletion],
         Text,
@@ -839,7 +847,7 @@ static ACTIONS: &[ActionMeta] = &[
         ["package", "check"],
         "Check Client Package",
         "Validate a workflow-created Client Package without uploading.",
-        Read,
+        Mutate,
         PACKAGE_FIELDS,
         NONE,
         [ReadsFiles, ReadsDatabase, WritesDatabase],
@@ -940,6 +948,31 @@ mod tests {
     }
 
     #[test]
+    fn catalog_read_actions_have_no_write_side_effects() {
+        let forbidden = [
+            SideEffect::WritesDatabase,
+            SideEffect::WritesFiles,
+            SideEffect::MovesFiles,
+            SideEffect::DeletesFiles,
+            SideEffect::UploadsFiles,
+        ];
+
+        for action in all()
+            .iter()
+            .filter(|action| action.kind == ActionKind::Read)
+        {
+            for effect in forbidden {
+                assert!(
+                    !action.side_effects.contains(&effect),
+                    "read action {} has write side effect {:?}",
+                    action.id,
+                    effect
+                );
+            }
+        }
+    }
+
+    #[test]
     fn catalog_exposes_phase_b_contracts() {
         let create = find_by_id("orders.create").unwrap();
         assert_eq!(create.cli_path, ["new"]);
@@ -959,10 +992,25 @@ mod tests {
         let dashboard = find_by_id("dashboard.get").unwrap();
         assert!(dashboard.workflow_critical);
         assert!(dashboard.json_supported);
+        assert!(dashboard.fields.is_empty());
+
+        let detail = find_by_id("orders.get_detail").unwrap();
+        assert!(detail.fields.iter().any(|field| field.name == "id_or_slug"));
 
         let list = find_by_id("orders.list").unwrap();
         assert!(list.cli_path.is_empty());
         assert_eq!(list.kind, ActionKind::Read);
+        assert!(list.fields.iter().any(|field| field.name == "status"));
+        assert!(!list.fields.iter().any(|field| field.name == "all"));
+
+        let package_check = find_by_id("delivery.package.check").unwrap();
+        assert_eq!(package_check.kind, ActionKind::Mutate);
+        assert!(package_check
+            .side_effects
+            .contains(&SideEffect::WritesDatabase));
+
+        let completion = find_by_id("cli.completion.generate").unwrap();
+        assert!(completion.fields.iter().any(|field| field.name == "shell"));
 
         let config = find_by_id("config.redacted.get").unwrap();
         assert!(config.cli_path.is_empty());
