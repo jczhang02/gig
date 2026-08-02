@@ -197,7 +197,7 @@ fn require_acceptance_items(contents: &str) -> Result<()> {
             ("evidence", columns[2]),
             ("conclusion", columns[3]),
         ] {
-            if cells.get(index).map_or(true, |cell| cell.trim().is_empty()) {
+            if cells.get(index).is_none_or(|cell| cell.trim().is_empty()) {
                 return Err(Error::Invalid(format!(
                     "acceptance item incomplete: {label} is required"
                 )));

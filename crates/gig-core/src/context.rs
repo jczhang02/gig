@@ -64,7 +64,7 @@ pub fn resolve_context_for(conn: &Connection, cwd: &Path) -> Result<Option<i64>>
             let p = PathBuf::from(&path_str);
             if is_within(cwd, &p) {
                 let len = p.as_os_str().len();
-                if best.map_or(true, |(_, best_len)| len > best_len) {
+                if best.is_none_or(|(_, best_len)| len > best_len) {
                     best = Some((id, len));
                 }
             }
