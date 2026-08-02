@@ -23,3 +23,8 @@ __pycache__/
 
 # OMC agent state (not project artifacts)
 .omc/
+
+# Local agent and deployment state
+.beads/
+.pi/workflow-runs/
+docs/.vercel/

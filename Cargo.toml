@@ -9,10 +9,12 @@ members = [
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.75"
+rust-version = "1.91.1"
 license = "MIT"
-authors = ["jc"]
-repository = "https://github.com/jc/gig"
+authors = ["JC Zhang <jczhang@live.it>"]
+description = "Personal freelance order lifecycle management CLI and local web UI"
+readme = "README.md"
+repository = "https://github.com/jczhang02/gig"
 
 [workspace.dependencies]
 # Shared versions pinned here
