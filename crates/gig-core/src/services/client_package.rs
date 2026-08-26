@@ -16,6 +16,7 @@ use time::OffsetDateTime;
 pub struct PackageCheckInput<'a> {
     pub delivery_date: &'a str,
     pub delivery_dir: &'a Path,
+    pub package_id: Option<&'a str>,
     pub checked_at: &'a str,
 }
 
@@ -23,6 +24,7 @@ pub struct PackageCheckInput<'a> {
 pub struct PackageSendInput<'a> {
     pub delivery_date: &'a str,
     pub delivery_dir: &'a Path,
+    pub package_id: Option<&'a str>,
     pub sent_at: &'a str,
 }
 
@@ -47,7 +49,7 @@ pub fn send_client_package(
 ) -> Result<PackageSendResult> {
     let order = orders::find_by_id(conn, order_id)?;
     ensure_package_send_status(order.status)?;
-    let paths = validate_package_input(input.delivery_date, input.delivery_dir)?;
+    let paths = validate_package_input(input.delivery_date, input.delivery_dir, input.package_id)?;
     let package_path = path_string(&paths.package_path);
     require_validated_package_for_send(conn, order_id, input.delivery_date, &package_path)?;
     let sent_at = parse_rfc3339(input.sent_at)?;
@@ -62,7 +64,8 @@ pub fn send_client_package(
                 input.delivery_date,
                 sent_at,
                 delivery_attempt,
-            )),
+                &paths.package_path,
+            )?),
         },
     )?;
 
@@ -127,7 +130,7 @@ pub fn check_client_package(
     let order = orders::find_by_id(conn, order_id)?;
     ensure_package_send_status(order.status)?;
 
-    let paths = validate_package_input(input.delivery_date, input.delivery_dir)?;
+    let paths = validate_package_input(input.delivery_date, input.delivery_dir, input.package_id)?;
     let package_path = path_string(&paths.package_path);
 
     delivery_packages::insert(
@@ -166,10 +169,13 @@ fn ensure_package_send_status(status: OrderStatus) -> Result<()> {
 fn validate_package_input(
     delivery_date: &str,
     delivery_dir: &Path,
+    package_id: Option<&str>,
 ) -> Result<ValidatedPackagePaths> {
     let client_dir = delivery_dir.join("client");
     let manifest_path = delivery_dir.join("manifest.toml");
-    let package_path = delivery_dir.join("export").join("client-package.zip");
+    let package_path = delivery_dir
+        .join("export")
+        .join(client_package_filename(package_id)?);
     validate_package_contents(
         delivery_date,
         delivery_dir,
@@ -236,12 +242,6 @@ fn validate_package_contents(
         client_dir,
         "client dir",
     )?;
-    require_delivery_documents(
-        delivery_dir,
-        client_dir,
-        &canonical_delivery_dir,
-        &canonical_client_dir,
-    )?;
     require_workflow_file_inside_dir(&canonical_delivery_dir, manifest_path, "package manifest")?;
     let manifest = read_manifest(manifest_path)?;
     validate_manifest(delivery_date, &manifest)?;
@@ -257,35 +257,6 @@ fn validate_package_contents(
 
     require_workflow_file_inside_dir(&canonical_delivery_dir, package_path, "package artifact")?;
     validate_zip_package(package_path, &manifest.client_files)
-}
-
-fn require_delivery_documents(
-    delivery_dir: &Path,
-    client_dir: &Path,
-    canonical_delivery_dir: &Path,
-    canonical_client_dir: &Path,
-) -> Result<()> {
-    require_workflow_file_inside_dir(
-        canonical_delivery_dir,
-        &delivery_dir.join("DELIVERY.md"),
-        "delivery document",
-    )?;
-    require_workflow_file_inside_dir(
-        canonical_delivery_dir,
-        &delivery_dir.join("internal").join("DELIVERY_INTERNAL.html"),
-        "internal delivery document",
-    )?;
-    require_client_file_inside_dir(
-        canonical_client_dir,
-        &client_dir.join("DELIVERY_CLIENT.html"),
-        "client delivery document",
-    )?;
-    require_client_file_inside_dir(
-        canonical_client_dir,
-        &client_dir.join("DELIVERY_CLIENT.pdf"),
-        "client delivery document",
-    )?;
-    Ok(())
 }
 
 fn canonicalize_workflow_path(path: &Path, label: &str) -> Result<PathBuf> {
@@ -309,6 +280,19 @@ fn validate_manifest(delivery_date: &str, manifest: &ClientManifest) -> Result<(
             "manifest delivery_date mismatch: expected {}, got {}",
             delivery_date, manifest.delivery_date
         )));
+    }
+    if manifest.client_files.is_empty() {
+        return Err(Error::Invalid(
+            "client manifest must list at least one file".to_string(),
+        ));
+    }
+    let mut seen = HashSet::new();
+    for file in &manifest.client_files {
+        if !seen.insert(file) {
+            return Err(Error::Invalid(format!(
+                "duplicate client manifest entry: {file}"
+            )));
+        }
     }
     Ok(())
 }
@@ -408,7 +392,11 @@ fn validate_zip_package(package_path: &Path, client_files: &[String]) -> Result<
                     "unmanifested package zip entry: {name}"
                 )));
             }
-            entries.insert(name.to_string());
+            if !entries.insert(name.to_string()) {
+                return Err(Error::Invalid(format!(
+                    "duplicate package zip entry: {name}"
+                )));
+            }
         } else if !is_manifest_parent_dir(name, client_files) {
             return Err(Error::Invalid(format!(
                 "unmanifested package zip entry: {name}"
@@ -497,16 +485,54 @@ fn next_delivery_attempt(conn: &Connection, order_id: i64, delivery_date: &str) 
     Ok(attempts)
 }
 
+fn client_package_filename(package_id: Option<&str>) -> Result<String> {
+    let Some(id) = package_id else {
+        return Ok("client-package.zip".to_string());
+    };
+
+    let valid = !id.is_empty()
+        && id.len() <= 64
+        && id.as_bytes().first().is_some_and(u8::is_ascii_alphanumeric)
+        && id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+        && !id.contains("..")
+        && !id.to_ascii_lowercase().ends_with(".zip");
+    if !valid {
+        return Err(Error::Invalid(format!(
+            "invalid client package id: {id}; use 1-64 ASCII letters, numbers, '.', '_' or '-', start with a letter or number, and omit the .zip suffix"
+        )));
+    }
+
+    Ok(format!("{id}.zip"))
+}
+
 fn client_package_object_key(
     order_id: i64,
     delivery_date: &str,
     uploaded_at: OffsetDateTime,
     delivery_attempt: usize,
-) -> String {
+    package_path: &Path,
+) -> Result<String> {
+    let filename = package_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| {
+            Error::Invalid(format!(
+                "invalid client package path: {}",
+                package_path.display()
+            ))
+        })?;
     let uploaded_at = uploaded_at.unix_timestamp_nanos();
-    format!(
-        "deliveries/{order_id}/{delivery_date}/{uploaded_at}-{delivery_attempt}-client-package.zip"
-    )
+    if filename == "client-package.zip" {
+        Ok(format!(
+            "deliveries/{order_id}/{delivery_date}/{uploaded_at}-{delivery_attempt}-{filename}"
+        ))
+    } else {
+        Ok(format!(
+            "deliveries/{order_id}/{delivery_date}/{uploaded_at}-{delivery_attempt}/{filename}"
+        ))
+    }
 }
 
 #[cfg(test)]
@@ -700,6 +726,7 @@ mod tests {
             PackageCheckInput {
                 delivery_date: "2026-05-27",
                 delivery_dir,
+                package_id: None,
                 checked_at: "2026-05-27T06:00:00Z",
             },
         )
@@ -734,6 +761,7 @@ mod tests {
             PackageCheckInput {
                 delivery_date: "2026-05-27",
                 delivery_dir: &delivery_dir,
+                package_id: None,
                 checked_at: "2026-05-27T06:00:00Z",
             },
         )
@@ -762,54 +790,169 @@ mod tests {
     }
 
     #[test]
-    fn check_client_package_rejects_missing_required_delivery_docs_without_recording() {
-        let cases = [
-            ("DELIVERY.md", "DELIVERY.md"),
-            ("DELIVERY_INTERNAL.html", "internal/DELIVERY_INTERNAL.html"),
-            ("DELIVERY_CLIENT.html", "client/DELIVERY_CLIENT.html"),
-            ("DELIVERY_CLIENT.pdf", "client/DELIVERY_CLIENT.pdf"),
-        ];
+    fn check_client_package_does_not_require_fixed_delivery_documents() {
+        let conn = open_in_memory().unwrap();
+        let order_id = ready_order(&conn);
+        let root = tempfile::tempdir().unwrap();
+        let delivery_dir = delivery_layout(root.path());
+        let client_dir = delivery_dir.join("client");
+        let export_dir = delivery_dir.join("export");
+        fs::create_dir_all(&client_dir).unwrap();
+        fs::create_dir_all(&export_dir).unwrap();
+        fs::write(client_dir.join("report.pdf"), "client report").unwrap();
+        write_manifest(&delivery_dir, ["report.pdf"]);
+        write_zip(
+            &export_dir.join("client-package.zip"),
+            [("report.pdf", "client report")],
+        );
 
-        for (file_name, relative_path) in cases {
-            let conn = open_in_memory().unwrap();
-            let order_id = ready_order(&conn);
-            let root = tempfile::tempdir().unwrap();
-            let delivery_dir = delivery_layout(root.path());
-            let export_dir = delivery_dir.join("export");
-            fs::create_dir_all(&export_dir).unwrap();
-            write_required_delivery_docs(&delivery_dir);
-            write_zip(
-                &export_dir.join("client-package.zip"),
-                [
-                    ("DELIVERY_CLIENT.html", "client html"),
-                    ("DELIVERY_CLIENT.pdf", "client pdf"),
-                ],
-            );
-            write_manifest(
-                &delivery_dir,
-                ["DELIVERY_CLIENT.html", "DELIVERY_CLIENT.pdf"],
-            );
-            fs::remove_file(delivery_dir.join(relative_path)).unwrap();
+        let package = check_client_package(
+            &conn,
+            order_id,
+            PackageCheckInput {
+                delivery_date: "2026-05-27",
+                delivery_dir: &delivery_dir,
+                package_id: None,
+                checked_at: "2026-05-27T06:00:00Z",
+            },
+        )
+        .unwrap();
 
-            let err = check_client_package(
-                &conn,
-                order_id,
-                PackageCheckInput {
-                    delivery_date: "2026-05-27",
-                    delivery_dir: &delivery_dir,
-                    checked_at: "2026-05-27T06:00:00Z",
-                },
-            )
-            .unwrap_err();
+        assert_eq!(package.status, DeliveryPackageStatus::Validated);
+    }
 
+    #[test]
+    fn dotted_package_id_is_checked_and_sent_with_matching_remote_name() {
+        let conn = open_in_memory().unwrap();
+        let order_id = ready_order(&conn);
+        let root = tempfile::tempdir().unwrap();
+        let delivery_dir = delivery_layout(root.path());
+        let client_dir = delivery_dir.join("client");
+        let export_dir = delivery_dir.join("export");
+        let package_path = export_dir.join("release.v1.zip");
+        fs::create_dir_all(&client_dir).unwrap();
+        fs::create_dir_all(&export_dir).unwrap();
+        fs::write(client_dir.join("report.pdf"), "client report").unwrap();
+        write_manifest(&delivery_dir, ["report.pdf"]);
+        write_zip(&package_path, [("report.pdf", "client report")]);
+
+        let checked = check_client_package(
+            &conn,
+            order_id,
+            PackageCheckInput {
+                delivery_date: "2026-05-27",
+                delivery_dir: &delivery_dir,
+                package_id: Some("release.v1"),
+                checked_at: "2026-05-27T06:00:00Z",
+            },
+        )
+        .unwrap();
+        let uploader = RecordingUploader::default();
+        let sent = send_client_package(
+            &conn,
+            order_id,
+            PackageSendInput {
+                delivery_date: "2026-05-27",
+                delivery_dir: &delivery_dir,
+                package_id: Some("release.v1"),
+                sent_at: "2026-05-27T07:00:00Z",
+            },
+            &uploader,
+        )
+        .unwrap();
+
+        assert_eq!(
+            checked.package_path.as_deref(),
+            Some(path_string(&package_path).as_str())
+        );
+        assert_eq!(
+            sent.package.package_path.as_deref(),
+            Some(path_string(&package_path).as_str())
+        );
+        assert_eq!(uploader.uploaded_paths(), vec![package_path]);
+        assert!(uploader.uploaded_object_keys()[0]
+            .as_deref()
+            .unwrap()
+            .ends_with("/release.v1.zip"));
+    }
+
+    #[test]
+    fn send_requires_the_same_custom_package_id_that_was_checked() {
+        let conn = open_in_memory().unwrap();
+        let order_id = ready_order(&conn);
+        let root = tempfile::tempdir().unwrap();
+        let delivery_dir = delivery_layout(root.path());
+        let client_dir = delivery_dir.join("client");
+        let export_dir = delivery_dir.join("export");
+        fs::create_dir_all(&client_dir).unwrap();
+        fs::create_dir_all(&export_dir).unwrap();
+        fs::write(client_dir.join("report.pdf"), "client report").unwrap();
+        write_manifest(&delivery_dir, ["report.pdf"]);
+        write_zip(
+            &export_dir.join("approved.zip"),
+            [("report.pdf", "client report")],
+        );
+        write_zip(
+            &export_dir.join("other.zip"),
+            [("report.pdf", "client report")],
+        );
+        check_client_package(
+            &conn,
+            order_id,
+            PackageCheckInput {
+                delivery_date: "2026-05-27",
+                delivery_dir: &delivery_dir,
+                package_id: Some("approved"),
+                checked_at: "2026-05-27T06:00:00Z",
+            },
+        )
+        .unwrap();
+        let uploader = RecordingUploader::default();
+
+        let err = send_client_package(
+            &conn,
+            order_id,
+            PackageSendInput {
+                delivery_date: "2026-05-27",
+                delivery_dir: &delivery_dir,
+                package_id: Some("other"),
+                sent_at: "2026-05-27T07:00:00Z",
+            },
+            &uploader,
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("must be validated"));
+        assert!(uploader.uploaded_paths().is_empty());
+    }
+
+    #[test]
+    fn client_package_id_validation_rejects_unsafe_stems() {
+        for id in [
+            "",
+            ".hidden",
+            "../secret",
+            "a..b",
+            "folder/name",
+            r"folder\name",
+            "archive.zip",
+            "archive.ZIP",
+            "white space",
+            "é",
+            &"a".repeat(65),
+        ] {
             assert!(
-                err.to_string().contains(file_name),
-                "expected missing {file_name}, got {err}"
+                client_package_filename(Some(id)).is_err(),
+                "accepted {id:?}"
             );
-            assert!(delivery_packages::list_for_order(&conn, order_id)
-                .unwrap()
-                .is_empty());
         }
+        for id in ["a", "A-1", "order_42", "2026.05.27"] {
+            assert_eq!(
+                client_package_filename(Some(id)).unwrap(),
+                format!("{id}.zip")
+            );
+        }
+        assert_eq!(client_package_filename(None).unwrap(), "client-package.zip");
     }
 
     #[test]
@@ -840,6 +983,7 @@ mod tests {
             PackageSendInput {
                 delivery_date: "2026-05-27",
                 delivery_dir: &delivery_dir,
+                package_id: None,
                 sent_at: "2026-05-27T07:00:00Z",
             },
             &uploader,
@@ -890,6 +1034,7 @@ mod tests {
             PackageSendInput {
                 delivery_date: "2026-05-27",
                 delivery_dir: &delivery_dir,
+                package_id: None,
                 sent_at: "2026-05-27T07:00:00Z",
             },
             &uploader,
@@ -971,6 +1116,7 @@ mod tests {
             PackageSendInput {
                 delivery_date: "2026-05-27",
                 delivery_dir: &delivery_dir,
+                package_id: None,
                 sent_at: "2026-05-27T07:00:00Z",
             },
             uploader.as_ref(),
@@ -1019,6 +1165,7 @@ mod tests {
             PackageSendInput {
                 delivery_date: "2026-05-27",
                 delivery_dir: &delivery_dir,
+                package_id: None,
                 sent_at: "2026-05-27T07:00:00Z",
             },
             &uploader,
@@ -1033,6 +1180,7 @@ mod tests {
             PackageSendInput {
                 delivery_date: "2026-05-27",
                 delivery_dir: &delivery_dir,
+                package_id: None,
                 sent_at: "2026-05-28T07:00:00Z",
             },
             &uploader,
@@ -1090,6 +1238,7 @@ mod tests {
             PackageSendInput {
                 delivery_date: "2026-05-27",
                 delivery_dir: &delivery_dir,
+                package_id: None,
                 sent_at: "2026-05-27T07:00:00.000000001Z",
             },
             &uploader,
@@ -1104,6 +1253,7 @@ mod tests {
             PackageSendInput {
                 delivery_date: "2026-05-27",
                 delivery_dir: &delivery_dir,
+                package_id: None,
                 sent_at: "2026-05-27T07:00:00.000000002Z",
             },
             &uploader,
@@ -1145,6 +1295,7 @@ mod tests {
             PackageSendInput {
                 delivery_date: "2026-05-27",
                 delivery_dir: &delivery_dir,
+                package_id: None,
                 sent_at: "2026-05-27T07:00:00Z",
             },
             &uploader,
@@ -1164,6 +1315,50 @@ mod tests {
             orders::find_by_id(&conn, order_id).unwrap().status,
             OrderStatus::ReadyToDeliver
         );
+    }
+
+    #[test]
+    fn check_client_package_rejects_empty_or_duplicate_manifests() {
+        for client_files in [vec![], vec!["report.pdf", "report.pdf"]] {
+            let conn = open_in_memory().unwrap();
+            let order_id = ready_order(&conn);
+            let root = tempfile::tempdir().unwrap();
+            let delivery_dir = delivery_layout(root.path());
+            let client_dir = delivery_dir.join("client");
+            fs::create_dir_all(&client_dir).unwrap();
+            fs::write(client_dir.join("report.pdf"), "client report").unwrap();
+            let entries = client_files
+                .iter()
+                .map(|path| format!("\"{path}\""))
+                .collect::<Vec<_>>()
+                .join(", ");
+            fs::write(
+                delivery_dir.join("manifest.toml"),
+                format!(
+                    "version = 1\ndelivery_date = \"2026-05-27\"\nclient_files = [{entries}]\n"
+                ),
+            )
+            .unwrap();
+
+            let err = check_client_package(
+                &conn,
+                order_id,
+                PackageCheckInput {
+                    delivery_date: "2026-05-27",
+                    delivery_dir: &delivery_dir,
+                    package_id: None,
+                    checked_at: "2026-05-27T06:00:00Z",
+                },
+            )
+            .unwrap_err();
+
+            assert!(
+                err.to_string().contains("at least one") || err.to_string().contains("duplicate")
+            );
+            assert!(delivery_packages::list_for_order(&conn, order_id)
+                .unwrap()
+                .is_empty());
+        }
     }
 
     #[test]
@@ -1192,6 +1387,7 @@ mod tests {
             PackageCheckInput {
                 delivery_date: "2026-05-27",
                 delivery_dir: &delivery_dir,
+                package_id: None,
                 checked_at: "2026-05-27T06:00:00Z",
             },
         )
@@ -1242,6 +1438,7 @@ mod tests {
             PackageCheckInput {
                 delivery_date: "2026-05-27",
                 delivery_dir: &delivery_dir,
+                package_id: None,
                 checked_at: "2026-05-27T06:00:00Z",
             },
         )
@@ -1282,6 +1479,7 @@ mod tests {
             PackageCheckInput {
                 delivery_date: "2026-05-27",
                 delivery_dir: &delivery_dir,
+                package_id: None,
                 checked_at: "2026-05-27T06:00:00Z",
             },
         )
@@ -1322,6 +1520,7 @@ mod tests {
             PackageCheckInput {
                 delivery_date: "2026-05-27",
                 delivery_dir: &delivery_dir,
+                package_id: None,
                 checked_at: "2026-05-27T06:00:00Z",
             },
         )
@@ -1361,6 +1560,7 @@ mod tests {
             PackageCheckInput {
                 delivery_date: "2026-05-27",
                 delivery_dir: &delivery_dir,
+                package_id: None,
                 checked_at: "2026-05-27T06:00:00Z",
             },
         )
@@ -1400,12 +1600,49 @@ mod tests {
             PackageCheckInput {
                 delivery_date: "2026-05-27",
                 delivery_dir: &delivery_dir,
+                package_id: None,
                 checked_at: "2026-05-27T06:00:00Z",
             },
         )
         .unwrap_err();
 
         assert!(err.to_string().contains("unmanifested package zip entry"));
+        assert!(delivery_packages::list_for_order(&conn, order_id)
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn check_client_package_rejects_duplicate_zip_entries_without_recording() {
+        let conn = open_in_memory().unwrap();
+        let order_id = ready_order(&conn);
+        let root = tempfile::tempdir().unwrap();
+        let delivery_dir = delivery_layout(root.path());
+        let export_dir = delivery_dir.join("export");
+        fs::create_dir_all(&export_dir).unwrap();
+        write_required_delivery_docs(&delivery_dir);
+        write_manifest(&delivery_dir, ["DELIVERY_CLIENT.html"]);
+        write_zip(
+            &export_dir.join("client-package.zip"),
+            [
+                ("DELIVERY_CLIENT.html", "first"),
+                ("DELIVERY_CLIENT.html", "second"),
+            ],
+        );
+
+        let err = check_client_package(
+            &conn,
+            order_id,
+            PackageCheckInput {
+                delivery_date: "2026-05-27",
+                delivery_dir: &delivery_dir,
+                package_id: None,
+                checked_at: "2026-05-27T06:00:00Z",
+            },
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("duplicate package zip entry"));
         assert!(delivery_packages::list_for_order(&conn, order_id)
             .unwrap()
             .is_empty());
@@ -1439,6 +1676,7 @@ mod tests {
             PackageCheckInput {
                 delivery_date: "2026-05-27",
                 delivery_dir: &delivery_dir,
+                package_id: None,
                 checked_at: "2026-05-27T06:00:00Z",
             },
         )
@@ -1469,6 +1707,7 @@ mod tests {
             PackageCheckInput {
                 delivery_date: "2026-05-27",
                 delivery_dir: &delivery_dir,
+                package_id: None,
                 checked_at: "2026-05-27T06:00:00Z",
             },
         )

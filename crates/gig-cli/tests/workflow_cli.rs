@@ -300,6 +300,84 @@ stderr:
 }
 
 #[test]
+fn package_check_json_accepts_a_custom_package_id() {
+    let (config_home, data_home, state_home) = isolated_homes("package-check-custom-id");
+    let project_dir = unique_temp_dir("package-check-custom-id-project");
+    let gig_dir = project_dir.join(".gig");
+    let delivery_dir = prepare_client_delivery(&gig_dir, true);
+    let export_dir = delivery_dir.join("export");
+    std::fs::rename(
+        export_dir.join("client-package.zip"),
+        export_dir.join("order-42.zip"),
+    )
+    .unwrap();
+    let order_id = seed_order_with_workflow(&data_home, OrderStatus::ReadyToDeliver, &gig_dir);
+
+    let output = gig_command(&config_home, &data_home, &state_home)
+        .args([
+            "package",
+            "check",
+            &order_id.to_string(),
+            "--delivery-date",
+            "2026-05-27",
+            "--delivery-dir",
+            delivery_dir.to_str().unwrap(),
+            "--package-id",
+            "order-42",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "package check failed
+stdout:
+{}
+stderr:
+{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let json: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["status"], "validated");
+    assert_eq!(
+        json["paths"]["package_path"],
+        export_dir.join("order-42.zip").to_string_lossy().as_ref()
+    );
+}
+
+#[test]
+fn package_check_json_rejects_an_unsafe_package_id() {
+    let (config_home, data_home, state_home) = isolated_homes("package-check-unsafe-id");
+    let project_dir = unique_temp_dir("package-check-unsafe-id-project");
+    let gig_dir = project_dir.join(".gig");
+    let delivery_dir = prepare_client_delivery(&gig_dir, true);
+    let order_id = seed_order_with_workflow(&data_home, OrderStatus::ReadyToDeliver, &gig_dir);
+
+    let output = gig_command(&config_home, &data_home, &state_home)
+        .args([
+            "package",
+            "check",
+            &order_id.to_string(),
+            "--delivery-date",
+            "2026-05-27",
+            "--delivery-dir",
+            delivery_dir.to_str().unwrap(),
+            "--package-id",
+            "../secret",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    let json: Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(json["error"]["code"], "invalid_package_id");
+}
+
+#[test]
 fn artifact_send_json_missing_uploader_emits_machine_readable_error_to_stderr() {
     let (config_home, data_home, state_home) = isolated_homes("artifact-json-error");
     let project_dir = unique_temp_dir("artifact-json-error-project");
@@ -991,7 +1069,7 @@ fn quote_mark_sent_json_records_sent_timestamp_without_accepting() {
 }
 
 #[test]
-fn quote_accept_json_rejects_missing_workflow_index_before_promotion() {
+fn quote_accept_json_accepts_minimal_files_and_flat_plan() {
     let (config_home, data_home, state_home) = isolated_homes("quote-accept-missing-index");
     let project_dir = unique_temp_dir("quote-accept-missing-index-project");
     let gig_dir = project_dir.join(".gig");
@@ -1031,21 +1109,43 @@ fn quote_accept_json_rejects_missing_workflow_index_before_promotion() {
         .output()
         .unwrap();
 
-    assert!(!output.status.success());
-    let stderr = String::from_utf8(output.stderr).unwrap();
-    let json: Value = serde_json::from_str(&stderr).unwrap();
-    assert_eq!(json["error"]["code"], "missing_workflow_file");
-    assert!(json["error"]["message"]
-        .as_str()
-        .unwrap()
-        .contains("INDEX.html"));
+    assert!(output.status.success());
+    let json: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["status"], "accepted");
 
     let conn = db::open(&data_home.join("gig/gig.db")).unwrap();
     let draft = quote_drafts::find_by_slug(&conn, "draft-1")
         .unwrap()
         .unwrap();
-    assert_eq!(draft.status, QuoteDraftStatus::Quoted);
-    assert_eq!(draft.promoted_order_id, None);
+    let order_id = draft.promoted_order_id.unwrap();
+    let workflow = order_workflow::find_by_order_id(&conn, order_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(workflow.index_path, None);
+    assert_eq!(workflow.plan_html_path, None);
+    assert_eq!(
+        workflow.plan_md_path.as_deref(),
+        Some(gig_dir.join("PLAN.md").to_str().unwrap())
+    );
+    drop(conn);
+
+    std::fs::write(gig_dir.join("PLAN.md"), "workflow-created plan").unwrap();
+    let ready = gig_command(&config_home, &data_home, &state_home)
+        .args(["plan", "ready", &order_id.to_string(), "--json"])
+        .output()
+        .unwrap();
+    assert!(
+        ready.status.success(),
+        "plan ready failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&ready.stdout),
+        String::from_utf8_lossy(&ready.stderr)
+    );
+    let json: Value = serde_json::from_slice(&ready.stdout).unwrap();
+    assert_eq!(json["status"], "plan_ready");
+    assert_eq!(
+        json["paths"]["plan_md_path"],
+        gig_dir.join("PLAN.md").to_string_lossy().as_ref()
+    );
 }
 
 #[test]
@@ -1117,9 +1217,8 @@ fn quote_accept_json_promotes_order_and_records_workflow_paths_without_generatin
         gig_dir.join("QUOTE.md").to_string_lossy().into_owned()
     );
 
-    assert!(!gig_dir.join("plan/PLAN.md").exists());
-    assert!(!gig_dir.join("plan/PLAN.html").exists());
-    assert!(!gig_dir.join("acceptance/ACCEPTANCE.md").exists());
+    assert!(!gig_dir.join("PLAN.md").exists());
+    assert!(!gig_dir.join("ACCEPTANCE.md").exists());
 
     let conn = db::open(&data_home.join("gig/gig.db")).unwrap();
     let draft = quote_drafts::find_by_slug(&conn, "draft-1")
@@ -1134,6 +1233,15 @@ fn quote_accept_json_promotes_order_and_records_workflow_paths_without_generatin
         .unwrap()
         .unwrap();
     assert_eq!(workflow.gig_dir.as_deref(), Some(gig_dir.to_str().unwrap()));
+    assert_eq!(
+        workflow.plan_md_path.as_deref(),
+        Some(gig_dir.join("PLAN.md").to_str().unwrap())
+    );
+    assert_eq!(workflow.plan_html_path, None);
+    assert_eq!(
+        workflow.acceptance_path.as_deref(),
+        Some(gig_dir.join("ACCEPTANCE.md").to_str().unwrap())
+    );
 }
 
 #[test]

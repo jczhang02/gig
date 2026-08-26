@@ -27,6 +27,7 @@ fn check(conn: &Connection, args: PackageCheckArgs) -> Result<()> {
         PackageCheckInput {
             delivery_date: &args.delivery_date,
             delivery_dir: &args.delivery_dir,
+            package_id: args.package_id.as_deref(),
             checked_at: &checked_at,
         },
     )?;
@@ -65,6 +66,7 @@ fn send(conn: &Connection, args: PackageSendArgs) -> Result<()> {
         PackageSendInput {
             delivery_date: &args.delivery_date,
             delivery_dir: &args.delivery_dir,
+            package_id: args.package_id.as_deref(),
             sent_at: &sent_at,
         },
         uploader.as_ref(),

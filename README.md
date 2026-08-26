@@ -69,7 +69,7 @@ gig quote new --slug crawler-a --title "数据爬虫" --project-type crawler --s
 gig quote price crawler-a --min 3000 --recommended 5000 --max 8000
 gig quote mark-sent crawler-a
 
-# 2. 外部 workflow 准备正式项目及 .gig/JOB.md、.gig/QUOTE.md、.gig/INDEX.html 后，接受报价
+# 2. 外部 workflow 准备正式项目及 .gig/JOB.md、.gig/QUOTE.md 后，接受报价
 project_dir="$HOME/dev/partjobs/crawler-a"
 gig quote accept crawler-a --project-dir "$project_dir"
 
@@ -80,10 +80,11 @@ gig work start crawler-a
 gig acceptance check crawler-a
 gig acceptance complete crawler-a
 
-# 4. 外部 workflow 准备交付目录；先检查，再用已配置的 uploader 发送
+# 4. 外部 workflow 准备交付目录并确认包 ID；检查和发送必须使用同一个 ID
 delivery_dir="$project_dir/.gig/delivery/2026-05-27"
-gig package check crawler-a --delivery-date 2026-05-27 --delivery-dir "$delivery_dir"
-gig package send crawler-a --delivery-date 2026-05-27 --delivery-dir "$delivery_dir"
+package_id="crawler-a-v1"
+gig package check crawler-a --delivery-date 2026-05-27 --delivery-dir "$delivery_dir" --package-id "$package_id"
+gig package send crawler-a --delivery-date 2026-05-27 --delivery-dir "$delivery_dir" --package-id "$package_id"
 
 # 5. 收款与归档
 gig paid crawler-a
@@ -142,25 +143,17 @@ Quote Draft 被接受后，`gig` 记录以下预期路径；相应 Workflow Gate
 └── .gig/
     ├── JOB.md
     ├── QUOTE.md
-    ├── INDEX.html
-    ├── plan/
-    │   ├── PLAN.md
-    │   └── PLAN.html
-    ├── acceptance/
-    │   └── ACCEPTANCE.md
+    ├── PLAN.md
+    ├── ACCEPTANCE.md
     └── delivery/<YYYY-MM-DD>/
-        ├── DELIVERY.md
-        ├── manifest.toml
-        ├── internal/
-        │   └── DELIVERY_INTERNAL.html
         ├── client/
-        │   ├── DELIVERY_CLIENT.html
-        │   └── DELIVERY_CLIENT.pdf
+        │   └── <manifest 中允许的客户文件>
+        ├── manifest.toml
         └── export/
-            └── client-package.zip
+            └── <package-id>.zip
 ```
 
-`ACCEPTANCE.md` 必须包含“验收项 / 方法 / 证据 / 结论”（或对应英文）表格，并且每一项都有通过类结论。
+`ACCEPTANCE.md` 必须包含“验收项 / 方法 / 证据 / 结论”（或对应英文）表格，并且每一项都有通过类结论；文件任意位置出现 `pending`、`待确认`、`待签字` 或 `待验收` 都会阻塞验收。
 
 ## Client Package 安全门禁
 
@@ -170,8 +163,7 @@ Quote Draft 被接受后，`gig` 记录以下预期路径；相应 Workflow Gate
 version = 1
 delivery_date = "2026-05-27"
 client_files = [
-  "DELIVERY_CLIENT.html",
-  "DELIVERY_CLIENT.pdf",
+  "report.pdf",
   "deliverables/result.csv",
 ]
 ```
@@ -180,12 +172,15 @@ client_files = [
 
 - Client Package 日期与 manifest 一致；
 - `client_files` 全部位于 `client/` 内，且都是普通文件；
-- ZIP 条目与 allowlist 一致，没有额外文件；
+- manifest 至少列出一个文件且不得重复；
+- ZIP 条目与 allowlist 一致，没有缺失、重复或额外文件；
 - 拒绝绝对路径、`..`、软链接、隐藏路径和反斜杠路径；
 - 拒绝 `internal`、`prompts`、`ACCEPTANCE.md`、`DELIVERY_INTERNAL.html` 等内部材料。
 
+包 ID 会原样成为 `<id>.zip`；不会自动添加 `JC-` 或其他前缀。ID 长度为 1–64 个 ASCII 字符，首字符必须是字母或数字，其余可使用字母、数字、点、下划线和短横线；拒绝 `..`、路径分隔符及已经带 `.zip` 的输入，`--json` 下错误码为 `invalid_package_id`。不传 `--package-id` 时兼容旧的 `client-package.zip`。
+
 > [!WARNING]
-> `gig package send` 只接受同一 Order、日期和 ZIP 路径上已验证的 Client Package。发送前会再次完整校验；上传成功后才记录 Delivery Artifact，并把 Order 推进到 `delivered`。
+> `gig package send` 只接受同一 Order、日期和 ZIP 路径上已验证的 Client Package。发送前会再次完整校验；自定义包上传后的远端 basename 仍是 `<id>.zip`。上传成功后才记录 Delivery Artifact，并把 Order 推进到 `delivered`。
 
 上传临时附件但不改变 Order 状态时，使用：
 

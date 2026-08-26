@@ -48,12 +48,11 @@ fn classify_invalid_error(message: &str) -> &'static str {
     let lower = message.to_ascii_lowercase();
     if lower.contains("unknown project type") {
         "invalid_project_type"
+    } else if lower.contains("invalid client package id") {
+        "invalid_package_id"
     } else if lower.contains("unsafe package path") {
         "unsafe_package_path"
-    } else if lower.contains("client-package.zip")
-        || lower.contains("package artifact")
-        || lower.contains("package zip entry")
-    {
+    } else if lower.contains("package artifact") || lower.contains("package zip entry") {
         "missing_package_artifact"
     } else if lower.contains("acceptance headings missing")
         || lower.contains("acceptance item incomplete")
@@ -79,6 +78,13 @@ fn classify_invalid_error(message: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn invalid_package_ids_have_a_stable_error_code() {
+        let error = Error::Invalid("invalid client package id: ../secret".to_string());
+
+        assert_eq!(workflow_error_code(&error), "invalid_package_id");
+    }
 
     #[test]
     fn package_zip_entry_errors_are_package_artifact_errors() {

@@ -28,20 +28,19 @@ Feel free to reach out with any questions.
 
 const DEFAULT_DELIVERY_CHECKLIST: &str = r#"# Delivery Checklist — {{ title }}
 
-Prepare these workflow-created files before running `gig package check`:
+Choose a client package ID, then prepare:
 
-- [ ] .gig/delivery/<YYYY-MM-DD>/DELIVERY.md
-- [ ] .gig/delivery/<YYYY-MM-DD>/internal/DELIVERY_INTERNAL.html
-- [ ] .gig/delivery/<YYYY-MM-DD>/client/DELIVERY_CLIENT.html
-- [ ] .gig/delivery/<YYYY-MM-DD>/client/DELIVERY_CLIENT.pdf
+- [ ] .gig/delivery/<YYYY-MM-DD>/client/<allowlisted files>
 - [ ] .gig/delivery/<YYYY-MM-DD>/manifest.toml
-- [ ] .gig/delivery/<YYYY-MM-DD>/export/client-package.zip
+- [ ] .gig/delivery/<YYYY-MM-DD>/export/<PACKAGE_ID>.zip
+
+The ZIP entries must exactly match `client_files` in `manifest.toml`.
 
 Then run:
 
 ```bash
-gig package check {{ slug }} --delivery-date <YYYY-MM-DD> --delivery-dir .gig/delivery/<YYYY-MM-DD>
-gig package send {{ slug }} --delivery-date <YYYY-MM-DD> --delivery-dir .gig/delivery/<YYYY-MM-DD>
+gig package check {{ slug }} --delivery-date <YYYY-MM-DD> --delivery-dir .gig/delivery/<YYYY-MM-DD> --package-id <PACKAGE_ID>
+gig package send {{ slug }} --delivery-date <YYYY-MM-DD> --delivery-dir .gig/delivery/<YYYY-MM-DD> --package-id <PACKAGE_ID>
 ```
 "#;
 
@@ -148,7 +147,7 @@ mod tests {
     }
 
     #[test]
-    fn delivery_checklist_names_required_delivery_gate_files() {
+    fn delivery_checklist_names_the_manifest_and_custom_package_gate() {
         let delivery_checklist = EMBEDDED_TEMPLATES
             .iter()
             .find(|(name, _)| *name == "delivery-checklist")
@@ -156,19 +155,20 @@ mod tests {
             .unwrap();
 
         for required in [
-            "DELIVERY.md",
-            "internal/DELIVERY_INTERNAL.html",
-            "client/DELIVERY_CLIENT.html",
-            "client/DELIVERY_CLIENT.pdf",
+            "client/<allowlisted files>",
             "manifest.toml",
-            "export/client-package.zip",
+            "export/<PACKAGE_ID>.zip",
+            "--package-id <PACKAGE_ID>",
             "gig package check",
+            "gig package send",
         ] {
             assert!(
                 delivery_checklist.contains(required),
                 "missing required marker {required}"
             );
         }
+        assert!(!delivery_checklist.contains("DELIVERY_INTERNAL"));
+        assert!(!delivery_checklist.contains("client-package.zip"));
     }
 
     #[test]

@@ -134,10 +134,8 @@ pub fn accept_quote_draft(
     input: QuoteAcceptInput<'_>,
 ) -> Result<QuoteAcceptResult> {
     let gig_dir = input.project_dir.join(".gig");
-    let index_path = gig_dir.join("INDEX.html");
     let job_path = gig_dir.join("JOB.md");
     let quote_path = gig_dir.join("QUOTE.md");
-    require_workflow_created_file(&index_path, "INDEX.html")?;
     require_workflow_created_file(&job_path, "JOB.md")?;
     require_workflow_created_file(&quote_path, "QUOTE.md")?;
 
@@ -182,11 +180,11 @@ pub fn accept_quote_draft(
             order_id: order.id,
             project_type: Some(draft.project_type),
             gig_dir: Some(workflow_paths.gig_dir.as_str()),
-            index_path: Some(workflow_paths.index_path.as_str()),
+            index_path: None,
             job_path: Some(workflow_paths.job_path.as_str()),
             quote_path: Some(workflow_paths.quote_path.as_str()),
             plan_md_path: Some(workflow_paths.plan_md_path.as_str()),
-            plan_html_path: Some(workflow_paths.plan_html_path.as_str()),
+            plan_html_path: None,
             acceptance_path: Some(workflow_paths.acceptance_path.as_str()),
             created_at: input.accepted_at,
             updated_at: input.accepted_at,
@@ -214,11 +212,9 @@ fn require_workflow_created_file(path: &Path, label: &str) -> Result<()> {
 
 struct WorkflowPaths {
     gig_dir: String,
-    index_path: String,
     job_path: String,
     quote_path: String,
     plan_md_path: String,
-    plan_html_path: String,
     acceptance_path: String,
 }
 
@@ -226,12 +222,10 @@ impl WorkflowPaths {
     fn new(gig_dir: &Path) -> Self {
         Self {
             gig_dir: path_string(gig_dir),
-            index_path: path_string(&gig_dir.join("INDEX.html")),
             job_path: path_string(&gig_dir.join("JOB.md")),
             quote_path: path_string(&gig_dir.join("QUOTE.md")),
-            plan_md_path: path_string(&gig_dir.join("plan/PLAN.md")),
-            plan_html_path: path_string(&gig_dir.join("plan/PLAN.html")),
-            acceptance_path: path_string(&gig_dir.join("acceptance/ACCEPTANCE.md")),
+            plan_md_path: path_string(&gig_dir.join("PLAN.md")),
+            acceptance_path: path_string(&gig_dir.join("ACCEPTANCE.md")),
         }
     }
 }
@@ -524,19 +518,15 @@ mod tests {
         );
         assert_eq!(
             accepted.workflow.plan_md_path.as_deref(),
-            Some(gig_dir.join("plan/PLAN.md").to_str().unwrap())
+            Some(gig_dir.join("PLAN.md").to_str().unwrap())
         );
-        assert_eq!(
-            accepted.workflow.plan_html_path.as_deref(),
-            Some(gig_dir.join("plan/PLAN.html").to_str().unwrap())
-        );
+        assert_eq!(accepted.workflow.plan_html_path, None);
         assert_eq!(
             accepted.workflow.acceptance_path.as_deref(),
-            Some(gig_dir.join("acceptance/ACCEPTANCE.md").to_str().unwrap())
+            Some(gig_dir.join("ACCEPTANCE.md").to_str().unwrap())
         );
-        assert!(!gig_dir.join("plan/PLAN.md").exists());
-        assert!(!gig_dir.join("plan/PLAN.html").exists());
-        assert!(!gig_dir.join("acceptance/ACCEPTANCE.md").exists());
+        assert!(!gig_dir.join("PLAN.md").exists());
+        assert!(!gig_dir.join("ACCEPTANCE.md").exists());
 
         let stored_workflow = order_workflow::find_by_order_id(&conn, accepted.order.id)
             .unwrap()
@@ -545,7 +535,7 @@ mod tests {
     }
 
     #[test]
-    fn accept_quote_draft_requires_workflow_created_index_before_promotion() {
+    fn accept_quote_draft_does_not_require_derived_index_or_plan_html() {
         let root = tempfile::tempdir().unwrap();
         let paths = Paths::under_root(root.path());
         let conn = open_in_memory().unwrap();
@@ -561,13 +551,13 @@ mod tests {
             },
         )
         .unwrap();
-        let project_dir = root.path().join("missing-index-project");
+        let project_dir = root.path().join("minimal-project");
         let gig_dir = project_dir.join(".gig");
         std::fs::create_dir_all(&gig_dir).unwrap();
         std::fs::write(gig_dir.join("JOB.md"), "workflow-created job").unwrap();
         std::fs::write(gig_dir.join("QUOTE.md"), "workflow-created quote").unwrap();
 
-        let err = accept_quote_draft(
+        let accepted = accept_quote_draft(
             &conn,
             priced.id,
             QuoteAcceptInput {
@@ -577,12 +567,11 @@ mod tests {
                 my_cut_ratio: 0.6,
             },
         )
-        .unwrap_err();
+        .unwrap();
 
-        assert!(err.to_string().contains("INDEX.html"));
-        let stored = quote_drafts::find_by_id(&conn, priced.id).unwrap();
-        assert_eq!(stored.status, QuoteDraftStatus::Quoted);
-        assert_eq!(stored.promoted_order_id, None);
+        assert_eq!(accepted.order.status, OrderStatus::Accepted);
+        assert_eq!(accepted.workflow.index_path, None);
+        assert_eq!(accepted.workflow.plan_html_path, None);
     }
 
     #[test]

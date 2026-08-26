@@ -55,13 +55,7 @@ pub fn mark_plan_ready(
         .plan_md_path
         .as_deref()
         .ok_or_else(|| Error::Invalid("missing expected plan markdown path".to_string()))?;
-    let plan_html_path = workflow
-        .plan_html_path
-        .as_deref()
-        .ok_or_else(|| Error::Invalid("missing expected plan html path".to_string()))?;
-
     require_workflow_created_file(Path::new(plan_md_path), "plan markdown")?;
-    require_workflow_created_file(Path::new(plan_html_path), "plan html")?;
 
     let tx = conn.unchecked_transaction()?;
     orders::update_status(&tx, order_id, OrderStatus::PlanReady, None, None)?;
@@ -164,6 +158,18 @@ pub fn complete_acceptance(
 }
 
 fn require_acceptance_items(contents: &str) -> Result<()> {
+    if contents.lines().any(|line| {
+        let line = line.to_ascii_lowercase();
+        line.contains("pending")
+            || line.contains("待确认")
+            || line.contains("待签字")
+            || line.contains("待验收")
+    }) {
+        return Err(Error::Invalid(
+            "acceptance contains a pending signoff or review".to_string(),
+        ));
+    }
+
     let mut rows_after_header = contents.lines().skip_while(|line| {
         let cells = markdown_table_cells(line);
         acceptance_column_indices(&cells).is_none()
@@ -383,12 +389,12 @@ mod tests {
                 order_id,
                 project_type: Some(ProjectType::Crawler),
                 gig_dir: Some(gig_dir.to_str().unwrap()),
-                index_path: Some(gig_dir.join("INDEX.html").to_str().unwrap()),
+                index_path: None,
                 job_path: Some(gig_dir.join("JOB.md").to_str().unwrap()),
                 quote_path: Some(gig_dir.join("QUOTE.md").to_str().unwrap()),
-                plan_md_path: Some(gig_dir.join("plan/PLAN.md").to_str().unwrap()),
-                plan_html_path: Some(gig_dir.join("plan/PLAN.html").to_str().unwrap()),
-                acceptance_path: Some(gig_dir.join("acceptance/ACCEPTANCE.md").to_str().unwrap()),
+                plan_md_path: Some(gig_dir.join("PLAN.md").to_str().unwrap()),
+                plan_html_path: None,
+                acceptance_path: Some(gig_dir.join("ACCEPTANCE.md").to_str().unwrap()),
                 created_at: "2026-05-27T02:00:00Z",
                 updated_at: "2026-05-27T02:00:00Z",
             },
@@ -402,10 +408,8 @@ mod tests {
         let conn = open_in_memory().unwrap();
         let order_id = accepted_order(&conn);
         let gig_dir = root.path().join("project/.gig");
-        let plan_dir = gig_dir.join("plan");
-        std::fs::create_dir_all(&plan_dir).unwrap();
-        std::fs::write(plan_dir.join("PLAN.md"), "workflow-created plan").unwrap();
-        std::fs::write(plan_dir.join("PLAN.html"), "workflow-created html").unwrap();
+        std::fs::create_dir_all(&gig_dir).unwrap();
+        std::fs::write(gig_dir.join("PLAN.md"), "workflow-created plan").unwrap();
         workflow_row(&conn, order_id, &gig_dir);
 
         let ready = mark_plan_ready(
@@ -422,9 +426,8 @@ mod tests {
             ready.workflow.plan_ready_at.as_deref(),
             Some("2026-05-27T03:00:00Z")
         );
-        assert!(plan_dir.join("PLAN.md").exists());
-        assert!(plan_dir.join("PLAN.html").exists());
-        assert!(!gig_dir.join("acceptance/ACCEPTANCE.md").exists());
+        assert!(gig_dir.join("PLAN.md").exists());
+        assert!(!gig_dir.join("ACCEPTANCE.md").exists());
     }
 
     #[test]
@@ -460,10 +463,8 @@ mod tests {
     ) -> (i64, std::path::PathBuf) {
         let order_id = accepted_order(conn);
         let gig_dir = root.path().join("project/.gig");
-        let plan_dir = gig_dir.join("plan");
-        std::fs::create_dir_all(&plan_dir).unwrap();
-        std::fs::write(plan_dir.join("PLAN.md"), "workflow-created plan").unwrap();
-        std::fs::write(plan_dir.join("PLAN.html"), "workflow-created html").unwrap();
+        std::fs::create_dir_all(&gig_dir).unwrap();
+        std::fs::write(gig_dir.join("PLAN.md"), "workflow-created plan").unwrap();
         workflow_row(conn, order_id, &gig_dir);
         mark_plan_ready(
             conn,
@@ -496,9 +497,8 @@ mod tests {
             approved.workflow.plan_approved_at.as_deref(),
             Some("2026-05-27T04:00:00Z")
         );
-        assert!(gig_dir.join("plan/PLAN.md").exists());
-        assert!(gig_dir.join("plan/PLAN.html").exists());
-        assert!(!gig_dir.join("acceptance/ACCEPTANCE.md").exists());
+        assert!(gig_dir.join("PLAN.md").exists());
+        assert!(!gig_dir.join("ACCEPTANCE.md").exists());
     }
 
     #[test]
@@ -506,7 +506,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let conn = open_in_memory().unwrap();
         let (order_id, gig_dir) = ready_order(&root, &conn);
-        let plan_path = gig_dir.join("plan/PLAN.md");
+        let plan_path = gig_dir.join("PLAN.md");
         let before = std::fs::read_to_string(&plan_path).unwrap();
 
         let rejected = reject_plan(
@@ -529,7 +529,6 @@ mod tests {
             Some("scope missing")
         );
         assert_eq!(std::fs::read_to_string(&plan_path).unwrap(), before);
-        assert!(gig_dir.join("plan/PLAN.html").exists());
     }
 
     #[test]
@@ -595,9 +594,8 @@ mod tests {
             Some("2026-05-27T04:45:00Z")
         );
         assert_eq!(started.workflow.updated_at, "2026-05-27T04:45:00Z");
-        assert!(gig_dir.join("plan/PLAN.md").exists());
-        assert!(gig_dir.join("plan/PLAN.html").exists());
-        assert!(!gig_dir.join("acceptance/ACCEPTANCE.md").exists());
+        assert!(gig_dir.join("PLAN.md").exists());
+        assert!(!gig_dir.join("ACCEPTANCE.md").exists());
     }
 
     #[test]
@@ -688,7 +686,7 @@ mod tests {
             .unwrap();
         assert_eq!(order.status, OrderStatus::InProgress);
         assert_eq!(workflow.acceptance_completed_at, None);
-        assert!(!gig_dir.join("acceptance").exists());
+        assert!(!gig_dir.join("ACCEPTANCE.md").exists());
     }
 
     #[test]
@@ -697,10 +695,9 @@ mod tests {
         let conn = open_in_memory().unwrap();
         let order_id = in_progress_order(&conn);
         let gig_dir = root.path().join("project/.gig");
-        let acceptance_dir = gig_dir.join("acceptance");
-        std::fs::create_dir_all(&acceptance_dir).unwrap();
+        std::fs::create_dir_all(&gig_dir).unwrap();
         std::fs::write(
-            acceptance_dir.join("ACCEPTANCE.md"),
+            gig_dir.join("ACCEPTANCE.md"),
             "| item | method |
 ",
         )
@@ -720,10 +717,9 @@ mod tests {
         let conn = open_in_memory().unwrap();
         let order_id = in_progress_order(&conn);
         let gig_dir = root.path().join("project/.gig");
-        let acceptance_dir = gig_dir.join("acceptance");
-        std::fs::create_dir_all(&acceptance_dir).unwrap();
+        std::fs::create_dir_all(&gig_dir).unwrap();
         std::fs::write(
-            acceptance_dir.join("ACCEPTANCE.md"),
+            gig_dir.join("ACCEPTANCE.md"),
             "| 验收项 | 方法 | 证据 | 结论 |
 | --- | --- | --- | --- |
 | crawler runs | run command |  | pass |
@@ -740,15 +736,40 @@ mod tests {
     }
 
     #[test]
+    fn check_acceptance_rejects_pending_signoff_outside_the_table() {
+        let root = tempfile::tempdir().unwrap();
+        let conn = open_in_memory().unwrap();
+        let order_id = in_progress_order(&conn);
+        let gig_dir = root.path().join("project/.gig");
+        std::fs::create_dir_all(&gig_dir).unwrap();
+        std::fs::write(
+            gig_dir.join("ACCEPTANCE.md"),
+            "| Item | Method | Evidence | Conclusion |
+| --- | --- | --- | --- |
+| Export | test | output.csv | pass |
+
+Human signoff pending.
+",
+        )
+        .unwrap();
+        workflow_row(&conn, order_id, &gig_dir);
+
+        let err = check_acceptance(&conn, order_id).unwrap_err();
+
+        assert!(err.to_string().contains("pending signoff"));
+        let order = orders::find_by_id(&conn, order_id).unwrap();
+        assert_eq!(order.status, OrderStatus::InProgress);
+    }
+
+    #[test]
     fn check_acceptance_rejects_blocked_conclusions() {
         let root = tempfile::tempdir().unwrap();
         let conn = open_in_memory().unwrap();
         let order_id = in_progress_order(&conn);
         let gig_dir = root.path().join("project/.gig");
-        let acceptance_dir = gig_dir.join("acceptance");
-        std::fs::create_dir_all(&acceptance_dir).unwrap();
+        std::fs::create_dir_all(&gig_dir).unwrap();
         std::fs::write(
-            acceptance_dir.join("ACCEPTANCE.md"),
+            gig_dir.join("ACCEPTANCE.md"),
             "| 验收项 | 方法 | 证据 | 结论 |
 | --- | --- | --- | --- |
 | crawler runs | run command | log | blocked |
@@ -770,10 +791,9 @@ mod tests {
         let conn = open_in_memory().unwrap();
         let order_id = in_progress_order(&conn);
         let gig_dir = root.path().join("project/.gig");
-        let acceptance_dir = gig_dir.join("acceptance");
-        std::fs::create_dir_all(&acceptance_dir).unwrap();
+        std::fs::create_dir_all(&gig_dir).unwrap();
         std::fs::write(
-            acceptance_dir.join("ACCEPTANCE.md"),
+            gig_dir.join("ACCEPTANCE.md"),
             "| 验收项 | 方法 | 证据 | 结论 |
 | --- | --- | --- | --- |
 | crawler runs | run command | log | not ready |
@@ -795,10 +815,9 @@ mod tests {
         let conn = open_in_memory().unwrap();
         let order_id = in_progress_order(&conn);
         let gig_dir = root.path().join("project/.gig");
-        let acceptance_dir = gig_dir.join("acceptance");
-        std::fs::create_dir_all(&acceptance_dir).unwrap();
+        std::fs::create_dir_all(&gig_dir).unwrap();
         std::fs::write(
-            acceptance_dir.join("ACCEPTANCE.md"),
+            gig_dir.join("ACCEPTANCE.md"),
             "| 验收项 | 方法 | 证据 | 结论 |
 | --- | --- | --- | --- |
 | ok | inspect | file | pass |
@@ -821,7 +840,7 @@ mod tests {
             completed.workflow.acceptance_completed_at.as_deref(),
             Some("2026-05-27T05:00:00Z")
         );
-        assert!(acceptance_dir.join("ACCEPTANCE.md").exists());
+        assert!(gig_dir.join("ACCEPTANCE.md").exists());
         assert!(!gig_dir.join("delivery").exists());
     }
 }

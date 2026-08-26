@@ -306,6 +306,10 @@ pub struct PackageCheckArgs {
     #[arg(long)]
     pub delivery_date: String,
 
+    /// Optional client package filename stem (the final file is <ID>.zip).
+    #[arg(long)]
+    pub package_id: Option<String>,
+
     /// Existing .gig delivery directory.
     #[arg(long)]
     pub delivery_dir: std::path::PathBuf,
@@ -323,6 +327,10 @@ pub struct PackageSendArgs {
     /// Delivery date matching manifest.toml.
     #[arg(long)]
     pub delivery_date: String,
+
+    /// Optional client package filename stem (the final file is <ID>.zip).
+    #[arg(long)]
+    pub package_id: Option<String>,
 
     /// Existing .gig delivery directory.
     #[arg(long)]

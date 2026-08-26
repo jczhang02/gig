@@ -504,7 +504,7 @@
 
           <div class="rule"></div>
           <div class="callout">
-            <strong>实践判断：</strong>如果你正在「创造」内容，应该去找 workflow、agent、编辑器或脚本；如果你正在「确认」某个节点已经发生，才用 <code>gig</code>。这个边界能避免最常见的误用：期待 <code>gig package send</code> 自动生成 <code>client-package.zip</code>。</div>
+            <strong>实践判断：</strong>如果你正在「创造」内容，应该去找 workflow、agent、编辑器或脚本；如果你正在「确认」某个节点已经发生，才用 <code>gig</code>。这个边界能避免最常见的误用：期待 <code>gig package send</code> 自动生成已确认 ID 的 ZIP。</div>
         </section>
 
         <section id="lifecycle">
@@ -523,7 +523,7 @@
           <div class="states" style="margin-top: var(--space-5);">
             <div class="state-row"><div><div class="state-kicker">early</div><div class="state-name">Lead → Negotiating</div></div><p>还在判断机会和沟通范围。旧的直接建单路径仍可用；新的 quote draft 路径通常从 <code>gig quote new</code> 开始。</p><span class="status-chip">lead / negotiating</span></div>
             <div class="state-row"><div><div class="state-kicker">acceptance of quote</div><div class="state-name">Accepted</div></div><p>客户接受报价后，用 <code>gig quote accept</code> 把 XDG 草稿提升为正式订单，并登记项目内 <code>.gig/</code> 路径。</p><span class="status-chip">accepted</span></div>
-            <div class="state-row"><div><div class="state-kicker">plan gate</div><div class="state-name">PlanReady → PlanApproved</div></div><p>外部 workflow 先生成 <code>.gig/plan/PLAN.md</code> 与 <code>PLAN.html</code>；CLI 只校验并记录 ready / approved。</p><span class="status-chip">plan_ready / plan_approved</span></div>
+            <div class="state-row"><div><div class="state-kicker">plan gate</div><div class="state-name">PlanReady → PlanApproved</div></div><p>外部 workflow 先生成 <code>.gig/PLAN.md</code>；CLI 只校验并记录 ready / approved。</p><span class="status-chip">plan_ready / plan_approved</span></div>
             <div class="state-row"><div><div class="state-kicker">execution</div><div class="state-name">InProgress → ReadyToDeliver</div></div><p>计划批准后用 <code>gig work start crawler-a</code> 进入开工并记录 <code>work_started_at</code>；验收材料完成后用 <code>gig acceptance complete</code> 进入可交付状态。</p><span class="status-chip">in_progress / ready_to_deliver</span></div>
             <div class="state-row"><div><div class="state-kicker">delivery</div><div class="state-name">Delivered ⇄ Revision</div></div><p><code>gig package check</code> 在 <code>ready_to_deliver</code> 或 <code>revision</code> 状态校验客户包并记录 validated；<code>gig package send</code> 只发送匹配的已校验客户包并置为 delivered。若客户要求改动，可回 revision 后重新 check/send。</p><span class="status-chip">delivered / revision</span></div>
             <div class="state-row"><div><div class="state-kicker">money and closure</div><div class="state-name">Paid → Archived</div></div><p>收款后标记 paid，再归档项目。旧订单即使缺少 workflow metadata，也仍可 list、show、export、archive。</p><span class="status-chip">paid / archived</span></div>
@@ -595,7 +595,7 @@ gig doctor</code></pre>
 
             <div class="card">
               <h3>3. 计划门：ready 再 approve</h3>
-              <pre><code># 校验 .gig/plan/PLAN.md 和 .gig/plan/PLAN.html
+              <pre><code># 校验 .gig/PLAN.md
 gig plan ready crawler-a
 
 # 用户或负责人确认计划后
@@ -616,11 +616,11 @@ gig acceptance complete crawler-a</code></pre>
               <h3>5. 先校验客户包，再发送并变 delivered</h3>
               <pre><code>gig package check crawler-a \
   --delivery-date 2026-05-27 \
-  --delivery-dir ~/dev/partjobs/crawler-a/.gig/delivery/2026-05-27
+  --delivery-dir ~/dev/partjobs/crawler-a/.gig/delivery/2026-05-27   --package-id crawler-a-v1
 
 gig package send crawler-a \
   --delivery-date 2026-05-27 \
-  --delivery-dir ~/dev/partjobs/crawler-a/.gig/delivery/2026-05-27</code></pre>
+  --delivery-dir ~/dev/partjobs/crawler-a/.gig/delivery/2026-05-27   --package-id crawler-a-v1</code></pre>
             </div>
 
             <div class="card">
@@ -653,32 +653,24 @@ gig doctor --fix</code></pre>
           <div class="folder" aria-label="项目目录示意">
 ~/dev/partjobs/crawler-a/
 ├── .gig/
-│   ├── JOB.md                    <span class="ok"># 外部 workflow 生成：需求与工作边界</span>
-│   ├── QUOTE.md                  <span class="ok"># 外部 workflow 生成：报价说明</span>
-│   ├── INDEX.html                <span class="ok"># 项目工作台或索引页</span>
-│   ├── plan/
-│   │   ├── PLAN.md               <span class="ok"># gig plan ready 会检查</span>
-│   │   └── PLAN.html             <span class="ok"># gig plan ready 会检查</span>
-│   ├── acceptance/
-│   │   └── ACCEPTANCE.md         <span class="warn"># 内部验收材料，不进入客户包</span>
+│   ├── JOB.md                    <span class="ok"># 需求与工作边界</span>
+│   ├── QUOTE.md                  <span class="ok"># 已接受的报价快照</span>
+│   ├── PLAN.md                   <span class="ok"># gig plan ready 会检查</span>
+│   ├── ACCEPTANCE.md             <span class="warn"># 内部验收证据，不进入客户包</span>
 │   └── delivery/
 │       └── 2026-05-27/
-│           ├── DELIVERY.md       <span class="ok"># 交付总说明</span>
-│           ├── client/           <span class="ok"># 只放允许发给客户的文件源</span>
-│           │   ├── DELIVERY_CLIENT.html
-│           │   └── DELIVERY_CLIENT.pdf
-│           ├── internal/         <span class="warn"># 禁止进客户包</span>
-│           │   └── DELIVERY_INTERNAL.html
+│           ├── client/           <span class="ok"># 只放 manifest 允许的客户文件</span>
+│           │   ├── report.pdf
+│           │   └── deliverables/result.csv
 │           ├── manifest.toml     <span class="ok"># client_files 精确白名单</span>
-│           ├── export/
-│           │   └── client-package.zip
-│           └── prompts/          <span class="warn"># 禁止进客户包</span>
+│           └── export/
+│               └── crawler-a-v1.zip
 └── src-or-work-files/            <span class="muted"># 项目实际工作文件，由外部工具维护</span>
           </div>
 
           <div class="grid two" style="margin-top: var(--space-5);">
-            <div class="callout"><strong>项目层：</strong><code>.gig/JOB.md</code>、<code>QUOTE.md</code>、<code>INDEX.html</code> 是 accept 后的基础事实。缺它们，订单可以存在，但后续 workflow 命令会被路径诊断卡住。</div>
-            <div class="callout"><strong>交付层：</strong>每次交付单独一个日期目录。客户 zip 固定是 <code>.gig/delivery/&lt;YYYY-MM-DD&gt;/export/client-package.zip</code>，不是随便找一个 zip 上传。</div>
+            <div class="callout"><strong>项目层：</strong><code>.gig/JOB.md</code> 与 <code>QUOTE.md</code> 是 accept 的必要输入；成交后只增加 <code>PLAN.md</code> 与 <code>ACCEPTANCE.md</code>。</div>
+            <div class="callout"><strong>交付层：</strong>每次交付单独一个日期目录。首次打包时确认 package ID，客户 ZIP 严格命名为 <code>&lt;id&gt;.zip</code>；修订时确认复用或输入新 ID。</div>
           </div>
         </section>
 
@@ -688,7 +680,7 @@ gig doctor --fix</code></pre>
               <p class="label">06 / Secure Client Package</p>
               <h2>客户包先过安全门，再上传</h2>
             </div>
-            <p><code>gig package check</code> 是交付前安全门；它只接受外部 workflow 已经创建好的 <code>manifest.toml</code> 与 <code>client-package.zip</code>，并检查 zip 内容是否严格等于白名单。<code>gig package send</code> 只发送匹配的已校验客户包。</p>
+            <p><code>gig package check</code> 是交付前安全门；它接受外部 workflow 已经创建好的 <code>manifest.toml</code> 与 <code>&lt;id&gt;.zip</code>，并检查 ZIP 内容是否严格等于白名单。<code>gig package send</code> 必须使用相同 ID，只发送匹配的已校验客户包；远端 basename 也保持 <code>&lt;id&gt;.zip</code>。</p>
           </div>
 
           <div class="grid two">
@@ -707,7 +699,8 @@ client_files = [
             <div class="card">
               <h3>目录与路径必须安全</h3>
               <ul class="compact-list">
-                <li><code>delivery_dir</code>、<code>client/</code>、<code>manifest.toml</code>、<code>export/client-package.zip</code> 都必须存在。</li>
+                <li><code>delivery_dir</code>、<code>client/</code>、<code>manifest.toml</code>、<code>export/&lt;id&gt;.zip</code> 都必须存在。</li>
+                <li>ID 为 1–64 个 ASCII 字符，首位字母数字，其余允许字母数字、点、下划线和短横线；拒绝 <code>..</code>、路径和 <code>.zip</code> 后缀。</li>
                 <li><code>client/</code> 和包文件必须留在 delivery 目录内，不能通过 symlink 或路径逃逸。</li>
                 <li>manifest 的 <code>delivery_date</code> 必须匹配命令行的 <code>--delivery-date</code>。</li>
                 <li>zip entry 不能是 symlink，不能使用绝对路径、<code>..</code>、反斜杠或空路径。</li>
@@ -721,7 +714,7 @@ client_files = [
               <tbody>
                 <tr><td><code>.gig/</code>、隐藏路径、以 <code>.</code> 开头的组件</td><td>内部状态和隐藏文件不属于客户交付物</td><td>只从 <code>delivery/client/</code> 复制公开文件</td></tr>
                 <tr><td><code>internal/</code>、<code>prompts/</code></td><td>包含内部过程、提示词或协作痕迹</td><td>保留在 delivery 目录内，但不要列入 manifest</td></tr>
-                <tr><td><code>.gig/acceptance/ACCEPTANCE.md</code>、<code>internal/DELIVERY_INTERNAL.html</code></td><td>验收与内部交付说明不是客户包内容</td><td>如需客户说明，另写公开版 README 或交付说明页</td></tr>
+                <tr><td><code>.gig/ACCEPTANCE.md</code>、内部日志或审计材料</td><td>验收证据和内部过程不是客户包内容</td><td>客户报告由 Kami 生成，并只把批准的正式产物列入 manifest</td></tr>
                 <tr><td>未列入 manifest 的 zip entry</td><td>防止临时文件、缓存、草稿被意外打包</td><td>先更新 <code>client_files</code>，再重建 zip</td></tr>
                 <tr><td>symlink、绝对路径、<code>../</code>、反斜杠路径</td><td>防止文件逃逸和跨平台路径歧义</td><td>使用普通文件和 POSIX 风格相对路径</td></tr>
               </tbody>
@@ -776,10 +769,10 @@ path_style = false</code></pre>
 
           <div class="cheatsheet">
             <div class="cheat"><div class="cheat-label">quote <span class="command-tag">报价草稿</span></div><code>gig quote new --slug crawler-a --title "数据爬虫" --project-type crawler --summary "采集公开列表并导出 CSV"</code><code>gig quote price crawler-a --min 3000 --recommended 5000 --max 8000</code><code>gig quote mark-sent crawler-a</code><code>gig quote accept crawler-a --project-dir ~/dev/partjobs/crawler-a</code><p>XDG 草稿到正式订单的入口。</p></div>
-            <div class="cheat"><div class="cheat-label">plan/work <span class="command-tag">计划与开工</span></div><code>gig plan ready crawler-a</code><code>gig plan approve crawler-a</code><code>gig work start crawler-a</code><code>gig plan reject crawler-a --reason "范围需要重写"</code><p>ready 检查外部生成的 <code>PLAN.md</code> 与 <code>PLAN.html</code>；start 记录正式开工。</p></div>
+            <div class="cheat"><div class="cheat-label">plan/work <span class="command-tag">计划与开工</span></div><code>gig plan ready crawler-a</code><code>gig plan approve crawler-a</code><code>gig work start crawler-a</code><code>gig plan reject crawler-a --reason "范围需要重写"</code><p>ready 检查外部生成的 <code>.gig/PLAN.md</code>；start 记录正式开工。</p></div>
             <div class="cheat"><div class="cheat-label">status <span class="command-tag">人工状态</span></div><code>gig status crawler-a revision</code><code>gig status crawler-a cancelled</code><p>开工使用 <code>gig work start</code>；强制改状态只用于真实业务事实。</p></div>
             <div class="cheat"><div class="cheat-label">acceptance <span class="command-tag">验收</span></div><code>gig acceptance check crawler-a</code><code>gig acceptance complete crawler-a</code><p>complete 会推进到 <code>ready_to_deliver</code>，为客户包发送做准备。</p></div>
-            <div class="cheat"><div class="cheat-label">package check/send <span class="command-tag">客户包</span></div><code>gig package check crawler-a --delivery-date 2026-05-27 --delivery-dir ~/dev/partjobs/crawler-a/.gig/delivery/2026-05-27</code><code>gig package send crawler-a --delivery-date 2026-05-27 --delivery-dir ~/dev/partjobs/crawler-a/.gig/delivery/2026-05-27</code><code>gig package send crawler-a --delivery-date 2026-05-27 --delivery-dir ~/dev/partjobs/crawler-a/.gig/delivery/2026-05-27 --json</code><p>先校验并记录 validated，再上传匹配的 <code>export/client-package.zip</code>，成功后订单变 <code>delivered</code>。</p></div>
+            <div class="cheat"><div class="cheat-label">package check/send <span class="command-tag">客户包</span></div><code>gig package check crawler-a --delivery-date 2026-05-27 --delivery-dir ~/dev/partjobs/crawler-a/.gig/delivery/2026-05-27 --package-id crawler-a-v1</code><code>gig package send crawler-a --delivery-date 2026-05-27 --delivery-dir ~/dev/partjobs/crawler-a/.gig/delivery/2026-05-27 --package-id crawler-a-v1</code><code>gig package send crawler-a --delivery-date 2026-05-27 --delivery-dir ~/dev/partjobs/crawler-a/.gig/delivery/2026-05-27 --package-id crawler-a-v1 --json</code><p>先校验并记录 validated，再上传同一 ID 的 <code>export/crawler-a-v1.zip</code>，成功后订单变 <code>delivered</code>。</p></div>
             <div class="cheat"><div class="cheat-label">artifact send <span class="command-tag">独立附件</span></div><code>gig artifact send crawler-a report.pdf screenshot.png</code><code>gig artifact send crawler-a report.pdf --uploader s3:aliyun-hk --json</code><p>上传并记录 artifacts，不改变订单状态。</p></div>
             <div class="cheat"><div class="cheat-label">paid <span class="command-tag">收款</span></div><code>gig paid crawler-a</code><code>gig paid crawler-a --on 1770000000</code><p>标记收款。<code>--on</code> 接收 unix timestamp。</p></div>
             <div class="cheat"><div class="cheat-label">archive <span class="command-tag">归档</span></div><code>gig archive crawler-a</code><code>gig archive crawler-a --yes</code><code>gig archive crawler-a --purge --yes</code><p>默认移动到 <code>archive_root</code>；<code>--purge</code> 是删除本地文件，慎用。</p></div>
@@ -804,12 +797,12 @@ path_style = false</code></pre>
             <table>
               <thead><tr><th>症状</th><th>通常原因</th><th>先做什么</th></tr></thead>
               <tbody>
-                <tr><td><code>gig plan ready</code> 失败</td><td>外部 workflow 没生成 <code>.gig/plan/PLAN.md</code> 或 <code>PLAN.html</code></td><td>回项目目录补文件，再跑 <code>gig doctor</code></td></tr>
-                <tr><td><code>gig quote accept</code> 后后续命令被挡</td><td>accept 只登记路径，不会创建 <code>JOB.md</code>、<code>QUOTE.md</code>、<code>INDEX.html</code></td><td>让 workflow 生成项目内 <code>.gig/</code> 基础文件</td></tr>
+                <tr><td><code>gig plan ready</code> 失败</td><td>外部 workflow 没生成 <code>.gig/PLAN.md</code></td><td>回项目目录补文件，再跑 <code>gig doctor</code></td></tr>
+                <tr><td><code>gig quote accept</code> 被挡</td><td>accept 只登记路径，不会创建 <code>JOB.md</code> 或 <code>QUOTE.md</code></td><td>让 workflow 先生成这两个项目内基础文件</td></tr>
                 <tr><td><code>package send requires ready_to_deliver or revision</code> / <code>client package must be validated before send</code></td><td>状态还没到交付门、修订流程没标记 revision，或还没跑 <code>package check</code></td><td>先完成 <code>gig acceptance complete</code>，必要时标记 revision，然后运行 <code>gig package check</code></td></tr>
                 <tr><td><code>unsafe package path</code></td><td>manifest 或 zip entry 有隐藏路径、<code>..</code>、反斜杠、内部目录或禁止文件名</td><td>清理 <code>client_files</code>，重建 zip</td></tr>
                 <tr><td><code>unmanifested package zip entry</code></td><td>zip 里出现了白名单之外的文件或目录</td><td>用 manifest 精确列出客户文件，删除临时文件后重新打包</td></tr>
-                <tr><td><code>missing package zip entry</code></td><td>manifest 写了某个文件，但 zip 没有它</td><td>重建 <code>export/client-package.zip</code>，保持与 manifest 一致</td></tr>
+                <tr><td><code>missing package zip entry</code></td><td>manifest 写了某个文件，但 ZIP 没有它</td><td>使用同一 package ID 重建 <code>export/&lt;id&gt;.zip</code>，保持与 manifest 一致</td></tr>
                 <tr><td>短链接请求失败</td><td>endpoint、token 或 Worker 响应不符合预期</td><td>检查 <code>[delivery.short_link]</code>，确认 token 只在本机配置中存在</td></tr>
                 <tr><td>旧订单 JSON next_action 显示 legacy</td><td>老数据缺 <code>order_workflow</code> 或 <code>project_type</code></td><td>旧订单仍可 list/show/export/archive；需要支持层命令时再补 metadata</td></tr>
                 <tr><td><code>artifact send</code> 后状态没变</td><td>这是预期行为</td><td>它只上传附件并记录 artifact；客户正式交付仍用 <code>package send</code></td></tr>

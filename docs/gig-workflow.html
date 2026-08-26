@@ -92,18 +92,25 @@ gig quote accept crawler-a --project-dir ~/dev/partjobs/crawler-a</code></pre>
 
     <section>
       <h2>4. 客户包交付</h2>
-      <p>客户包目录由外部 workflow 准备，形状固定：</p>
+      <p>客户包目录由外部 workflow 准备；包 ID 由 JC 确认并原样成为文件名，不添加前缀：</p>
       <pre><code>.gig/delivery/2026-05-27/
   client/
   manifest.toml
-  export/client-package.zip</code></pre>
-      <pre><code>gig package send crawler-a \
+  export/crawler-a-v1.zip</code></pre>
+      <pre><code>gig package check crawler-a \
   --delivery-date 2026-05-27 \
-  --delivery-dir ~/dev/partjobs/crawler-a/.gig/delivery/2026-05-27</code></pre>
-      <p><code>package send</code> 会先执行严格白名单校验，再用配置好的 uploader 上传 zip，记录 artifact，把 package 标为 sent，并把订单推进到 delivered。</p>
+  --delivery-dir ~/dev/partjobs/crawler-a/.gig/delivery/2026-05-27 \
+  --package-id crawler-a-v1
+
+gig package send crawler-a \
+  --delivery-date 2026-05-27 \
+  --delivery-dir ~/dev/partjobs/crawler-a/.gig/delivery/2026-05-27 \
+  --package-id crawler-a-v1</code></pre>
+      <p><code>package send</code> 只发送同一日期、路径及 ID 下已经校验的 ZIP；远端 basename 仍是 <code>crawler-a-v1.zip</code>。未传 <code>--package-id</code> 时兼容旧的 <code>client-package.zip</code>。</p>
       <ul>
-        <li><code>manifest.toml</code> 的 <code>client_files</code> 是精确白名单。</li>
-        <li>内部目录、隐藏路径、反斜杠路径、未声明 zip 条目、符号链接逃逸都会被拒绝。</li>
+        <li>ID 长度为 1–64 个 ASCII 字符，首位是字母或数字，其余可用字母、数字、点、下划线和短横线；拒绝 <code>..</code>、路径和 <code>.zip</code> 后缀。</li>
+        <li><code>manifest.toml</code> 的 <code>client_files</code> 是非空、无重复的精确白名单。</li>
+        <li>内部目录、隐藏路径、反斜杠路径、未声明 ZIP 条目、符号链接逃逸都会被拒绝；不依赖固定名称的 DELIVERY 文档。</li>
         <li>客户包发送是唯一正式客户交付路径。</li>
       </ul>
     </section>
