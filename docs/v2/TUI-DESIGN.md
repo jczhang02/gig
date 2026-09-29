@@ -94,7 +94,7 @@ Nerd Font glyphs from the Font Awesome BMP range (stable in NF v2 and v3, and al
 
 No glyphs on tabs (the numbers identify them), no link glyph, no view glyphs (`Icons::view` is removed).
 
-Structural characters, always drawn, 1 cell each (East-Asian-ambiguous; ratatui measures them as 1, which matches every common terminal in its default setting): `▎` marker, `·` separator and empty dot, `…` truncation, `─` baseline and popup edge, `┈` zero baseline, `╭╮╰╯│` popup frame, `▁▂▃▄▅▆▇█` bars, `▏▎▍▌▋▊▉█` progress fill, `‹ ›` select arrows, `↑ ↓` scroll, braille `⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏` spinner, ASCII `!` and `?`.
+Structural characters, always drawn, 1 cell each (East-Asian-ambiguous; ratatui measures them as 1, which matches every common terminal in its default setting): `▎` marker, `·` separator and empty dot, `…` truncation, `─` baseline and popup edge, `┈` zero baseline, `╭╮╰╯│` popup frame, `▁▂▃▄▅▆▇█` bars, `▒` NO_COLOR bars, `▏▎▍▌▋▊▉█` progress fill, `‹ ›` select arrows, `↑ ↓` scroll, braille `⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏` spinner, ASCII `!` and `?`.
 
 Banned (fonts draw them as emoji or double width, which breaks alignment next to CJK): `● ○ ◆ ◇ ★ ☆ ✓ ✕ ✗ ■ □ ◈ ▪`.
 
@@ -161,7 +161,7 @@ Arithmetic (`L` = list width, `P` = pane width, margins 1 + 1, gutter 2, so `L +
  gig   1 Orders   2 Drafts   3 Money   4 History               owed 1,600  ·  sep 0  ·  2026 29,550 CNY 
 ```
 
-- `gig`: bold `text`. Then 3 cells, then the tabs, 3 cells apart (2 below W 100).
+- `gig`: bold `text`. Then 3 cells, then the tabs, 3 cells apart (both gaps are 2 cells below W 100).
 - A tab is the number in `muted` and the word in `muted`; the active tab's word is bold `text` with an `accent` underline. No background pill, no reverse, no glyph.
 - Right cluster, right-aligned to the margin, items separated by `  ·  ` with a `dim` dot:
   - `owed 1,600`: label `muted`; value bold `unpaid` when > 0, plain `text` when 0 (nothing owed is not an alarm).
@@ -272,7 +272,7 @@ Order: Next, Packages, Latest status, Client questions, Requirement changes, Not
   - line 1: the package id in `text`, middle-truncated to the body width keeping its last 10 cells (the date): `sers-colitis-analysis-deliv…2026-08-26`;
   - line 2: `kind · status · channel · MM-DD` in `muted`, the status word coloured (`checked` in `queued`, `uploaded` in `warranty`, `sent` in `text`), missing fields skipped;
   - the short link, scheme stripped, underlined `text`: after 2 cells on line 2 when it fits, else on its own line 3. Never char-wrapped.
-- Latest status (last 3), Requirement changes, Notes (last 5): dated entries. Date `MM-DD` in `muted` (`YYYY-MM-DD` when not the current year), 2 cells, the text in `text` wrapped by display width with a hanging indent under the text start. In the pane each entry is capped at 2 lines, the second ending in `…`; full screen shows every line.
+- Latest status (last 3), Requirement changes, Notes (last 5): dated entries. Date `MM-DD` in `muted` (`YYYY-MM-DD` when not the current year), 2 cells, the text in `text` wrapped by display width with a hanging indent under the text start. In the pane each entry is capped at 2 lines, the second ending in `…` when the entry was cut; full screen shows every line.
 - Client questions: each prefixed `? ` with the `?` in `warranty`.
 - Scorecard: `score 4/5` (score bold), then `  ·  2 decisions  ·  1 repeat question  ·  0 cleanups  ·  0 report reworks` in `muted`, wrapped at `  ·  ` boundaries.
 - Empty sections get no heading. They are listed together, after the last non-empty section, one blank row above, in `muted`: `no status entries · no client questions · no scorecard (k records one)`, wrapped at ` · ` boundaries. Next is never empty (for archived orders it reads `none`).
@@ -483,7 +483,7 @@ WCAG 2 relative luminance and contrast ratio.
 
 Output of the script in 16.5 (ratios to 2 decimals). "(from ...)" marks a value snapped from the editorial proposal to meet 16.1.
 
-### gig-dark
+#### gig-dark
 | slot | hex | on bg | on sel | on surface | need | ok |
 |---|---|---|---|---|---|---|
 | text | `#dfe2e7` | 13.95 | 11.11 | 14.55 | 4.5 | yes |
@@ -502,7 +502,7 @@ Output of the script in 16.5 (ratios to 2 decimals). "(from ...)" marks a value 
 | surface | `#0f1115` | 1.04 | - | - | popup fill | - |
 | muted/dim | | 1.80 | | | >= 1.4 (steps stay distinct) | yes |
 
-### gig-light
+#### gig-light
 | slot | hex | on bg | on sel | on surface | need | ok |
 |---|---|---|---|---|---|---|
 | text | `#1f2328` | 14.61 | 12.89 | 15.80 | 4.5 | yes |
@@ -521,7 +521,7 @@ Output of the script in 16.5 (ratios to 2 decimals). "(from ...)" marks a value 
 | surface | `#ffffff` | 1.08 | - | - | popup fill | - |
 | muted/dim | | 1.76 | | | >= 1.4 (steps stay distinct) | yes |
 
-### catppuccin-mocha
+#### catppuccin-mocha
 | slot | hex | on bg | on sel | on surface | need | ok |
 |---|---|---|---|---|---|---|
 | text | `#cdd6f4` | 11.34 | 8.69 | 12.14 | 4.5 | yes |
@@ -540,7 +540,7 @@ Output of the script in 16.5 (ratios to 2 decimals). "(from ...)" marks a value 
 | surface | `#181825` | 1.07 | - | - | popup fill | - |
 | muted/dim | | 1.66 | | | >= 1.4 (steps stay distinct) | yes |
 
-### catppuccin-latte
+#### catppuccin-latte
 | slot | hex | on bg | on sel | on surface | need | ok |
 |---|---|---|---|---|---|---|
 | text | `#4c4f69` | 7.06 | 6.04 | 7.64 | 4.5 | yes |
@@ -559,7 +559,7 @@ Output of the script in 16.5 (ratios to 2 decimals). "(from ...)" marks a value 
 | surface | `#f9fafb` | 1.08 | - | - | popup fill | - |
 | muted/dim | | 1.52 | | | >= 1.4 (steps stay distinct) | yes |
 
-### tokyonight
+#### tokyonight
 | slot | hex | on bg | on sel | on surface | need | ok |
 |---|---|---|---|---|---|---|
 | text | `#c0caf5` | 10.59 | 9.34 | 11.14 | 4.5 | yes |
@@ -578,7 +578,7 @@ Output of the script in 16.5 (ratios to 2 decimals). "(from ...)" marks a value 
 | surface | `#16161e` | 1.05 | - | - | popup fill | - |
 | muted/dim | | 1.98 | | | >= 1.4 (steps stay distinct) | yes |
 
-### gruvbox-dark
+#### gruvbox-dark
 | slot | hex | on bg | on sel | on surface | need | ok |
 |---|---|---|---|---|---|---|
 | text | `#ebdbb2` | 10.75 | 8.45 | 11.95 | 4.5 | yes |
@@ -597,7 +597,7 @@ Output of the script in 16.5 (ratios to 2 decimals). "(from ...)" marks a value 
 | surface | `#1d2021` | 1.11 | - | - | popup fill | - |
 | muted/dim | | 1.68 | | | >= 1.4 (steps stay distinct) | yes |
 
-### nord
+#### nord
 | slot | hex | on bg | on sel | on surface | need | ok |
 |---|---|---|---|---|---|---|
 | text | `#eceff4` | 10.84 | 8.88 | 11.80 | 4.5 | yes |
@@ -616,7 +616,7 @@ Output of the script in 16.5 (ratios to 2 decimals). "(from ...)" marks a value 
 | surface | `#292e39` | 1.09 | - | - | popup fill | - |
 | muted/dim | | 2.23 | | | >= 1.4 (steps stay distinct) | yes |
 
-### dracula
+#### dracula
 | slot | hex | on bg | on sel | on surface | need | ok |
 |---|---|---|---|---|---|---|
 | text | `#f8f8f2` | 13.36 | 11.15 | 14.81 | 4.5 | yes |
@@ -637,7 +637,7 @@ Output of the script in 16.5 (ratios to 2 decimals). "(from ...)" marks a value 
 
 ### 16.4 Changes from the editorial proposal
 
-- `surface` moved so the band stays visible in popups (editorial never checked `surface`; gig-light `sel` on its `surface` was 1.03): gig-dark `#1c1f25` -> `#0f1115`, gig-light `#efede7` -> `#ffffff`, catppuccin-latte `#e6e9ef` -> `#f9fafb`, catppuccin-mocha `#181825`, tokyonight `#16161e`, gruvbox-dark `#32302f` -> `#1d2021`, nord `#3b4252` -> `#292e39`, dracula `#21222c`.
+- `surface` moved so the band stays visible in popups (editorial never checked `surface`; gig-light `sel` on its `surface` was 1.03): gig-dark `#1c1f25` -> `#0f1115`, gig-light `#efede7` -> `#ffffff`, catppuccin-latte `#e6e9ef` -> `#f9fafb`, catppuccin-mocha `#181825` (unchanged), tokyonight `#16161e` (unchanged), gruvbox-dark `#32302f` -> `#1d2021`, nord `#3b4252` -> `#292e39`, dracula `#21222c` (unchanged).
 - `archived` held to 4.5 on `sel` as well (editorial allowed 4.0), which snapped five values: gig-light `#646a73` -> `#626770`, catppuccin-mocha `#9399b2` -> `#969cb4`, catppuccin-latte `#66697c` -> `#5e6170`, tokyonight `#8189af` -> `#848cb1`, gruvbox-dark `#a89984` -> `#b0a290`.
 - Everything else is editorial's palette, including its snaps from the upstream theme colours (catppuccin-latte accent, red, peach and blue darkened; gruvbox, nord and dracula reds lightened; four upstream selection colours softened: latte surface0 -> crust, tokyonight `#283457` -> `#232538`, nord nord2 -> `#3a4150`, dracula current-line -> `#33364a`).
 
