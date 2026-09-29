@@ -71,7 +71,7 @@ All orders including archived and cancelled, newest first, with scorecard score 
 
 - Reads go through gig-core repos; the view refreshes every `--refresh` seconds and on every keypress that returns from an action.
 - Writes call the same service functions the CLI uses, so all state checks apply. A refusal (`invalid_state`, `needs_check`, `secrets`, ...) is shown in a popup verbatim and the list refreshes; nothing is retried automatically.
-- The TUI never runs `git`, never deletes files, never moves directories. `gig new` from the TUI scaffolds exactly as the CLI does.
+- The TUI never runs `git` itself, never deletes files, never moves directories. `gig new` from the TUI scaffolds exactly as the CLI does. One exception, decided 2026-09-29 while implementing: the `A` archive preview calls `archive::archive(yes=false)`, which runs a read-only `git status` in the project to list dirty files (2.1 asks for them).
 - Clipboard: `arboard`; when unavailable the link is shown in the popup only.
 
 ## 5. Config

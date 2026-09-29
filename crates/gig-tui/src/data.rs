@@ -13,7 +13,9 @@ use gig_core::repo::{self, artifacts, drafts, events, orders, packages, scorecar
 use gig_core::services::Ctx;
 use gig_core::Result;
 use std::cmp::Ordering;
-use std::path::Path;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 pub use job_md::JobMd;
 pub use money::Money;
@@ -84,21 +86,61 @@ pub struct Note {
     pub text: String,
 }
 
+/// Parsed JOB.md files kept between refreshes, keyed by path and checked
+/// by modification time, so a refresh re-reads only files that changed
+/// (most orders, archived ones above all, never change).
+#[derive(Debug, Default)]
+pub struct JobCache {
+    entries: HashMap<PathBuf, (Option<SystemTime>, JobMd)>,
+}
+
+impl JobCache {
+    /// The parsed file, re-read only when its mtime differs from last time.
+    pub fn get(&mut self, path: &Path) -> JobMd {
+        let mtime = std::fs::metadata(path).and_then(|m| m.modified()).ok();
+        if let Some((seen, job)) = self.entries.get(path) {
+            if mtime.is_some() && *seen == mtime {
+                return job.clone();
+            }
+        }
+        let job = JobMd::load(path);
+        self.entries
+            .insert(path.to_path_buf(), (mtime, job.clone()));
+        job
+    }
+
+    /// Drop entries for paths no order uses any more.
+    fn retain(&mut self, used: &HashSet<PathBuf>) {
+        self.entries.retain(|p, _| used.contains(p));
+    }
+}
+
 impl Snapshot {
-    /// Read everything for the current day.
+    /// Read everything for the current day, with no JOB.md cache.
     pub fn load(ctx: &Ctx) -> Result<Self> {
-        Self::load_at(ctx, &clock::today())
+        Self::load_cached(ctx, &clock::today(), &mut JobCache::default())
     }
 
     /// Read everything, computing day counts and money against `today`.
     pub fn load_at(ctx: &Ctx, today: &str) -> Result<Self> {
+        Self::load_cached(ctx, today, &mut JobCache::default())
+    }
+
+    /// `load_at` reusing JOB.md parses from earlier refreshes.
+    pub fn load_cached(ctx: &Ctx, today: &str, cache: &mut JobCache) -> Result<Self> {
         let conn = &ctx.conn;
         let mut rows = Vec::new();
+        let mut used = HashSet::new();
         for order in orders::list(conn, true)? {
             let id = order.id;
-            let job = job_md_path(&order)
-                .map(|p| JobMd::load(&p))
-                .unwrap_or_default();
+            let job = match job_md_path(&order) {
+                Some(p) => {
+                    let job = cache.get(&p);
+                    used.insert(p);
+                    job
+                }
+                None => JobMd::default(),
+            };
             rows.push(OrderRow {
                 next_action: order.next_action(today),
                 group: Group::of(order.status),
@@ -113,6 +155,7 @@ impl Snapshot {
                 order,
             });
         }
+        cache.retain(&used);
         let raw: Vec<Order> = rows.iter().map(|r| r.order.clone()).collect();
         Ok(Self {
             today: today.to_string(),
@@ -175,13 +218,28 @@ fn compare_rows(a: &OrderRow, b: &OrderRow) -> Ordering {
 
 /// `<root>/.gig/JOB.md`, where root is the archive path for archived orders
 /// (as `gig show` does) and the dev path otherwise.
-pub fn job_md_path(order: &Order) -> Option<std::path::PathBuf> {
+pub fn job_md_path(order: &Order) -> Option<PathBuf> {
     let root = order
         .archive_path
         .as_deref()
         .filter(|_| order.status == OrderStatus::Archived)
         .or(order.dev_path.as_deref())?;
     Some(Path::new(root).join(".gig").join("JOB.md"))
+}
+
+/// The file `e` opens: `<dev_path>/.gig/JOB.md` (spec 2.1), only when it
+/// exists, so the editor never creates a file the TUI should not write.
+pub fn job_md_edit_path(order: &Order) -> std::result::Result<PathBuf, String> {
+    let dev = order
+        .dev_path
+        .as_deref()
+        .ok_or_else(|| format!("{} has no project directory", order.slug))?;
+    let path = Path::new(dev).join(".gig").join("JOB.md");
+    if path.is_file() {
+        Ok(path)
+    } else {
+        Err(format!("{} does not exist", path.display()))
+    }
 }
 
 /// Calendar days since the timestamp of the current status. Unlike `gig ls`
@@ -289,6 +347,11 @@ pub(crate) mod tests {
             job: JobMd::default(),
             order: o,
         }
+    }
+
+    /// The sort-test snapshot, for view and key tests elsewhere in the crate.
+    pub(crate) fn sample_snapshot(today: &str) -> Snapshot {
+        snapshot(today)
     }
 
     fn snapshot(today: &str) -> Snapshot {

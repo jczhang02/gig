@@ -59,8 +59,15 @@ fn apply_flags(config: &Tui, opts: Opts) -> Tui {
 pub fn run(opts: Opts) -> Result<()> {
     let ctx = Ctx::open()?;
     let settings = resolve_settings(&ctx.config.tui, opts)?;
+    let here = std::env::current_dir()
+        .ok()
+        .and_then(|d| gig_core::context::canonical(d).ok())
+        .and_then(|d| gig_core::context::resolve_for(&ctx.conn, &d).ok().flatten());
     let mut app = app::App::new(ctx, &settings);
     app.refresh();
+    if let Some(order) = here {
+        app.ui.preselect(order.id);
+    }
     let mut term = terminal::enter()?;
     let _guard = terminal::Guard;
     app.run_loop(&mut term)

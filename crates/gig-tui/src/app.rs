@@ -1,7 +1,7 @@
 //! Application state, global key routing (spec section 2), and the event loop.
 
 use crate::actions::{self, Action, Effect};
-use crate::data::{OrderRow, Snapshot};
+use crate::data::{JobCache, OrderRow, Snapshot};
 use crate::icons::Icons;
 use crate::popup::Popup;
 use crate::terminal::{self, Term};
@@ -66,6 +66,13 @@ pub struct Filter {
     pub text: String,
     /// True while the hint line is taking input.
     pub editing: bool,
+}
+
+/// Case-insensitive substring match of `filter` in any of `fields`; an
+/// empty filter matches everything.
+pub fn matches_filter(filter: &str, fields: &[&str]) -> bool {
+    let needle = filter.trim().to_lowercase();
+    needle.is_empty() || fields.iter().any(|f| f.to_lowercase().contains(&needle))
 }
 
 /// Everything the renderer needs. Kept apart from `Ctx` so drawing can be
@@ -147,12 +154,21 @@ impl UiState {
 
     /// The order list the selection moves in: History in History, else the
     /// Orders list (with closed orders when `show_closed`).
+    /// The views draw exactly this list, filtered by the view's `/` text, so
+    /// actions always target a visible row.
     pub fn order_list(&self) -> Vec<&OrderRow> {
-        if self.view == View::History {
+        let list = if self.view == View::History {
             self.data.history()
         } else {
             self.data.active_orders(self.show_closed)
-        }
+        };
+        let f = &self.filter().text;
+        list.into_iter()
+            .filter(|r| {
+                let o = &r.order;
+                matches_filter(f, &[&o.slug, &o.title, o.platform.as_deref().unwrap_or("")])
+            })
+            .collect()
     }
 
     /// The order actions apply to: the selected one, else the first row.
@@ -164,13 +180,34 @@ impl UiState {
             .copied()
     }
 
+    /// The Drafts view list: open drafts matching the Drafts filter.
+    pub fn draft_list(&self) -> Vec<&Draft> {
+        let f = &self.filters[View::Drafts.index()].text;
+        self.data
+            .open_drafts()
+            .filter(|d| matches_filter(f, &[&d.slug, d.title.as_deref().unwrap_or("")]))
+            .collect()
+    }
+
     /// The open draft `P` promotes: the selected one, else the first.
     pub fn selected_draft(&self) -> Option<&Draft> {
-        let mut open = self.data.open_drafts();
-        let first = self.data.open_drafts().next();
+        let list = self.draft_list();
         self.selected_draft
-            .and_then(|id| open.find(|d| d.id == id))
-            .or(first)
+            .and_then(|id| list.iter().find(|d| d.id == id))
+            .or(list.first())
+            .copied()
+    }
+
+    /// Select order `id` at start-up (spec 1: inside a project directory the
+    /// TUI preselects that order). A closed order turns the `a` toggle on so
+    /// the selection is visible rather than falling back to the first row.
+    pub fn preselect(&mut self, id: i64) {
+        if let Some(row) = self.data.order(id) {
+            if row.group == crate::data::Group::Closed {
+                self.show_closed = true;
+            }
+            self.selected = Some(id);
+        }
     }
 
     /// Up/Down in the current list, clamped at both ends.
@@ -189,7 +226,7 @@ impl UiState {
                 self.selected = step(&ids, cur, delta);
             }
             View::Drafts => {
-                let ids: Vec<i64> = self.data.open_drafts().map(|d| d.id).collect();
+                let ids: Vec<i64> = self.draft_list().iter().map(|d| d.id).collect();
                 let cur = self.selected_draft().map(|d| d.id);
                 self.selected_draft = step(&ids, cur, delta);
             }
@@ -230,6 +267,13 @@ impl UiState {
                 _ => {}
             }
             return Outcome::None;
+        }
+        // Ctrl and Alt chords are not keys of this app (Ctrl+C is above).
+        if key
+            .modifiers
+            .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+        {
+            return Outcome::Unhandled(key);
         }
         match key.code {
             KeyCode::Char('q') => Outcome::Quit,
@@ -302,6 +346,8 @@ pub struct App {
     /// Created on first copy and kept: on X11 the clipboard text lives only
     /// as long as this handle. `Err` remembers that there is no clipboard.
     clipboard: Option<std::result::Result<arboard::Clipboard, String>>,
+    /// JOB.md parses kept between refreshes.
+    jobs: JobCache,
 }
 
 /// How long to wait for input when the refresh timer is off.
@@ -320,12 +366,13 @@ impl App {
             refresh_every: (settings.refresh_seconds > 0)
                 .then(|| Duration::from_secs(settings.refresh_seconds)),
             clipboard: None,
+            jobs: JobCache::default(),
         }
     }
 
     /// Reload the snapshot. Errors land on the hint line; nothing is retried.
     pub fn refresh(&mut self) {
-        match Snapshot::load(&self.ctx) {
+        match Snapshot::load_cached(&self.ctx, &gig_core::clock::today(), &mut self.jobs) {
             Ok(data) => {
                 self.ui.data = data;
                 self.ui.error = None;
@@ -337,14 +384,7 @@ impl App {
     pub fn run_loop(&mut self, term: &mut Term) -> Result<()> {
         let mut next_tick = self.refresh_every.map(|d| Instant::now() + d);
         loop {
-            term.draw(|frame| {
-                let cx = ui::RenderCx {
-                    state: &self.ui,
-                    theme: &self.theme,
-                    icons: &self.icons,
-                };
-                ui::draw(frame, &cx);
-            })?;
+            self.draw(term)?;
 
             let timeout = match next_tick {
                 Some(t) => t.saturating_duration_since(Instant::now()),
@@ -377,7 +417,7 @@ impl App {
         match effect {
             Effect::None => {}
             Effect::Refresh => self.refresh(),
-            Effect::Call(action) => self.call(&action),
+            Effect::Call(action) => self.call(&action, term)?,
             Effect::EditField(index) => {
                 let initial = actions::field_text(&self.ui, index);
                 // A failed editor (`:cq`) leaves the field as it was and
@@ -392,7 +432,7 @@ impl App {
                 match terminal::suspend_while(term, || crate::editor::edit_text(""))? {
                     // An empty note means "changed my mind".
                     Ok(text) if text.trim().is_empty() => {}
-                    Ok(text) => self.call(&Action::Note { slug, text }),
+                    Ok(text) => self.call(&Action::Note { slug, text }, term)?,
                     Err(e) => self.editor_failed(e),
                 }
             }
@@ -454,8 +494,13 @@ impl App {
                 draw_error.get_or_insert(e);
             }
             // Paces the loop and swallows keys typed during the upload.
-            if matches!(event::poll(UPLOAD_TICK), Ok(true)) {
-                let _ = event::read();
+            match event::poll(UPLOAD_TICK) {
+                Ok(true) => {
+                    let _ = event::read();
+                }
+                Ok(false) => {}
+                // A broken input stream returns at once; keep the pace.
+                Err(_) => std::thread::sleep(UPLOAD_TICK),
             }
         });
         self.ui.popup = None;
@@ -477,17 +522,48 @@ impl App {
         }
     }
 
-    fn call(&mut self, action: &Action) {
+    /// Run a gig-core call, then refresh. Slow calls first draw a busy
+    /// popup, and keys typed while the UI thread was blocked are dropped so
+    /// they cannot act on the result popup.
+    fn call(&mut self, action: &Action, term: &mut Term) -> Result<()> {
+        let busy = action.busy_text();
+        if let Some(text) = busy {
+            self.ui.popup = Some(Popup::Busy {
+                title: "working".into(),
+                text: text.into(),
+            });
+            self.draw(term)?;
+        }
         actions::perform(&self.ctx, &mut self.ui, action);
+        if busy.is_some() {
+            if let Some(Popup::Busy { .. }) = self.ui.popup {
+                self.ui.popup = None;
+            }
+            while event::poll(Duration::ZERO)? {
+                event::read()?;
+            }
+        }
         self.refresh();
+        Ok(())
+    }
+
+    fn draw(&self, term: &mut Term) -> Result<()> {
+        term.draw(|frame| {
+            let cx = ui::RenderCx {
+                state: &self.ui,
+                theme: &self.theme,
+                icons: &self.icons,
+            };
+            ui::draw(frame, &cx);
+        })?;
+        Ok(())
     }
 
     fn editor_failed(&mut self, e: std::io::Error) {
-        self.ui.popup = Some(Popup::Message {
-            title: "editor".into(),
-            lines: vec![format!("{}: {e}", crate::editor::command().join(" "))],
-            error: true,
-        });
+        self.ui.popup = Some(Popup::error_text(
+            "editor",
+            format!("{}: {e}", crate::editor::command().join(" ")),
+        ));
     }
 
     /// `y` and finished uploads: the link goes to the clipboard; without one
@@ -582,6 +658,62 @@ mod tests {
         press(&mut s, KeyCode::Char('4'));
         s.handle_key(enter, 200);
         assert!(s.detail_open);
+    }
+
+    fn with_orders() -> UiState {
+        use crate::data::tests::sample_snapshot;
+        UiState {
+            data: sample_snapshot("2026-09-29"),
+            ..UiState::default()
+        }
+    }
+
+    #[test]
+    fn filter_narrows_the_list_actions_use() {
+        let mut s = with_orders();
+        let all = s.order_list().len();
+        assert!(all > 2);
+        s.filters[0].text = "O7".into();
+        let ids: Vec<i64> = s.order_list().iter().map(|r| r.order.id).collect();
+        assert_eq!(ids, vec![7]);
+        // A selection hidden by the filter falls back to the first visible row.
+        s.selected = Some(6);
+        assert_eq!(s.selected_order().unwrap().order.id, 7);
+        press(&mut s, KeyCode::Down);
+        assert_eq!(s.selected, Some(7));
+        // The filter is per view: History is unfiltered.
+        s.view = View::History;
+        assert_eq!(s.order_list().len(), s.data.orders.len());
+    }
+
+    #[test]
+    fn chords_are_not_action_keys() {
+        let mut s = with_orders();
+        for c in ['s', 'n', 'u', 'a'] {
+            let chord = KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL);
+            assert!(matches!(s.handle_key(chord, 200), Outcome::Unhandled(_)));
+            let alt = KeyEvent::new(KeyCode::Char(c), KeyModifiers::ALT);
+            assert!(matches!(s.handle_key(alt, 200), Outcome::Unhandled(_)));
+        }
+        assert!(!s.show_closed);
+        assert_eq!(s.popup, None);
+        // Shift stays allowed: `N` opens the new order form.
+        let shift_n = KeyEvent::new(KeyCode::Char('N'), KeyModifiers::SHIFT);
+        assert_eq!(s.handle_key(shift_n, 200), Outcome::Act(Effect::None));
+        assert!(s.popup.is_some());
+    }
+
+    #[test]
+    fn preselect_shows_closed_orders() {
+        let mut s = with_orders();
+        s.preselect(5);
+        assert_eq!(s.selected_order().unwrap().order.id, 5);
+        assert!(!s.show_closed);
+        s.preselect(8); // archived
+        assert!(s.show_closed);
+        assert_eq!(s.selected_order().unwrap().order.id, 8);
+        s.preselect(999);
+        assert_eq!(s.selected, Some(8));
     }
 
     #[test]

@@ -6,10 +6,12 @@ use crate::actions::{Effect, FormKind};
 use crate::text;
 use crate::theme::Theme;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use ratatui::layout::{Constraint, Rect};
+use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Clear, Paragraph, Wrap};
+use ratatui::widgets::{Block, BorderType, Clear, Paragraph};
 use ratatui::Frame;
+use std::cell::Cell;
 
 /// One input of a form.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -235,17 +237,46 @@ impl Pick {
     }
 }
 
+/// Vertical scroll of a long popup body. `max` is written by the renderer
+/// (it knows the wrapped height), so keys clamp against the last drawn size.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Scroll {
+    pub offset: u16,
+    pub max: Cell<u16>,
+}
+
+impl Scroll {
+    /// Up/Down/PgUp/PgDn/Home/End; true when the key was a scroll key.
+    fn key(&mut self, code: KeyCode) -> bool {
+        let max = self.max.get();
+        let page = 10;
+        self.offset = match code {
+            KeyCode::Up | KeyCode::Char('k') => self.offset.saturating_sub(1),
+            KeyCode::Down | KeyCode::Char('j') => self.offset.saturating_add(1),
+            KeyCode::PageUp => self.offset.saturating_sub(page),
+            KeyCode::PageDown => self.offset.saturating_add(page),
+            KeyCode::Home => 0,
+            KeyCode::End => max,
+            _ => return false,
+        }
+        .min(max);
+        true
+    }
+}
+
 /// What a popup shows.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Popup {
     Form(Form),
     Pick(Pick),
-    /// A dangerous action waits for a typed `y`; any other key cancels.
+    /// A dangerous action waits for a typed `y`; scroll keys scroll, any
+    /// other key cancels.
     Confirm {
         title: String,
         lines: Vec<String>,
         /// Carried out on `y`.
         then: Effect,
+        scroll: Scroll,
     },
     /// A running upload. Drawn by the blocking upload loop, which reads no
     /// keys, so it never closes by key.
@@ -258,11 +289,19 @@ pub enum Popup {
         /// Spinner frame counter.
         frame: usize,
     },
-    /// Result or information; any key closes.
+    /// Drawn once before a slow gig-core call on the UI thread (a dry run
+    /// that hashes a package, an archive preview, a scaffold); replaced by
+    /// the result when the call returns.
+    Busy {
+        title: String,
+        text: String,
+    },
+    /// Result or information; Enter/Esc/q/Space closes, scroll keys scroll.
     Message {
         title: String,
         lines: Vec<String>,
         error: bool,
+        scroll: Scroll,
     },
 }
 
@@ -285,37 +324,65 @@ impl Popup {
             title: title.into(),
             lines,
             error: false,
+            scroll: Scroll::default(),
+        }
+    }
+
+    /// A refusal or failure that is not a gig-core error (editor, missing
+    /// file), shown in the error colour.
+    pub fn error_text(title: impl Into<String>, text: impl Into<String>) -> Self {
+        Popup::Message {
+            title: title.into(),
+            lines: vec![text.into()],
+            error: true,
+            scroll: Scroll::default(),
         }
     }
 
     /// A gig-core refusal, shown verbatim with its code (as the hint line
     /// shows refresh errors).
     pub fn error(e: &gig_core::Error) -> Self {
-        Popup::Message {
-            title: "refused".into(),
-            lines: vec![format!("{}: {e}", e.code())],
-            error: true,
+        Self::error_text("refused", format!("{}: {e}", e.code()))
+    }
+
+    pub fn confirm(title: impl Into<String>, lines: Vec<String>, then: Effect) -> Self {
+        Popup::Confirm {
+            title: title.into(),
+            lines,
+            then,
+            scroll: Scroll::default(),
         }
     }
 
     pub fn handle_key(&mut self, key: KeyEvent) -> PopupKey {
-        if matches!(self, Popup::Progress { .. }) {
+        if matches!(self, Popup::Progress { .. } | Popup::Busy { .. }) {
             return PopupKey::None;
         }
         if key.code == KeyCode::Esc {
             return PopupKey::Close;
         }
+        let chord = key
+            .modifiers
+            .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT);
         match self {
             Popup::Form(form) => form.key(key),
             Popup::Pick(pick) => pick.key(key),
-            Popup::Progress { .. } => PopupKey::None,
-            Popup::Confirm { .. } => match key.code {
-                KeyCode::Char('y') => PopupKey::Confirmed,
+            Popup::Progress { .. } | Popup::Busy { .. } => PopupKey::None,
+            Popup::Confirm { scroll, .. } => match key.code {
+                // Only a plain `y` confirms; Ctrl+Y or Alt+Y cancels.
+                KeyCode::Char('y') if !chord => PopupKey::Confirmed,
+                KeyCode::Up | KeyCode::Down | KeyCode::PageUp | KeyCode::PageDown => {
+                    scroll.key(key.code);
+                    PopupKey::None
+                }
                 _ => PopupKey::Close,
             },
-            Popup::Message { .. } => match key.code {
+            Popup::Message { scroll, .. } => match key.code {
                 KeyCode::Enter | KeyCode::Char('q') | KeyCode::Char(' ') => PopupKey::Close,
-                _ => PopupKey::None,
+                code => {
+                    scroll.key(code);
+                    PopupKey::None
+                }
             },
         }
     }
@@ -325,76 +392,90 @@ impl Popup {
 const WIDTH: u16 = 76;
 
 pub fn render(frame: &mut Frame, area: Rect, popup: &Popup, theme: &Theme) {
-    let inner_width = usize::from(WIDTH.min(area.width).saturating_sub(4));
-    let (title, lines, title_style) = match popup {
-        Popup::Form(form) => (
-            form.title.clone(),
-            form_lines(form, theme, inner_width),
-            theme.title(),
-        ),
-        Popup::Confirm { title, lines, .. } => {
-            let mut out: Vec<Line> = lines
-                .iter()
-                .map(|l| Line::from(Span::styled(l.clone(), theme.text())))
-                .collect();
-            out.push(Line::raw(""));
-            out.push(Line::from(vec![
-                Span::styled(" y ", theme.key()),
-                Span::styled("confirm   ", theme.dim()),
-                Span::styled("any other key ", theme.key()),
-                Span::styled("cancel", theme.dim()),
-            ]));
-            (title.clone(), out, theme.error())
-        }
-        Popup::Pick(pick) => (
-            pick.title.clone(),
-            pick_lines(pick, theme, inner_width),
-            theme.title(),
-        ),
-        Popup::Progress {
-            title,
-            sent,
-            total,
-            frame,
-        } => (
-            title.clone(),
-            progress_lines(*sent, *total, *frame, theme, inner_width),
-            theme.title(),
-        ),
-        Popup::Message {
-            title,
-            lines,
-            error,
-        } => {
-            let style = if *error { theme.error() } else { theme.text() };
-            let mut out: Vec<Line> = lines
-                .iter()
-                .map(|l| Line::from(Span::styled(l.clone(), style)))
-                .collect();
-            out.push(Line::raw(""));
-            out.push(Line::from(vec![
-                Span::styled(" Enter/Esc ", theme.key()),
-                Span::styled("close", theme.dim()),
-            ]));
-            let ts = if *error { theme.error() } else { theme.title() };
-            (title.clone(), out, ts)
-        }
-    };
-    // Wrapped lines need more rows than `lines.len()`; estimate by width.
-    let rows: usize = lines
-        .iter()
-        .map(|l| {
-            // Word wrapping can take a row more than the plain division.
-            let w = l.width().max(1);
-            let inner = inner_width.max(1);
-            if w > inner {
-                w.div_ceil(inner) + 1
-            } else {
-                1
+    let inner_width = usize::from(WIDTH.min(area.width).saturating_sub(4)).max(1);
+    // Body lines are pre-wrapped to `inner_width`, so their count is the
+    // exact height; the footer (key hints) is pinned under the body and
+    // stays visible however long the body is.
+    let (title, title_style, body, footer, scroll): (String, _, Vec<Line>, Vec<Line>, _) =
+        match popup {
+            Popup::Form(form) => (
+                form.title.clone(),
+                theme.title(),
+                form_lines(form, theme, inner_width),
+                vec![form_hint(theme)],
+                None,
+            ),
+            Popup::Confirm {
+                title,
+                lines,
+                scroll,
+                ..
+            } => (
+                title.clone(),
+                theme.error(),
+                wrapped(lines, theme.text(), inner_width),
+                vec![Line::from(vec![
+                    Span::styled(" y ", theme.key()),
+                    Span::styled("confirm   ", theme.dim()),
+                    Span::styled("any other key ", theme.key()),
+                    Span::styled("cancel", theme.dim()),
+                ])],
+                Some(scroll),
+            ),
+            Popup::Pick(pick) => (
+                pick.title.clone(),
+                theme.title(),
+                pick_lines(pick, theme, inner_width),
+                vec![pick_hint(theme)],
+                None,
+            ),
+            Popup::Progress {
+                title,
+                sent,
+                total,
+                frame,
+            } => (
+                title.clone(),
+                theme.title(),
+                progress_lines(*sent, *total, *frame, theme, inner_width),
+                vec![Line::from(Span::styled(
+                    "One upload at a time; please wait.",
+                    theme.dim(),
+                ))],
+                None,
+            ),
+            Popup::Busy { title, text } => (
+                title.clone(),
+                theme.title(),
+                wrapped(std::slice::from_ref(text), theme.text(), inner_width),
+                vec![Line::from(Span::styled("please wait", theme.dim()))],
+                None,
+            ),
+            Popup::Message {
+                title,
+                lines,
+                error,
+                scroll,
+            } => {
+                let style = if *error { theme.error() } else { theme.text() };
+                let ts = if *error { theme.error() } else { theme.title() };
+                (
+                    title.clone(),
+                    ts,
+                    wrapped(lines, style, inner_width),
+                    vec![Line::from(vec![
+                        Span::styled(" Enter/Esc ", theme.key()),
+                        Span::styled("close", theme.dim()),
+                    ])],
+                    Some(scroll),
+                )
             }
-        })
-        .sum();
-    let height = (rows as u16).saturating_add(2).min(area.height);
+        };
+    let footer_rows = footer.len() as u16 + 1; // a blank line above the hints
+    let want = (body.len() as u16)
+        .saturating_add(footer_rows)
+        .saturating_add(2);
+    let height = want.min(area.height);
     let rect = area.centered(
         Constraint::Length(WIDTH.min(area.width)),
         Constraint::Length(height),
@@ -412,7 +493,54 @@ pub fn render(frame: &mut Frame, area: Rect, popup: &Popup, theme: &Theme) {
         width: inner.width.saturating_sub(2),
         ..inner
     };
-    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
+    let footer_h = footer_rows.min(inner.height);
+    let [body_area, footer_area] =
+        Layout::vertical([Constraint::Min(0), Constraint::Length(footer_h)]).areas(inner);
+    let hidden = (body.len() as u16).saturating_sub(body_area.height);
+    let offset = match scroll {
+        Some(s) => {
+            s.max.set(hidden);
+            s.offset.min(hidden)
+        }
+        None => 0,
+    };
+    let mut footer = footer;
+    if hidden > 0 {
+        let more = if scroll.is_some() {
+            format!(
+                "  Up/Dn scroll ({}/{})",
+                offset + body_area.height.min(body.len() as u16),
+                body.len()
+            )
+        } else {
+            format!("  ({hidden} more lines)")
+        };
+        if let Some(first) = footer.first_mut() {
+            first.push_span(Span::styled(more, theme.dim()));
+        }
+    }
+    frame.render_widget(Paragraph::new(body).scroll((offset, 0)), body_area);
+    let mut footer_lines = vec![Line::raw("")];
+    footer_lines.extend(footer);
+    // With only one row left, the hint wins over the blank line.
+    let skip = footer_lines
+        .len()
+        .saturating_sub(usize::from(footer_area.height));
+    frame.render_widget(
+        Paragraph::new(footer_lines.split_off(skip.min(1))),
+        footer_area,
+    );
+}
+
+/// `lines` hard-wrapped at `width` display cells (Chinese text included);
+/// embedded newlines start new rows.
+fn wrapped<'a>(lines: &[String], style: Style, width: usize) -> Vec<Line<'a>> {
+    lines
+        .iter()
+        .flat_map(|l| l.split('\n'))
+        .flat_map(|l| text::wrap(l, width))
+        .map(|row| Line::from(Span::styled(row, style)))
+        .collect()
 }
 
 /// Label column width in forms.
@@ -463,8 +591,11 @@ fn form_lines<'a>(form: &Form, t: &Theme, width: usize) -> Vec<Line<'a>> {
         spans.push(Span::styled(value, style));
         out.push(Line::from(spans));
     }
-    out.push(Line::raw(""));
-    out.push(Line::from(vec![
+    out
+}
+
+fn form_hint<'a>(t: &Theme) -> Line<'a> {
+    Line::from(vec![
         Span::styled(" Tab ", t.key()),
         Span::styled("next  ", t.dim()),
         Span::styled("Space ", t.key()),
@@ -473,12 +604,11 @@ fn form_lines<'a>(form: &Form, t: &Theme, width: usize) -> Vec<Line<'a>> {
         Span::styled("submit / edit  ", t.dim()),
         Span::styled("Esc ", t.key()),
         Span::styled("cancel", t.dim()),
-    ]));
-    out
+    ])
 }
 
 fn pick_lines<'a>(pick: &Pick, t: &Theme, width: usize) -> Vec<Line<'a>> {
-    let mut out: Vec<Line> = pick
+    let out: Vec<Line> = pick
         .items
         .iter()
         .enumerate()
@@ -494,16 +624,18 @@ fn pick_lines<'a>(pick: &Pick, t: &Theme, width: usize) -> Vec<Line<'a>> {
             }
         })
         .collect();
-    out.push(Line::raw(""));
-    out.push(Line::from(vec![
+    out
+}
+
+fn pick_hint<'a>(t: &Theme) -> Line<'a> {
+    Line::from(vec![
         Span::styled(" Up/Dn ", t.key()),
         Span::styled("choose  ", t.dim()),
         Span::styled("Enter ", t.key()),
         Span::styled("pick  ", t.dim()),
         Span::styled("Esc ", t.key()),
         Span::styled("cancel", t.dim()),
-    ]));
-    out
+    ])
 }
 
 const SPINNER: [&str; 10] = [
@@ -541,11 +673,7 @@ fn progress_lines<'a>(
             Span::styled(label, t.text()),
         ])
     };
-    vec![
-        status,
-        Line::raw(""),
-        Line::from(Span::styled("One upload at a time; please wait.", t.dim())),
-    ]
+    vec![status]
 }
 
 /// The last `max` cells of `s`.
@@ -624,11 +752,7 @@ mod tests {
 
     #[test]
     fn confirm_needs_y() {
-        let mut p = Popup::Confirm {
-            title: "c".into(),
-            lines: vec![],
-            then: Effect::None,
-        };
+        let mut p = Popup::confirm("c", vec![], Effect::None);
         assert_eq!(p.handle_key(key(KeyCode::Char('n'))), PopupKey::Close);
         assert_eq!(p.handle_key(key(KeyCode::Enter)), PopupKey::Close);
         assert_eq!(p.handle_key(key(KeyCode::Char('y'))), PopupKey::Confirmed);
@@ -640,11 +764,7 @@ mod tests {
         use ratatui::Terminal;
         let popups = [
             Popup::Form(form()),
-            Popup::Confirm {
-                title: "cancel a".into(),
-                lines: vec!["Cancel order a?".into()],
-                then: Effect::None,
-            },
+            Popup::confirm("cancel a", vec!["Cancel order a?".into()], Effect::None),
             Popup::message("m", vec!["x".repeat(300)]),
             Popup::Pick(Pick {
                 title: "upload a".into(),
@@ -709,6 +829,63 @@ mod tests {
             .map(|c| c.symbol())
             .collect();
         assert!(text.contains("close"), "{text}");
+    }
+
+    fn screen(p: &Popup, w: u16, h: u16) -> String {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+        let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
+        term.draw(|f| render(f, f.area(), p, &Theme::DARK)).unwrap();
+        term.backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|c| c.symbol())
+            .collect()
+    }
+
+    #[test]
+    fn long_messages_scroll_and_keep_the_hint() {
+        let lines: Vec<String> = (1..=40).map(|i| format!("dirty file {i:02}")).collect();
+        let mut p = Popup::message("archive preview", lines);
+        let text = screen(&p, 80, 24);
+        assert!(text.contains("dirty file 01"));
+        assert!(!text.contains("dirty file 40"));
+        assert!(text.contains("close"), "hint pinned");
+        assert!(text.contains("Up/Dn scroll"), "{text}");
+        // End scrolls to the bottom (max set by the last render).
+        assert_eq!(p.handle_key(key(KeyCode::End)), PopupKey::None);
+        let text = screen(&p, 80, 24);
+        assert!(text.contains("dirty file 40"));
+        assert!(!text.contains("dirty file 01"));
+        // Scrolling never passes the end; Up comes straight back.
+        p.handle_key(key(KeyCode::Down));
+        p.handle_key(key(KeyCode::Up));
+        let text = screen(&p, 80, 24);
+        assert!(!text.contains("dirty file 40") && text.contains("dirty file 39"));
+        assert_eq!(p.handle_key(key(KeyCode::Enter)), PopupKey::Close);
+    }
+
+    #[test]
+    fn long_confirm_keeps_y_hint_and_scrolls() {
+        let lines: Vec<String> = (1..=40).map(|i| format!("warning {i}")).collect();
+        let mut p = Popup::confirm("upload", lines, Effect::None);
+        let text = screen(&p, 80, 24);
+        assert!(text.contains("confirm"), "{text}");
+        assert_eq!(p.handle_key(key(KeyCode::Down)), PopupKey::None);
+        let chord = KeyEvent::new(KeyCode::Char('y'), KeyModifiers::CONTROL);
+        assert_eq!(p.handle_key(chord), PopupKey::Close);
+        assert_eq!(p.handle_key(key(KeyCode::Char('y'))), PopupKey::Confirmed);
+    }
+
+    #[test]
+    fn busy_ignores_keys() {
+        let mut p = Popup::Busy {
+            title: "working".into(),
+            text: "checking the package...".into(),
+        };
+        assert_eq!(p.handle_key(key(KeyCode::Esc)), PopupKey::None);
+        assert!(screen(&p, 80, 24).contains("checking the package..."));
     }
 
     #[test]

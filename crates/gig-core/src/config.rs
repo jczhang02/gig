@@ -212,8 +212,8 @@ impl Default for Tui {
 
 impl Tui {
     /// Apply `GIG_TUI_LIGHT`, `GIG_TUI_ICONS` and `GIG_TUI_REFRESH_SECONDS`.
-    /// Idempotent, so `gig tui` can call it again after applying its flags
-    /// to keep the env > flags > file precedence.
+    /// Called by `gig tui` only, after its flags, for the env > flags > file
+    /// precedence; `Config::load` leaves these variables alone.
     pub fn apply_env_overrides(&mut self) -> Result<()> {
         self.apply_overrides(|k| std::env::var(k).ok().filter(|v| !v.is_empty()))
     }
@@ -303,7 +303,9 @@ impl Config {
                 Error::Config("GIG_DELIVERY_LINK_TTL_SECONDS must be an integer".into())
             })?;
         }
-        self.tui.apply_env_overrides()
+        // `GIG_TUI_*` is applied by `gig tui` only (gig_tui::resolve_settings),
+        // so a malformed TUI variable cannot break the JSON commands.
+        Ok(())
     }
 
     pub fn save(&self, path: &Path) -> Result<()> {

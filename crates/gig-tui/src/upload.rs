@@ -252,9 +252,13 @@ pub fn run_on_worker(
             let (sent, total) = meter.get();
             tick(sent, total);
         }
-        worker
-            .join()
-            .unwrap_or_else(|_| Err(Error::Upload("upload worker panicked".into())))
+        worker.join().unwrap_or_else(|payload| {
+            let what = crate::terminal::take_worker_panic()
+                .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
+                .or_else(|| payload.downcast_ref::<String>().cloned())
+                .unwrap_or_default();
+            Err(Error::Upload(format!("upload worker panicked: {what}")))
+        })
     })
 }
 

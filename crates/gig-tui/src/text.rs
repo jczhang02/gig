@@ -49,6 +49,28 @@ pub fn fit(s: &str, cells: usize) -> String {
     out
 }
 
+/// `s` split into rows of at most `width` cells (hard wrap, no word
+/// breaking, so CJK text wraps too). Control characters become spaces. An
+/// empty `s` is one empty row; a zero width yields one row per character.
+pub fn wrap(s: &str, width: usize) -> Vec<String> {
+    let width = width.max(1);
+    let mut rows = vec![String::new()];
+    let mut used = 0;
+    for c in s.chars() {
+        let c = if c.is_control() { ' ' } else { c };
+        let w = cell_width(c);
+        if used + w > width && used > 0 {
+            rows.push(String::new());
+            used = 0;
+        }
+        used += w;
+        if let Some(row) = rows.last_mut() {
+            row.push(c);
+        }
+    }
+    rows
+}
+
 fn cell_width(c: char) -> usize {
     if c.is_control() {
         1
@@ -104,6 +126,17 @@ mod tests {
         assert_eq!(width(&padded), 9);
         assert_eq!(fit("ab", 4), "ab  ");
         assert_eq!(width(&fit("图像去噪", 5)), 5);
+    }
+
+    #[test]
+    fn wrap_by_cells() {
+        assert_eq!(wrap("", 5), vec![""]);
+        assert_eq!(wrap("abcdefg", 3), vec!["abc", "def", "g"]);
+        // Wide characters never straddle a row end.
+        assert_eq!(wrap("图像去噪", 5), vec!["图像", "去噪"]);
+        for row in wrap("SERS 数据分析 and more text", 7) {
+            assert!(width(&row) <= 7, "{row}");
+        }
     }
 
     #[test]

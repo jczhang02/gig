@@ -10,7 +10,7 @@ use crate::app::{UiState, View};
 use crate::data::{self, OrderRow};
 use crate::popup::{Field, Form, Pick, PickFor, Popup, PopupKey};
 use crate::upload::{self, NoUploader, UploadJob};
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use gig_core::models::{Channel, Draft, ProjectType};
 use gig_core::money::{format_minor, parse_amount};
 use gig_core::services::{archive, artifacts, drafts, orders, packages, Ctx};
@@ -171,6 +171,14 @@ const NO_TYPE: &str = "none";
 /// Drafts view (2.2). `None` means "not an action key
 /// here", so the caller can pass the key on.
 pub fn view_key(ui: &mut UiState, key: KeyEvent) -> Option<Effect> {
+    // Ctrl and Alt chords are never action keys (raw mode passes Ctrl+S
+    // through); Shift stays allowed for `$`, `A`, `U`, `N`, `P`.
+    if key
+        .modifiers
+        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+    {
+        return None;
+    }
     let KeyCode::Char(c) = key.code else {
         return None;
     };
@@ -199,14 +207,10 @@ pub fn view_key(ui: &mut UiState, key: KeyEvent) -> Option<Effect> {
         'u' => open_pick(ui, PickFor::Upload { slug }),
         'm' => open_pick(ui, PickFor::MarkSent { slug }),
         'U' => open(ui, artifact_form(&slug)),
-        'e' => match data::job_md_path(&row.order) {
-            Some(p) => Effect::EditFile(p),
-            None => {
-                ui.popup = Some(Popup::Message {
-                    title: "edit JOB.md".into(),
-                    lines: vec![format!("{slug} has no project directory")],
-                    error: true,
-                });
+        'e' => match data::job_md_edit_path(&row.order) {
+            Ok(p) => Effect::EditFile(p),
+            Err(why) => {
+                ui.popup = Some(Popup::error_text("edit JOB.md", why));
                 Effect::None
             }
         },
@@ -356,6 +360,7 @@ fn submit(ui: &mut UiState, form: Form) -> Effect {
         },
         FormKind::Cancel { slug } => {
             ui.popup = Some(Popup::Confirm {
+                scroll: Default::default(),
                 title: format!("cancel {slug}"),
                 lines: vec![
                     format!("Cancel order {slug}?"),
@@ -432,21 +437,34 @@ pub fn perform(ctx: &Ctx, ui: &mut UiState, action: &Action) {
 pub fn run(ctx: &Ctx, action: &Action) -> Result<Option<Popup>> {
     match action {
         Action::Start { slug } => {
-            orders::start(ctx, Some(slug))?;
-            Ok(None)
+            let o = orders::start(ctx, Some(slug))?;
+            Ok(Some(done(
+                format!("start {slug}"),
+                vec![format!("started {slug}: now {}", o.status)],
+            )))
         }
         Action::Paid { slug, date, amount } => {
             let amount = opt_amount(amount)?;
-            orders::paid(ctx, Some(slug), non_empty(date), amount)?;
-            Ok(None)
+            let o = orders::paid(ctx, Some(slug), non_empty(date), amount)?;
+            let mut lines = vec![format!("{slug} is {}", o.status)];
+            if let Some(p) = &o.paid_at {
+                lines.push(format!("paid: {p}"));
+            }
+            if let Some(w) = &o.warranty_until {
+                lines.push(format!("warranty until {w}"));
+            }
+            Ok(Some(done(format!("paid {slug}"), lines)))
         }
         Action::Price {
             slug,
             amount,
             reason,
         } => {
-            orders::price(ctx, Some(slug), parse_amount(amount)?, reason.trim())?;
-            Ok(None)
+            let o = orders::price(ctx, Some(slug), parse_amount(amount)?, reason.trim())?;
+            Ok(Some(done(
+                format!("price {slug}"),
+                vec![format!("{slug} price is now {}", minor_text(o.price_minor))],
+            )))
         }
         Action::Change {
             slug,
@@ -454,12 +472,21 @@ pub fn run(ctx: &Ctx, action: &Action) -> Result<Option<Popup>> {
             delta,
         } => {
             let delta = opt_amount(delta)?.unwrap_or(0);
-            orders::change(ctx, Some(slug), description, delta)?;
-            Ok(None)
+            let shown = orders::change(ctx, Some(slug), description, delta)?;
+            Ok(Some(done(
+                format!("change {slug}"),
+                vec![
+                    format!("recorded a requirement change for {slug}"),
+                    format!("price: {}", minor_text(shown.order.price_minor)),
+                ],
+            )))
         }
         Action::Note { slug, text } => {
             orders::note(ctx, Some(slug), text)?;
-            Ok(None)
+            Ok(Some(done(
+                format!("note {slug}"),
+                vec![format!("added a note to {slug}")],
+            )))
         }
         Action::Scorecard {
             slug,
@@ -482,11 +509,17 @@ pub fn run(ctx: &Ctx, action: &Action) -> Result<Option<Popup>> {
                     note: non_empty(note).map(str::to_string),
                 },
             )?;
-            Ok(None)
+            Ok(Some(done(
+                format!("scorecard {slug}"),
+                vec![format!("saved the scorecard of {slug}")],
+            )))
         }
         Action::Cancel { slug, reason } => {
-            orders::cancel(ctx, Some(slug), reason, true)?;
-            Ok(None)
+            let r = orders::cancel(ctx, Some(slug), reason, true)?;
+            Ok(Some(done(
+                format!("cancel {slug}"),
+                vec![format!("{slug} is {}", r.order.status)],
+            )))
         }
         Action::ArchivePreview { slug } => {
             let report = archive::archive(
@@ -521,6 +554,7 @@ pub fn run(ctx: &Ctx, action: &Action) -> Result<Option<Popup>> {
             lines.extend(dry.warnings.iter().map(|w| format!("warning: {w}")));
             lines.push("The link is copied to the clipboard when done.".into());
             Ok(Some(Popup::Confirm {
+                scroll: Default::default(),
                 title: format!("upload {package_id}"),
                 lines,
                 then: Effect::Upload(UploadJob::Package {
@@ -554,6 +588,7 @@ pub fn run(ctx: &Ctx, action: &Action) -> Result<Option<Popup>> {
             ];
             lines.extend(dry.warnings.iter().map(|w| format!("warning: {w}")));
             Ok(Some(Popup::Confirm {
+                scroll: Default::default(),
                 title: format!("mark sent {}", m.package_id),
                 lines,
                 then: Effect::Call(Action::MarkSent(m.clone())),
@@ -584,6 +619,7 @@ pub fn run(ctx: &Ctx, action: &Action) -> Result<Option<Popup>> {
             let file = upload::expand_home(path);
             let dry = artifacts::upload(ctx, Some(slug), &file, false, &NoUploader)?;
             Ok(Some(Popup::Confirm {
+                scroll: Default::default(),
                 title: format!("upload artifact {slug}"),
                 lines: vec![
                     format!("Upload {} for {slug}?", dry.local_path),
@@ -649,6 +685,31 @@ pub fn run(ctx: &Ctx, action: &Action) -> Result<Option<Popup>> {
                     format!("notes: {}", created.notes_path.display()),
                 ],
             )))
+        }
+    }
+}
+
+/// Result popup of a write, so no write goes unacknowledged.
+fn done(title: String, lines: Vec<String>) -> Popup {
+    Popup::message(title, lines)
+}
+
+impl Action {
+    /// Text of the busy popup drawn before a call that can take a while on
+    /// the UI thread (hashing a package, walking a project, scaffolding);
+    /// `None` for quick database writes.
+    pub fn busy_text(&self) -> Option<&'static str> {
+        match self {
+            Action::UploadPreview { .. } | Action::SentPreview(_) | Action::MarkSent(_) => {
+                Some("checking the package...")
+            }
+            Action::ArtifactPreview { .. } => Some("reading the file..."),
+            Action::ArchivePreview { .. } => {
+                Some("checking the project (dirty files, large files)...")
+            }
+            Action::NewOrder(_) => Some("creating the project directory..."),
+            Action::NewDraft { .. } => Some("creating the draft..."),
+            _ => None,
         }
     }
 }

@@ -139,6 +139,22 @@ impl Harness {
         self.refresh();
     }
 
+    /// A write succeeded: its result popup names it (no write is silent),
+    /// and Enter closes it.
+    fn ack(&mut self, title: &str) {
+        match &self.ui.popup {
+            Some(Popup::Message {
+                title: t, error, ..
+            }) => {
+                assert!(!error, "refused: {}", self.popup_text());
+                assert_eq!(t, title);
+            }
+            other => panic!("result popup {title:?} expected, got {other:?}"),
+        }
+        self.key(KeyCode::Enter);
+        assert_eq!(self.ui.popup, None);
+    }
+
     fn popup_text(&self) -> String {
         match &self.ui.popup {
             Some(Popup::Message { title, lines, .. }) => format!("{title}\n{}", lines.join("\n")),
@@ -162,7 +178,7 @@ fn paid_form_defaults_mark_paid_and_set_warranty() {
         other => panic!("paid form expected, got {other:?}"),
     }
     h.key(KeyCode::Enter);
-    assert_eq!(h.ui.popup, None, "no refusal");
+    h.ack("paid tk-paid");
     let o = h.order("tk-paid");
     assert_eq!(o.status, OrderStatus::Paid);
     assert_eq!(o.paid_at.as_deref(), Some(clock::today().as_str()));
@@ -207,6 +223,9 @@ fn refusals_are_shown_verbatim_and_change_nothing() {
     h.key(KeyCode::Esc);
     assert_eq!(h.ui.popup, None);
     h.key(KeyCode::Char('s'));
+    assert!(h
+        .popup_text()
+        .contains("started tk-queued: now in_progress"));
     assert_eq!(h.order("tk-queued").status, OrderStatus::InProgress);
 }
 
@@ -358,6 +377,7 @@ fn other_forms_reach_gig_core() {
     let mut h = Harness::new();
     let id = h.register("tk-misc", Some(10_000));
     h.key(KeyCode::Char('s'));
+    h.ack("start tk-misc");
 
     h.key(KeyCode::Char('$'));
     h.backspaces(10);
@@ -365,6 +385,7 @@ fn other_forms_reach_gig_core() {
     h.key(KeyCode::Tab);
     h.chars("scope grew");
     h.key(KeyCode::Enter);
+    h.ack("price tk-misc");
     assert_eq!(h.order("tk-misc").price_minor, Some(15_000));
 
     h.key(KeyCode::Char('c'));
@@ -377,6 +398,7 @@ fn other_forms_reach_gig_core() {
     h.backspaces(1);
     h.chars("20");
     h.key(KeyCode::Enter);
+    h.ack("change tk-misc");
     assert_eq!(h.order("tk-misc").price_minor, Some(17_000));
     assert_eq!(h.ui.data.order(id).unwrap().requirement_changes.len(), 1);
 
@@ -387,6 +409,7 @@ fn other_forms_reach_gig_core() {
     }
     h.key(KeyCode::Right); // 3 -> 4
     h.key(KeyCode::Enter);
+    h.ack("scorecard tk-misc");
     let sc = h.ui.data.order(id).unwrap().scorecard.clone().unwrap();
     assert_eq!(sc.decisions, Some(2));
     assert_eq!(sc.score, Some(4));
@@ -407,13 +430,22 @@ fn other_forms_reach_gig_core() {
         },
     );
     h.refresh();
+    h.ack("note tk-misc");
     assert!(h.order("tk-misc").notes.contains("called the client"));
 
+    // `e` refuses a JOB.md that does not exist, so the editor never
+    // creates one ...
     h.key(KeyCode::Char('e'));
-    match h.effects.pop() {
-        Some(Effect::EditFile(p)) => assert!(p.ends_with(".gig/JOB.md")),
-        other => panic!("{other:?}"),
-    }
+    assert!(h.effects.is_empty());
+    assert!(h.popup_text().contains("JOB.md does not exist"));
+    h.key(KeyCode::Esc);
+    // ... and opens `<dev_path>/.gig/JOB.md` when it does.
+    let dev = h.order("tk-misc").dev_path.unwrap();
+    let job = Path::new(&dev).join(".gig").join("JOB.md");
+    std::fs::create_dir_all(job.parent().unwrap()).unwrap();
+    std::fs::write(&job, "# x\n").unwrap();
+    h.key(KeyCode::Char('e'));
+    assert_eq!(h.effects.pop(), Some(Effect::EditFile(job)));
     h.key(KeyCode::Char('y'));
     assert!(h.popup_text().contains("no uploaded link"));
 }
