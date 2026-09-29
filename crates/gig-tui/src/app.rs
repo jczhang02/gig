@@ -7,8 +7,10 @@ use crate::popup::Popup;
 use crate::terminal::{self, Term};
 use crate::theme::Theme;
 use crate::ui;
+use crate::upload::{self, UploadJob};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use gig_core::config::Tui;
+use gig_core::delivery::configured_uploader;
 use gig_core::models::Draft;
 use gig_core::services::Ctx;
 use gig_core::Result;
@@ -305,6 +307,9 @@ pub struct App {
 /// How long to wait for input when the refresh timer is off.
 const IDLE_POLL: Duration = Duration::from_secs(60);
 
+/// Redraw interval of the upload progress popup.
+const UPLOAD_TICK: Duration = Duration::from_millis(80);
+
 impl App {
     pub fn new(ctx: Ctx, settings: &Tui) -> Self {
         Self {
@@ -397,9 +402,79 @@ impl App {
                 }
                 self.refresh();
             }
-            Effect::Copy(link) => self.copy(link),
+            Effect::Copy(link) => {
+                let lines = self.copy_lines(link);
+                self.ui.popup = Some(Popup::message("link", lines));
+            }
+            Effect::Upload(job) => self.upload(&job, term)?,
         }
         Ok(())
+    }
+
+    /// Confirmed `u` or `U`: build the configured uploader (a secrets or
+    /// config error is shown verbatim), run the upload on a worker thread
+    /// while this thread draws the progress popup, then show the link and
+    /// copy it. Keys pressed meanwhile are dropped: one upload at a time,
+    /// and there is no cancel.
+    fn upload(&mut self, job: &UploadJob, term: &mut Term) -> Result<()> {
+        let uploader = match configured_uploader(&self.ctx.config, &self.ctx.paths) {
+            Ok(u) => u,
+            Err(e) => {
+                self.ui.popup = Some(Popup::error(&e));
+                return Ok(());
+            }
+        };
+        let Self {
+            ctx,
+            ui,
+            theme,
+            icons,
+            ..
+        } = self;
+        let title = job.title();
+        let mut frame_no = 0;
+        let mut draw_error = None;
+        let result = upload::run_on_worker(ctx, job, uploader.as_ref(), |sent, total| {
+            ui.popup = Some(Popup::Progress {
+                title: title.clone(),
+                sent,
+                total,
+                frame: frame_no,
+            });
+            frame_no += 1;
+            let drawn = term.draw(|frame| {
+                let cx = ui::RenderCx {
+                    state: ui,
+                    theme,
+                    icons,
+                };
+                ui::draw(frame, &cx);
+            });
+            if let Err(e) = drawn {
+                draw_error.get_or_insert(e);
+            }
+            // Paces the loop and swallows keys typed during the upload.
+            if matches!(event::poll(UPLOAD_TICK), Ok(true)) {
+                let _ = event::read();
+            }
+        });
+        self.ui.popup = None;
+        match result {
+            Ok(done) => {
+                let mut lines = done.lines();
+                if let Some(link) = done.link() {
+                    lines.push(String::new());
+                    lines.extend(self.copy_lines(link.to_string()));
+                }
+                self.ui.popup = Some(Popup::message(format!("uploaded {}", done.what), lines));
+            }
+            Err(e) => self.ui.popup = Some(Popup::error(&e)),
+        }
+        self.refresh();
+        match draw_error {
+            Some(e) => Err(e.into()),
+            None => Ok(()),
+        }
     }
 
     fn call(&mut self, action: &Action) {
@@ -415,19 +490,19 @@ impl App {
         });
     }
 
-    /// `y`: the link goes to the clipboard; without one it is only shown.
-    fn copy(&mut self, link: String) {
+    /// `y` and finished uploads: the link goes to the clipboard; without one
+    /// it is only shown. Returns the popup lines saying which.
+    fn copy_lines(&mut self, link: String) -> Vec<String> {
         let clip = self
             .clipboard
             .get_or_insert_with(|| arboard::Clipboard::new().map_err(|e| e.to_string()));
-        let lines = match clip {
+        match clip {
             Ok(c) => match c.set_text(link.clone()) {
                 Ok(()) => vec!["copied to the clipboard:".into(), link],
                 Err(e) => vec![format!("clipboard unavailable ({e}):"), link],
             },
             Err(e) => vec![format!("clipboard unavailable ({e}):"), link],
-        };
-        self.ui.popup = Some(Popup::message("link", lines));
+        }
     }
 }
 

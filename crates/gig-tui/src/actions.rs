@@ -8,22 +8,42 @@
 
 use crate::app::{UiState, View};
 use crate::data::{self, OrderRow};
-use crate::popup::{Field, Form, Popup, PopupKey};
+use crate::popup::{Field, Form, Pick, PickFor, Popup, PopupKey};
+use crate::upload::{self, NoUploader, UploadJob};
 use crossterm::event::{KeyCode, KeyEvent};
-use gig_core::models::{Draft, ProjectType};
+use gig_core::models::{Channel, Draft, ProjectType};
 use gig_core::money::{format_minor, parse_amount};
-use gig_core::services::{archive, drafts, orders, Ctx};
+use gig_core::services::{archive, artifacts, drafts, orders, packages, Ctx};
 use gig_core::{clock, Error, Result};
 use std::path::PathBuf;
 
 /// Which form a popup is, and the order it belongs to.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FormKind {
-    Paid { slug: String },
-    Price { slug: String },
-    Change { slug: String },
-    Scorecard { slug: String },
-    Cancel { slug: String },
+    Paid {
+        slug: String,
+    },
+    Price {
+        slug: String,
+    },
+    Change {
+        slug: String,
+    },
+    Scorecard {
+        slug: String,
+    },
+    Cancel {
+        slug: String,
+    },
+    /// `m` after the package pick: channel and note.
+    MarkSent {
+        slug: String,
+        package_id: String,
+    },
+    /// `U`: the file path.
+    Artifact {
+        slug: String,
+    },
     NewOrder,
     NewDraft,
 }
@@ -71,6 +91,20 @@ pub enum Action {
     ArchivePreview {
         slug: String,
     },
+    /// `u` after the pick: dry run, then the confirmation popup.
+    UploadPreview {
+        slug: String,
+        package_id: String,
+    },
+    /// `m` after the form: dry run, then the confirmation popup.
+    SentPreview(MarkSent),
+    /// Only built from a confirmed popup; runs `packages::sent(yes=true)`.
+    MarkSent(MarkSent),
+    /// `U` after the path form: dry run, then the confirmation popup.
+    ArtifactPreview {
+        slug: String,
+        path: String,
+    },
     NewOrder(NewOrder),
     NewDraft {
         slug: String,
@@ -93,6 +127,16 @@ pub struct NewOrder {
     pub from_draft: bool,
 }
 
+/// Input of `m` (mark sent).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MarkSent {
+    pub slug: String,
+    pub package_id: String,
+    /// `phone` or `other`; oss goes through `u`.
+    pub channel: String,
+    pub note: String,
+}
+
 /// What the app loop must do after a key press.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Effect {
@@ -110,6 +154,9 @@ pub enum Effect {
     EditFile(PathBuf),
     /// Put a link on the clipboard, or show it when there is none.
     Copy(String),
+    /// Build the configured uploader and run the upload with a progress
+    /// popup, then show and copy the link (`App::upload`).
+    Upload(UploadJob),
 }
 
 /// Choices of the project type select, as gig-core spells them.
@@ -120,8 +167,8 @@ fn project_types() -> Vec<&'static str> {
 /// The draft type select also allows "none".
 const NO_TYPE: &str = "none";
 
-/// Keys of the Orders view and the detail (spec 2.1 table, minus the
-/// uploads), and of the Drafts view (2.2). `None` means "not an action key
+/// Keys of the Orders view and the detail (spec 2.1 table), and of the
+/// Drafts view (2.2). `None` means "not an action key
 /// here", so the caller can pass the key on.
 pub fn view_key(ui: &mut UiState, key: KeyEvent) -> Option<Effect> {
     let KeyCode::Char(c) = key.code else {
@@ -149,6 +196,9 @@ pub fn view_key(ui: &mut UiState, key: KeyEvent) -> Option<Effect> {
         'k' => open(ui, scorecard_form(row)),
         'x' => open(ui, cancel_form(row)),
         'A' => Effect::Call(Action::ArchivePreview { slug }),
+        'u' => open_pick(ui, PickFor::Upload { slug }),
+        'm' => open_pick(ui, PickFor::MarkSent { slug }),
+        'U' => open(ui, artifact_form(&slug)),
         'e' => match data::job_md_path(&row.order) {
             Some(p) => Effect::EditFile(p),
             None => {
@@ -195,6 +245,60 @@ fn open(ui: &mut UiState, form: Form) -> Effect {
     Effect::None
 }
 
+/// `u` and `m`: the checked packages of the selected order, or a message
+/// when there are none.
+fn open_pick(ui: &mut UiState, purpose: PickFor) -> Effect {
+    let (slug, title) = match &purpose {
+        PickFor::Upload { slug } => (slug.clone(), format!("upload package {slug}")),
+        PickFor::MarkSent { slug } => (slug.clone(), format!("mark sent {slug}")),
+    };
+    let items: Vec<(String, String)> = ui
+        .selected_order()
+        .map(|row| {
+            upload::checked_packages(row)
+                .into_iter()
+                .map(|p| {
+                    let files = p
+                        .file_count
+                        .map_or(String::new(), |n| format!("  {n} files"));
+                    (
+                        p.package_id.clone(),
+                        format!("{}  {}{files}", p.package_id, p.kind),
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    ui.popup = Some(if items.is_empty() {
+        Popup::message(
+            title,
+            vec![
+                format!("{slug} has no checked package to send."),
+                "Have the agent build and check one first.".into(),
+            ],
+        )
+    } else {
+        Popup::Pick(Pick {
+            title,
+            purpose,
+            items,
+            selected: 0,
+        })
+    });
+    Effect::None
+}
+
+/// Enter in a pick list.
+fn picked(ui: &mut UiState, pick: Pick) -> Effect {
+    let Some(package_id) = pick.value().map(str::to_string) else {
+        return Effect::None;
+    };
+    match pick.purpose {
+        PickFor::Upload { slug } => Effect::Call(Action::UploadPreview { slug, package_id }),
+        PickFor::MarkSent { slug } => open(ui, mark_sent_form(&slug, &package_id)),
+    }
+}
+
 /// A key while a popup is open. Esc closes any popup.
 pub fn popup_key(ui: &mut UiState, key: KeyEvent) -> Effect {
     let Some(popup) = ui.popup.as_mut() else {
@@ -208,11 +312,12 @@ pub fn popup_key(ui: &mut UiState, key: KeyEvent) -> Effect {
         }
         PopupKey::EditField(i) => Effect::EditField(i),
         PopupKey::Confirmed => match ui.popup.take() {
-            Some(Popup::Confirm { then, .. }) => Effect::Call(then),
+            Some(Popup::Confirm { then, .. }) => then,
             _ => Effect::None,
         },
         PopupKey::Submit => match ui.popup.take() {
             Some(Popup::Form(form)) => submit(ui, form),
+            Some(Popup::Pick(pick)) => picked(ui, pick),
             other => {
                 ui.popup = other;
                 Effect::None
@@ -257,13 +362,23 @@ fn submit(ui: &mut UiState, form: Form) -> Effect {
                     format!("reason: {}", form.get("reason")),
                     "The project directory stays; archive it later.".into(),
                 ],
-                then: Action::Cancel {
+                then: Effect::Call(Action::Cancel {
                     slug: slug.clone(),
                     reason: f("reason"),
-                },
+                }),
             });
             return Effect::None;
         }
+        FormKind::MarkSent { slug, package_id } => Action::SentPreview(MarkSent {
+            slug: slug.clone(),
+            package_id: package_id.clone(),
+            channel: f("channel"),
+            note: f("note"),
+        }),
+        FormKind::Artifact { slug } => Action::ArtifactPreview {
+            slug: slug.clone(),
+            path: f("path"),
+        },
         FormKind::NewOrder => Action::NewOrder(NewOrder {
             slug: f("slug"),
             title: f("title"),
@@ -385,6 +500,106 @@ pub fn run(ctx: &Ctx, action: &Action) -> Result<Option<Popup>> {
                 },
             )?;
             Ok(Some(archive_popup(&report)))
+        }
+        Action::UploadPreview { slug, package_id } => {
+            let dry = packages::upload(ctx, Some(slug), package_id, false, &NoUploader)?;
+            let kind = dry.package.kind;
+            let mut lines = vec![
+                format!("Upload package {package_id} of {slug}?"),
+                format!("kind: {kind}"),
+                format!(
+                    "size: {} ({} bytes)",
+                    upload::human_size(dry.size),
+                    dry.size
+                ),
+                format!(
+                    "order: {} -> {}",
+                    dry.order_status,
+                    upload::state_after(dry.order_status, kind)
+                ),
+            ];
+            lines.extend(dry.warnings.iter().map(|w| format!("warning: {w}")));
+            lines.push("The link is copied to the clipboard when done.".into());
+            Ok(Some(Popup::Confirm {
+                title: format!("upload {package_id}"),
+                lines,
+                then: Effect::Upload(UploadJob::Package {
+                    slug: slug.clone(),
+                    package_id: package_id.clone(),
+                }),
+            }))
+        }
+        Action::SentPreview(m) => {
+            let channel = Channel::parse(&m.channel)?;
+            let note = non_empty(&m.note);
+            let dry = packages::sent(ctx, Some(&m.slug), &m.package_id, channel, note, false)?;
+            let kind = dry.package.kind;
+            let mut lines = vec![
+                format!(
+                    "Record {} of {} as sent via {channel}?",
+                    m.package_id, m.slug
+                ),
+                format!("kind: {kind}"),
+                format!(
+                    "size: {} ({} bytes)",
+                    upload::human_size(dry.size),
+                    dry.size
+                ),
+                format!(
+                    "order: {} -> {}",
+                    dry.order_status,
+                    upload::state_after(dry.order_status, kind)
+                ),
+                format!("note: {}", note.unwrap_or("(none)")),
+            ];
+            lines.extend(dry.warnings.iter().map(|w| format!("warning: {w}")));
+            Ok(Some(Popup::Confirm {
+                title: format!("mark sent {}", m.package_id),
+                lines,
+                then: Effect::Call(Action::MarkSent(m.clone())),
+            }))
+        }
+        Action::MarkSent(m) => {
+            let channel = Channel::parse(&m.channel)?;
+            let r = packages::sent(
+                ctx,
+                Some(&m.slug),
+                &m.package_id,
+                channel,
+                non_empty(&m.note),
+                true,
+            )?;
+            Ok(Some(Popup::message(
+                format!("sent {}", m.package_id),
+                vec![
+                    format!("recorded {} as sent via {channel}", m.package_id),
+                    format!("order: {}", r.order_status),
+                ],
+            )))
+        }
+        Action::ArtifactPreview { slug, path } => {
+            if path.trim().is_empty() {
+                return Err(Error::InvalidInput("path is empty".into()));
+            }
+            let file = upload::expand_home(path);
+            let dry = artifacts::upload(ctx, Some(slug), &file, false, &NoUploader)?;
+            Ok(Some(Popup::Confirm {
+                title: format!("upload artifact {slug}"),
+                lines: vec![
+                    format!("Upload {} for {slug}?", dry.local_path),
+                    format!(
+                        "size: {} ({} bytes)",
+                        upload::human_size(dry.size),
+                        dry.size
+                    ),
+                    "The order status does not change.".into(),
+                    "The link is copied to the clipboard when done.".into(),
+                ],
+                then: Effect::Upload(UploadJob::Artifact {
+                    slug: slug.clone(),
+                    path: dry.local_path.into(),
+                }),
+            }))
         }
         Action::NewOrder(n) => {
             let price_minor = opt_amount(&n.price)?;
@@ -600,6 +815,32 @@ pub fn cancel_form(row: &OrderRow) -> Form {
             slug: o.slug.clone(),
         },
         vec![Field::text("reason", "")],
+    )
+}
+
+/// `m` after the pick. Channel oss is `u`'s job, so it is not offered.
+pub fn mark_sent_form(slug: &str, package_id: &str) -> Form {
+    Form::new(
+        format!("mark sent {package_id}"),
+        FormKind::MarkSent {
+            slug: slug.to_string(),
+            package_id: package_id.to_string(),
+        },
+        vec![
+            Field::select("channel", &["phone", "other"], "phone"),
+            Field::text("note", ""),
+        ],
+    )
+}
+
+/// `U`: one typed path (no $EDITOR); `~/` is expanded.
+pub fn artifact_form(slug: &str) -> Form {
+    Form::new(
+        format!("upload artifact {slug}"),
+        FormKind::Artifact {
+            slug: slug.to_string(),
+        },
+        vec![Field::text("path", "")],
     )
 }
 

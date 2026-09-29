@@ -119,7 +119,12 @@ fn draw_banner(frame: &mut Frame, area: Rect, cx: &RenderCx) {
 fn draw_hint(frame: &mut Frame, area: Rect, cx: &RenderCx) {
     let t = cx.theme;
     let filter = cx.state.filter();
-    let line = if cx.state.popup.is_some() {
+    let line = if matches!(cx.state.popup, Some(popup::Popup::Progress { .. })) {
+        Line::from(Span::styled(
+            " uploading; keys are ignored until it ends",
+            t.dim(),
+        ))
+    } else if cx.state.popup.is_some() {
         // The popup box carries its own key hints; global keys are off.
         Line::from(vec![
             Span::styled(" Esc ", t.key()),

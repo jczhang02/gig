@@ -2,7 +2,7 @@
 //! gig-core refusals). Pure state plus drawing; the gig-core calls and the
 //! $EDITOR round trip live in `actions` and `app`.
 
-use crate::actions::{Action, FormKind};
+use crate::actions::{Effect, FormKind};
 use crate::text;
 use crate::theme::Theme;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -199,15 +199,64 @@ impl Form {
     }
 }
 
+/// What a pick list is for, and the order it belongs to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PickFor {
+    /// `u`: upload the picked package.
+    Upload { slug: String },
+    /// `m`: mark the picked package sent.
+    MarkSent { slug: String },
+}
+
+/// Choose one item with Up/Down and Enter.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Pick {
+    pub title: String,
+    pub purpose: PickFor,
+    /// `(value, label)`: the value goes to the action, the label is shown.
+    pub items: Vec<(String, String)>,
+    pub selected: usize,
+}
+
+impl Pick {
+    pub fn value(&self) -> Option<&str> {
+        self.items.get(self.selected).map(|(v, _)| v.as_str())
+    }
+
+    fn key(&mut self, key: KeyEvent) -> PopupKey {
+        let last = self.items.len().saturating_sub(1);
+        match key.code {
+            KeyCode::Up | KeyCode::BackTab => self.selected = self.selected.saturating_sub(1),
+            KeyCode::Down | KeyCode::Tab => self.selected = (self.selected + 1).min(last),
+            KeyCode::Enter if !self.items.is_empty() => return PopupKey::Submit,
+            _ => {}
+        }
+        PopupKey::None
+    }
+}
+
 /// What a popup shows.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Popup {
     Form(Form),
+    Pick(Pick),
     /// A dangerous action waits for a typed `y`; any other key cancels.
     Confirm {
         title: String,
         lines: Vec<String>,
-        then: Action,
+        /// Carried out on `y`.
+        then: Effect,
+    },
+    /// A running upload. Drawn by the blocking upload loop, which reads no
+    /// keys, so it never closes by key.
+    Progress {
+        title: String,
+        /// Bytes sent and total; total 0 means the uploader has not reported
+        /// (a single PUT reports only at the end): show a spinner.
+        sent: u64,
+        total: u64,
+        /// Spinner frame counter.
+        frame: usize,
     },
     /// Result or information; any key closes.
     Message {
@@ -250,11 +299,16 @@ impl Popup {
     }
 
     pub fn handle_key(&mut self, key: KeyEvent) -> PopupKey {
+        if matches!(self, Popup::Progress { .. }) {
+            return PopupKey::None;
+        }
         if key.code == KeyCode::Esc {
             return PopupKey::Close;
         }
         match self {
             Popup::Form(form) => form.key(key),
+            Popup::Pick(pick) => pick.key(key),
+            Popup::Progress { .. } => PopupKey::None,
             Popup::Confirm { .. } => match key.code {
                 KeyCode::Char('y') => PopupKey::Confirmed,
                 _ => PopupKey::Close,
@@ -292,6 +346,21 @@ pub fn render(frame: &mut Frame, area: Rect, popup: &Popup, theme: &Theme) {
             ]));
             (title.clone(), out, theme.error())
         }
+        Popup::Pick(pick) => (
+            pick.title.clone(),
+            pick_lines(pick, theme, inner_width),
+            theme.title(),
+        ),
+        Popup::Progress {
+            title,
+            sent,
+            total,
+            frame,
+        } => (
+            title.clone(),
+            progress_lines(*sent, *total, *frame, theme, inner_width),
+            theme.title(),
+        ),
         Popup::Message {
             title,
             lines,
@@ -408,6 +477,77 @@ fn form_lines<'a>(form: &Form, t: &Theme, width: usize) -> Vec<Line<'a>> {
     out
 }
 
+fn pick_lines<'a>(pick: &Pick, t: &Theme, width: usize) -> Vec<Line<'a>> {
+    let mut out: Vec<Line> = pick
+        .items
+        .iter()
+        .enumerate()
+        .map(|(i, (_, label))| {
+            let shown = text::truncate(label, width.saturating_sub(2));
+            if i == pick.selected {
+                Line::from(vec![
+                    Span::styled("> ", t.key()),
+                    Span::styled(shown, t.text().patch(t.selected())),
+                ])
+            } else {
+                Line::from(vec![Span::raw("  "), Span::styled(shown, t.text())])
+            }
+        })
+        .collect();
+    out.push(Line::raw(""));
+    out.push(Line::from(vec![
+        Span::styled(" Up/Dn ", t.key()),
+        Span::styled("choose  ", t.dim()),
+        Span::styled("Enter ", t.key()),
+        Span::styled("pick  ", t.dim()),
+        Span::styled("Esc ", t.key()),
+        Span::styled("cancel", t.dim()),
+    ]));
+    out
+}
+
+const SPINNER: [&str; 10] = [
+    "\u{280b}", "\u{2819}", "\u{2839}", "\u{2838}", "\u{283c}", "\u{2834}", "\u{2826}", "\u{2827}",
+    "\u{2807}", "\u{280f}",
+];
+
+/// A text bar (so it wraps and clips like the other popup lines), or a
+/// spinner while the uploader has not reported.
+fn progress_lines<'a>(
+    sent: u64,
+    total: u64,
+    frame: usize,
+    t: &Theme,
+    width: usize,
+) -> Vec<Line<'a>> {
+    let status = if total == 0 {
+        Line::from(vec![
+            Span::styled(SPINNER[frame % SPINNER.len()], t.key()),
+            Span::styled(" sending", t.text()),
+        ])
+    } else {
+        let ratio = (sent as f64 / total as f64).clamp(0.0, 1.0);
+        let label = format!(
+            " {:>3}%  {} / {}",
+            (ratio * 100.0).round() as u64,
+            crate::upload::human_size(sent.min(total)),
+            crate::upload::human_size(total)
+        );
+        let bar = width.saturating_sub(text::width(&label)).clamp(1, 40);
+        let filled = ((bar as f64) * ratio).round() as usize;
+        Line::from(vec![
+            Span::styled("\u{2588}".repeat(filled), t.key()),
+            Span::styled("\u{2591}".repeat(bar - filled), t.dim()),
+            Span::styled(label, t.text()),
+        ])
+    };
+    vec![
+        status,
+        Line::raw(""),
+        Line::from(Span::styled("One upload at a time; please wait.", t.dim())),
+    ]
+}
+
 /// The last `max` cells of `s`.
 fn tail(s: &str, max: usize) -> String {
     let mut used = 0;
@@ -487,7 +627,7 @@ mod tests {
         let mut p = Popup::Confirm {
             title: "c".into(),
             lines: vec![],
-            then: Action::Start { slug: "a".into() },
+            then: Effect::None,
         };
         assert_eq!(p.handle_key(key(KeyCode::Char('n'))), PopupKey::Close);
         assert_eq!(p.handle_key(key(KeyCode::Enter)), PopupKey::Close);
@@ -503,9 +643,27 @@ mod tests {
             Popup::Confirm {
                 title: "cancel a".into(),
                 lines: vec!["Cancel order a?".into()],
-                then: Action::Start { slug: "a".into() },
+                then: Effect::None,
             },
             Popup::message("m", vec!["x".repeat(300)]),
+            Popup::Pick(Pick {
+                title: "upload a".into(),
+                purpose: PickFor::Upload { slug: "a".into() },
+                items: vec![("a-v1".into(), "a-v1  full".into())],
+                selected: 0,
+            }),
+            Popup::Progress {
+                title: "uploading a-v1".into(),
+                sent: 5,
+                total: 10,
+                frame: 0,
+            },
+            Popup::Progress {
+                title: "uploading a-v1".into(),
+                sent: 0,
+                total: 0,
+                frame: 3,
+            },
         ];
         for (w, h) in [(80, 24), (30, 8), (200, 50)] {
             for p in &popups {
@@ -551,6 +709,59 @@ mod tests {
             .map(|c| c.symbol())
             .collect();
         assert!(text.contains("close"), "{text}");
+    }
+
+    #[test]
+    fn pick_moves_and_submits() {
+        let mut p = Popup::Pick(Pick {
+            title: "t".into(),
+            purpose: PickFor::MarkSent { slug: "a".into() },
+            items: vec![("x".into(), "x".into()), ("y".into(), "y".into())],
+            selected: 0,
+        });
+        p.handle_key(key(KeyCode::Up));
+        p.handle_key(key(KeyCode::Down));
+        p.handle_key(key(KeyCode::Down));
+        assert_eq!(p.handle_key(key(KeyCode::Enter)), PopupKey::Submit);
+        let Popup::Pick(pick) = &p else { panic!() };
+        assert_eq!(pick.value(), Some("y"));
+        assert_eq!(p.handle_key(key(KeyCode::Esc)), PopupKey::Close);
+    }
+
+    #[test]
+    fn progress_ignores_keys_and_draws_a_bar_or_spinner() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+        let mut p = Popup::Progress {
+            title: "uploading a-v1".into(),
+            sent: 3 * 1024 * 1024,
+            total: 12 * 1024 * 1024,
+            frame: 0,
+        };
+        for code in [KeyCode::Esc, KeyCode::Enter, KeyCode::Char('q')] {
+            assert_eq!(p.handle_key(key(code)), PopupKey::None);
+        }
+        let draw = |p: &Popup| {
+            let mut term = Terminal::new(TestBackend::new(80, 24)).unwrap();
+            term.draw(|f| render(f, f.area(), p, &Theme::DARK)).unwrap();
+            term.backend()
+                .buffer()
+                .content()
+                .iter()
+                .map(|c| c.symbol())
+                .collect::<String>()
+        };
+        let text = draw(&p);
+        assert!(text.contains(" 25%  3.0 MB / 12.0 MB"), "{text}");
+        assert!(text.contains('\u{2588}') && text.contains('\u{2591}'));
+        let spin = draw(&Popup::Progress {
+            title: "uploading a-v1".into(),
+            sent: 0,
+            total: 0,
+            frame: 1,
+        });
+        assert!(spin.contains("\u{2819} sending"), "{spin}");
+        assert!(!spin.contains('%'));
     }
 
     #[test]

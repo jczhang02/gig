@@ -417,3 +417,313 @@ fn other_forms_reach_gig_core() {
     h.key(KeyCode::Char('y'));
     assert!(h.popup_text().contains("no uploaded link"));
 }
+
+// ---- uploads (spec 2.1 `u`, `m`, `U`) ----
+
+use gig_core::delivery::{configured_uploader, UploadOpts, UploadResult, Uploader};
+use gig_core::models::{Channel, PackageKind, PackageStatus};
+use gig_core::services::packages;
+use gig_tui::upload::{self, UploadJob};
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+
+/// Reports three parts through the progress callback, then waits until the
+/// drawing side has seen the last report, so the test is not timing bound.
+struct FakeUploader {
+    seen_done: Arc<AtomicBool>,
+    keys: Mutex<Vec<String>>,
+}
+
+impl FakeUploader {
+    fn new() -> Self {
+        Self {
+            seen_done: Arc::new(AtomicBool::new(false)),
+            keys: Mutex::new(Vec::new()),
+        }
+    }
+}
+
+impl Uploader for FakeUploader {
+    fn name(&self) -> &str {
+        "s3:fake"
+    }
+
+    fn upload(&self, local: &Path, opts: &UploadOpts) -> gig_core::Result<UploadResult> {
+        assert!(
+            opts.progress.is_some(),
+            "the TUI passes a progress callback"
+        );
+        self.keys
+            .lock()
+            .unwrap()
+            .push(opts.object_key.clone().unwrap());
+        for part in 1..=3 {
+            opts.report(part * 10, 30);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !self.seen_done.load(Ordering::SeqCst) && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        Ok(UploadResult {
+            url: format!(
+                "https://s3.test/{}",
+                local.file_name().unwrap().to_string_lossy()
+            ),
+            short_url: Some("https://go.test/abc".into()),
+            expires_at: Some(1_900_000_000),
+            provider: "s3:fake".into(),
+            file_size: std::fs::metadata(local).unwrap().len(),
+        })
+    }
+}
+
+/// Run a confirmed upload the way `App::upload` does, minus the terminal:
+/// worker thread, a tick per poll. Returns the result and the ticks seen.
+fn run_upload(
+    h: &mut Harness,
+    job: &UploadJob,
+) -> (gig_core::Result<upload::Uploaded>, Vec<(u64, u64)>) {
+    let fake = FakeUploader::new();
+    let seen_done = fake.seen_done.clone();
+    let mut ticks = Vec::new();
+    let result = upload::run_on_worker(&mut h.ctx, job, &fake, |sent, total| {
+        ticks.push((sent, total));
+        if total > 0 && sent == total {
+            seen_done.store(true, Ordering::SeqCst);
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    });
+    h.refresh();
+    (result, ticks)
+}
+
+/// An order in progress with a checked package `<slug>-v1` of `kind`.
+fn with_checked_package(h: &mut Harness, slug: &str, kind: PackageKind) -> (i64, String) {
+    let id = h.register(slug, Some(50_000));
+    orders::start(&h.ctx, Some(slug)).unwrap();
+    let dev = PathBuf::from(h.order(slug).dev_path.unwrap());
+    let pkg = format!("{slug}-v1");
+    let dir = dev.join("delivery").join(&pkg);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("manual.pdf"), "pdf bytes").unwrap();
+    packages::build_package(&h.ctx, Some(slug), &pkg, kind, true, &[]).unwrap();
+    h.refresh();
+    h.ui.selected = Some(id);
+    (id, pkg)
+}
+
+fn confirm_text(h: &Harness) -> String {
+    match &h.ui.popup {
+        Some(Popup::Confirm { title, lines, .. }) => format!("{title}\n{}", lines.join("\n")),
+        other => panic!("expected a confirmation, got {other:?}"),
+    }
+}
+
+#[test]
+fn upload_package_shows_progress_and_delivers() {
+    let mut h = Harness::new();
+    let (id, pkg) = with_checked_package(&mut h, "tk-up", PackageKind::Full);
+
+    h.key(KeyCode::Char('u'));
+    match &h.ui.popup {
+        Some(Popup::Pick(p)) => {
+            assert_eq!(p.items.len(), 1);
+            assert_eq!(p.value(), Some(pkg.as_str()));
+            assert!(p.items[0].1.contains("full"), "{:?}", p.items);
+        }
+        other => panic!("package pick expected, got {other:?}"),
+    }
+    h.key(KeyCode::Enter);
+    let text = confirm_text(&h);
+    assert!(
+        text.contains(&format!("Upload package {pkg} of tk-up?")),
+        "{text}"
+    );
+    assert!(text.contains("kind: full"), "{text}");
+    assert!(text.contains("size: "), "{text}");
+    assert!(text.contains("order: in_progress -> delivered"), "{text}");
+
+    // Anything but y cancels and uploads nothing.
+    h.key(KeyCode::Char('n'));
+    assert_eq!(h.ui.popup, None);
+    assert!(h.effects.is_empty());
+
+    h.key(KeyCode::Char('u'));
+    h.key(KeyCode::Enter);
+    h.key(KeyCode::Char('y'));
+    let job = match h.effects.pop() {
+        Some(Effect::Upload(job)) => job,
+        other => panic!("upload effect expected, got {other:?}"),
+    };
+    assert_eq!(
+        job,
+        UploadJob::Package {
+            slug: "tk-up".into(),
+            package_id: pkg.clone()
+        }
+    );
+    // Nothing changed before the upload ran.
+    assert_eq!(h.order("tk-up").status, OrderStatus::InProgress);
+
+    let (result, ticks) = run_upload(&mut h, &job);
+    let done = result.unwrap();
+    assert!(ticks.contains(&(30, 30)), "{ticks:?}");
+    assert!(
+        ticks.windows(2).all(|w| w[0].0 <= w[1].0),
+        "progress only grows: {ticks:?}"
+    );
+    assert_eq!(done.link(), Some("https://go.test/abc"));
+    assert_eq!(done.order_status, Some(OrderStatus::Delivered));
+    assert!(done.lines().join("\n").contains("order: delivered"));
+
+    // The state transition went through gig-core.
+    assert_eq!(h.order("tk-up").status, OrderStatus::Delivered);
+    let row = h.ui.data.order(id).unwrap();
+    let p = row.packages.iter().find(|p| p.package_id == pkg).unwrap();
+    assert_eq!(p.status, PackageStatus::Sent);
+    assert_eq!(p.channel, Some(Channel::Oss));
+    assert_eq!(p.short_url.as_deref(), Some("https://go.test/abc"));
+    assert_eq!(p.uploader.as_deref(), Some("s3:fake"));
+    assert_eq!(
+        actions::latest_link(row).as_deref(),
+        Some("https://go.test/abc")
+    );
+
+    // Sent packages are no longer offered.
+    h.key(KeyCode::Char('u'));
+    assert!(h.popup_text().contains("no checked package"));
+}
+
+#[test]
+fn upload_refusals_are_shown_before_confirming() {
+    let mut h = Harness::new();
+    with_checked_package(&mut h, "tk-stale", PackageKind::Full);
+    // The zip is rebuilt after the check: gig-core wants a new check.
+    let dev = PathBuf::from(h.order("tk-stale").dev_path.unwrap());
+    std::fs::write(dev.join("delivery/tk-stale-v1/manual.pdf"), "changed").unwrap();
+    gig_core::package::build::build(&dev, "tk-stale-v1", PackageKind::Full, false, &[]).unwrap();
+    h.key(KeyCode::Char('u'));
+    h.key(KeyCode::Enter);
+    let text = h.popup_text();
+    assert!(text.starts_with("refused\n"), "{text}");
+    assert!(
+        text.contains("needs_check: ") && text.contains("changed since it was checked"),
+        "{text}"
+    );
+    assert_eq!(h.order("tk-stale").status, OrderStatus::InProgress);
+}
+
+#[test]
+fn no_uploader_configured_is_an_error_not_a_panic() {
+    let h = Harness::new();
+    let e = match configured_uploader(&h.ctx.config, &h.ctx.paths) {
+        Ok(_) => panic!("a fresh home has no uploader"),
+        Err(e) => e,
+    };
+    // `App::upload` shows exactly this popup.
+    let Popup::Message { lines, error, .. } = Popup::error(&e) else {
+        panic!()
+    };
+    assert!(error);
+    assert_eq!(lines, vec![format!("{}: {e}", e.code())]);
+}
+
+#[test]
+fn mark_sent_by_phone_with_a_note() {
+    let mut h = Harness::new();
+    let (_, pkg) = with_checked_package(&mut h, "tk-phone", PackageKind::Full);
+    h.key(KeyCode::Char('m'));
+    assert!(matches!(h.ui.popup, Some(Popup::Pick(_))));
+    h.key(KeyCode::Enter);
+    match &h.ui.popup {
+        Some(Popup::Form(f)) => assert_eq!(f.get("channel"), "phone"),
+        other => panic!("mark sent form expected, got {other:?}"),
+    }
+    h.key(KeyCode::Tab);
+    h.chars("via gsconnect");
+    h.key(KeyCode::Enter);
+    let text = confirm_text(&h);
+    assert!(text.contains("sent via phone"), "{text}");
+    assert!(text.contains("order: in_progress -> delivered"), "{text}");
+    assert!(text.contains("note: via gsconnect"), "{text}");
+    assert_eq!(h.order("tk-phone").status, OrderStatus::InProgress);
+
+    h.key(KeyCode::Char('y'));
+    let text = h.popup_text();
+    assert!(text.contains("order: delivered"), "{text}");
+    let o = h.order("tk-phone");
+    assert_eq!(o.status, OrderStatus::Delivered);
+    assert!(
+        o.notes
+            .contains(&format!("sent {pkg} via phone: via gsconnect")),
+        "{}",
+        o.notes
+    );
+    let p = &h.ui.data.order(o.id).unwrap().packages[0];
+    assert_eq!(p.channel, Some(Channel::Phone));
+}
+
+#[test]
+fn mark_sent_preview_keeps_the_order_state() {
+    let mut h = Harness::new();
+    with_checked_package(&mut h, "tk-prev", PackageKind::Preview);
+    h.key(KeyCode::Char('m'));
+    h.key(KeyCode::Enter);
+    h.key(KeyCode::Right); // phone -> other
+    h.key(KeyCode::Enter);
+    let text = confirm_text(&h);
+    assert!(text.contains("sent via other"), "{text}");
+    assert!(text.contains("order: in_progress -> in_progress"), "{text}");
+    h.key(KeyCode::Char('y'));
+    assert_eq!(h.order("tk-prev").status, OrderStatus::InProgress);
+    let o = h.order("tk-prev");
+    let p = &h.ui.data.order(o.id).unwrap().packages[0];
+    assert_eq!(p.channel, Some(Channel::Other));
+    assert_eq!(p.status, PackageStatus::Sent);
+}
+
+#[test]
+fn upload_artifact_from_a_typed_path() {
+    let mut h = Harness::new();
+    let id = h.register("tk-art", None);
+    orders::start(&h.ctx, Some("tk-art")).unwrap();
+    h.refresh();
+    h.ui.selected = Some(id);
+    let file = h._dir.path().join("report.pdf");
+    std::fs::write(&file, "report").unwrap();
+
+    h.key(KeyCode::Char('U'));
+    assert!(matches!(h.ui.popup, Some(Popup::Form(_))));
+    h.chars(&file.display().to_string());
+    h.key(KeyCode::Enter);
+    let text = confirm_text(&h);
+    assert!(text.contains("report.pdf"), "{text}");
+    assert!(text.contains("size: 6 B"), "{text}");
+    h.key(KeyCode::Char('y'));
+    let job = match h.effects.pop() {
+        Some(Effect::Upload(job)) => job,
+        other => panic!("upload effect expected, got {other:?}"),
+    };
+    assert_eq!(job.title(), "uploading report.pdf");
+    let (result, ticks) = run_upload(&mut h, &job);
+    let done = result.unwrap();
+    assert!(!ticks.is_empty());
+    assert_eq!(done.order_status, None);
+    assert_eq!(done.link(), Some("https://go.test/abc"));
+    let row = h.ui.data.order(id).unwrap();
+    assert_eq!(row.artifacts.len(), 1);
+    assert_eq!(
+        row.artifacts[0].short_url.as_deref(),
+        Some("https://go.test/abc")
+    );
+    assert_eq!(h.order("tk-art").status, OrderStatus::InProgress);
+
+    // A missing file is refused before the confirmation.
+    h.key(KeyCode::Char('U'));
+    h.chars("/nonexistent/file.pdf");
+    h.key(KeyCode::Enter);
+    assert!(h.popup_text().contains("refused"));
+}
