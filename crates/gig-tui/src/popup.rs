@@ -291,6 +291,9 @@ pub enum Popup {
         /// Carried out on `y`.
         then: Effect,
         scroll: Scroll,
+        /// Destructive (cancel): the title is drawn in the error colour.
+        /// Routine steps (upload, mark sent) are not.
+        danger: bool,
     },
     /// A running upload. Drawn by the blocking upload loop, which reads no
     /// keys, so it never closes by key.
@@ -315,6 +318,8 @@ pub enum Popup {
         title: String,
         lines: Vec<String>,
         error: bool,
+        /// A write that succeeded: the title is drawn in the ok colour.
+        ok: bool,
         scroll: Scroll,
     },
 }
@@ -338,8 +343,37 @@ impl Popup {
             title: title.into(),
             lines,
             error: false,
+            ok: false,
             scroll: Scroll::default(),
         }
+    }
+
+    /// Result of a write that succeeded.
+    pub fn done(title: impl Into<String>, lines: Vec<String>) -> Self {
+        match Self::message(title, lines) {
+            Popup::Message {
+                title,
+                lines,
+                scroll,
+                ..
+            } => Popup::Message {
+                title,
+                lines,
+                error: false,
+                ok: true,
+                scroll,
+            },
+            other => other,
+        }
+    }
+
+    /// A message opened scrolled to its end (the newest lines of a tail).
+    pub fn message_at_end(title: impl Into<String>, lines: Vec<String>) -> Self {
+        let mut p = Self::message(title, lines);
+        if let Popup::Message { scroll, .. } = &mut p {
+            scroll.offset = u16::MAX;
+        }
+        p
     }
 
     /// A refusal or failure that is not a gig-core error (editor, missing
@@ -349,6 +383,7 @@ impl Popup {
             title: title.into(),
             lines: vec![text.into()],
             error: true,
+            ok: false,
             scroll: Scroll::default(),
         }
     }
@@ -359,12 +394,34 @@ impl Popup {
         Self::error_text("refused", format!("{}: {e}", e.code()))
     }
 
+    /// A routine confirmation (upload, mark sent).
     pub fn confirm(title: impl Into<String>, lines: Vec<String>, then: Effect) -> Self {
         Popup::Confirm {
             title: title.into(),
             lines,
             then,
             scroll: Scroll::default(),
+            danger: false,
+        }
+    }
+
+    /// A destructive confirmation (cancel an order).
+    pub fn confirm_danger(title: impl Into<String>, lines: Vec<String>, then: Effect) -> Self {
+        match Self::confirm(title, lines, then) {
+            Popup::Confirm {
+                title,
+                lines,
+                then,
+                scroll,
+                ..
+            } => Popup::Confirm {
+                title,
+                lines,
+                then,
+                scroll,
+                danger: true,
+            },
+            other => other,
         }
     }
 
@@ -385,7 +442,17 @@ impl Popup {
             Popup::Confirm { scroll, .. } => match key.code {
                 // Only a plain `y` confirms; Ctrl+Y or Alt+Y cancels.
                 KeyCode::Char('y') if !chord => PopupKey::Confirmed,
-                KeyCode::Up | KeyCode::Down | KeyCode::PageUp | KeyCode::PageDown => {
+                // The same scroll keys as a message.
+                KeyCode::Up
+                | KeyCode::Down
+                | KeyCode::PageUp
+                | KeyCode::PageDown
+                | KeyCode::Home
+                | KeyCode::End
+                | KeyCode::Char('j')
+                | KeyCode::Char('k')
+                    if !chord =>
+                {
                     scroll.key(key.code);
                     PopupKey::None
                 }
@@ -406,7 +473,14 @@ impl Popup {
 const WIDTH: u16 = 76;
 
 pub fn render(frame: &mut Frame, area: Rect, popup: &Popup, theme: &Theme) {
-    let inner_width = usize::from(WIDTH.min(area.width).saturating_sub(4)).max(1);
+    // Near the WIDTH the box takes the frame less a 1-cell margin, so no
+    // sliver of the list shows (cut glyphs, ellipses) beside it.
+    let box_width = if area.width <= WIDTH + 4 {
+        area.width.saturating_sub(2).max(area.width.min(10))
+    } else {
+        WIDTH
+    };
+    let inner_width = usize::from(box_width.saturating_sub(4)).max(1);
     // Body lines are pre-wrapped to `inner_width`, so their count is the
     // exact height; the footer (key hints) is pinned under the body and
     // stays visible however long the body is.
@@ -423,16 +497,19 @@ pub fn render(frame: &mut Frame, area: Rect, popup: &Popup, theme: &Theme) {
                 title,
                 lines,
                 scroll,
+                danger,
                 ..
             } => (
                 title.clone(),
-                theme.error(),
+                if *danger {
+                    theme.error()
+                } else {
+                    theme.title()
+                },
                 wrapped(lines, theme.text(), inner_width),
                 vec![Line::from(vec![
                     Span::styled(" y ", theme.key()),
-                    Span::styled("confirm   ", theme.dim()),
-                    Span::styled("any other key ", theme.key()),
-                    Span::styled("cancel", theme.dim()),
+                    Span::styled("confirm   any other key cancels", theme.dim()),
                 ])],
                 Some(scroll),
             ),
@@ -469,10 +546,17 @@ pub fn render(frame: &mut Frame, area: Rect, popup: &Popup, theme: &Theme) {
                 title,
                 lines,
                 error,
+                ok,
                 scroll,
             } => {
                 let style = if *error { theme.error() } else { theme.text() };
-                let ts = if *error { theme.error() } else { theme.title() };
+                let ts = if *error {
+                    theme.error()
+                } else if *ok {
+                    theme.title().fg(theme.ok)
+                } else {
+                    theme.title()
+                };
                 (
                     title.clone(),
                     ts,
@@ -490,15 +574,18 @@ pub fn render(frame: &mut Frame, area: Rect, popup: &Popup, theme: &Theme) {
         .saturating_add(footer_rows)
         .saturating_add(2);
     let height = want.min(area.height);
-    let rect = area.centered(
-        Constraint::Length(WIDTH.min(area.width)),
-        Constraint::Length(height),
-    );
+    let rect = area.centered(Constraint::Length(box_width), Constraint::Length(height));
     frame.render_widget(Clear, rect);
     let block = Block::bordered()
         .border_type(BorderType::Rounded)
         .border_style(theme.border())
-        .title(Span::styled(format!(" {title} "), title_style))
+        .title(Span::styled(
+            format!(
+                " {} ",
+                text::truncate(&title, usize::from(box_width.saturating_sub(6)))
+            ),
+            title_style,
+        ))
         .style(theme.base());
     let inner = block.inner(rect);
     frame.render_widget(block, rect);
@@ -597,10 +684,15 @@ fn form_lines<'a>(form: &Form, t: &Theme, width: usize) -> Vec<Line<'a>> {
         };
         let mut spans = vec![Span::styled(text::fit(&f.label, LABEL), label_style)];
         spans.push(Span::raw("  "));
-        let style = if focused {
-            value_style.patch(t.selected())
+        let (value, style) = if focused {
+            // The band spans the whole value column, so an empty field is
+            // as visible as a filled one.
+            (
+                text::fit(&value, value_width),
+                value_style.patch(t.selected()),
+            )
         } else {
-            value_style
+            (value, value_style)
         };
         spans.push(Span::styled(value, style));
         out.push(Line::from(spans));
@@ -938,5 +1030,71 @@ mod tests {
         });
         assert!(spin.contains("\u{2819} sending"), "{spin}");
         assert!(!spin.contains('%'));
+    }
+
+    #[test]
+    fn confirm_colours_scroll_and_message_tones() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+        let title_fg = |p: &Popup| {
+            let mut term = Terminal::new(TestBackend::new(80, 24)).unwrap();
+            term.draw(|f| render(f, f.area(), p, &Theme::DARK)).unwrap();
+            let buf = term.backend().buffer().clone();
+            // The title is the only capital T on screen.
+            let (x, y) = (0..24u16)
+                .flat_map(|y| (0..80u16).map(move |x| (x, y)))
+                .find(|&(x, y)| buf[(x, y)].symbol() == "T")
+                .unwrap();
+            assert_eq!(
+                buf[(1, y)].symbol(),
+                "\u{256d}",
+                "78-wide box at 80 columns"
+            );
+            buf[(x, y)].fg
+        };
+        let routine = Popup::confirm("Title", vec!["x".into()], Effect::None);
+        let danger = Popup::confirm_danger("Title", vec!["x".into()], Effect::None);
+        assert_eq!(title_fg(&routine), Theme::DARK.accent);
+        assert_eq!(title_fg(&danger), Theme::DARK.error);
+        assert_eq!(title_fg(&Popup::done("Title", vec![])), Theme::DARK.ok);
+        let screen_text = screen(&routine, 80, 24);
+        assert!(screen_text.contains("any other key cancels"));
+        let mut p = Popup::confirm(
+            "c",
+            (1..=40).map(|i| format!("w{i}")).collect(),
+            Effect::None,
+        );
+        screen(&p, 80, 24);
+        for code in [
+            KeyCode::End,
+            KeyCode::Home,
+            KeyCode::Char('j'),
+            KeyCode::Char('k'),
+        ] {
+            assert_eq!(p.handle_key(key(code)), PopupKey::None, "{code:?}");
+        }
+        assert_eq!(p.handle_key(key(KeyCode::Char('n'))), PopupKey::Close);
+        // A tail opens at its end; Up then moves back one line.
+        let mut tail =
+            Popup::message_at_end("notes", (1..=40).map(|i| format!("line {i:02}")).collect());
+        let text = screen(&tail, 80, 24);
+        assert!(
+            text.contains("line 40") && !text.contains("line 01"),
+            "{text}"
+        );
+        tail.handle_key(key(KeyCode::Up));
+        let text = screen(&tail, 80, 24);
+        assert!(
+            text.contains("line 39") && !text.contains("line 40"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn long_titles_stay_inside_the_box() {
+        let p = Popup::message("图".repeat(60), vec!["x".into()]);
+        let text = screen(&p, 80, 24);
+        assert!(text.contains("\u{256e}"), "right corner kept");
+        assert!(text.contains('\u{2026}'));
     }
 }

@@ -773,6 +773,22 @@ fn upload_artifact_from_a_typed_path() {
     h.chars("/nonexistent/file.pdf");
     h.key(KeyCode::Enter);
     assert!(h.popup_text().contains("refused"));
+    // Closing the refusal brings the form back; Esc drops it.
+    h.key(KeyCode::Esc);
+    h.key(KeyCode::Esc);
+    assert_eq!(h.ui.popup, None);
+
+    // A relative path is taken from the order's project directory.
+    let dev = h.order("tk-art").dev_path.expect("scaffolded");
+    std::fs::create_dir_all(&dev).unwrap();
+    std::fs::write(Path::new(&dev).join("summary.txt"), "hello").unwrap();
+    h.key(KeyCode::Char('U'));
+    h.chars("summary.txt");
+    h.key(KeyCode::Enter);
+    let text = confirm_text(&h);
+    let want = std::fs::canonicalize(Path::new(&dev).join("summary.txt")).unwrap();
+    assert!(text.contains(&want.display().to_string()), "{text}");
+    assert!(text.contains("size: 5 B"), "{text}");
 }
 
 #[test]

@@ -122,9 +122,13 @@ pub fn human_size(bytes: u64) -> String {
 /// Expand a leading `~/` in a typed path.
 pub fn expand_home(typed: &str) -> PathBuf {
     let typed = typed.trim();
-    match (typed.strip_prefix("~/"), std::env::var_os("HOME")) {
-        (Some(rest), Some(home)) => Path::new(&home).join(rest),
-        _ => PathBuf::from(typed),
+    match std::env::var_os("HOME") {
+        Some(home) if typed == "~" => PathBuf::from(home),
+        Some(home) => match typed.strip_prefix("~/") {
+            Some(rest) => Path::new(&home).join(rest),
+            None => PathBuf::from(typed),
+        },
+        None => PathBuf::from(typed),
     }
 }
 

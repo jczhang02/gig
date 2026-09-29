@@ -687,6 +687,12 @@ impl App {
             .get_or_insert_with(|| arboard::Clipboard::new().map_err(|e| e.to_string()));
         match clip {
             Ok(c) => match c.set_text(link.clone()) {
+                // On X11 the copied text lives in this process: without a
+                // clipboard manager it is gone once gig tui quits.
+                Ok(()) if cfg!(target_os = "linux") => vec![
+                    "copied to the clipboard (paste it before quitting gig tui):".into(),
+                    link,
+                ],
                 Ok(()) => vec!["copied to the clipboard:".into(), link],
                 Err(e) => vec![format!("clipboard unavailable ({e}):"), link],
             },

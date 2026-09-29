@@ -265,7 +265,8 @@ pub fn draft_notes(ui: &mut UiState) {
             if lines.is_empty() {
                 lines.push("(NOTES.md is empty)".into());
             }
-            Popup::message(title, lines)
+            // Opened at the end: the newest notes matter most.
+            Popup::message_at_end(title, lines)
         }
         None => Popup::error_text(title, format!("no NOTES.md in {}", d.notes_dir)),
     });
@@ -399,19 +400,18 @@ fn submit(ui: &mut UiState, form: Form) -> Effect {
             note: f("note"),
         },
         FormKind::Cancel { slug } => {
-            ui.popup = Some(Popup::Confirm {
-                scroll: Default::default(),
-                title: format!("cancel {slug}"),
-                lines: vec![
+            ui.popup = Some(Popup::confirm_danger(
+                format!("cancel {slug}"),
+                vec![
                     format!("Cancel order {slug}?"),
                     format!("reason: {}", form.get("reason")),
                     "The project directory stays; archive it later.".into(),
                 ],
-                then: Effect::Call(Action::Cancel {
+                Effect::Call(Action::Cancel {
                     slug: slug.clone(),
                     reason: f("reason"),
                 }),
-            });
+            ));
             return Effect::None;
         }
         FormKind::MarkSent { slug, package_id } => Action::SentPreview(MarkSent {
@@ -422,7 +422,7 @@ fn submit(ui: &mut UiState, form: Form) -> Effect {
         }),
         FormKind::Artifact { slug } => Action::ArtifactPreview {
             slug: slug.clone(),
-            path: f("path"),
+            path: resolve_artifact_path(ui, slug, form.get("path")),
         },
         FormKind::NewOrder => Action::NewOrder(NewOrder {
             slug: f("slug"),
@@ -442,6 +442,30 @@ fn submit(ui: &mut UiState, form: Form) -> Effect {
         },
     };
     Effect::Call(action)
+}
+
+/// The path typed in `U`: `~` expanded, and a relative path taken from the
+/// order's project directory (not from where gig tui was started). The
+/// confirmation shows the absolute path either way.
+fn resolve_artifact_path(ui: &UiState, slug: &str, typed: &str) -> String {
+    let typed = typed.trim();
+    if typed.is_empty() {
+        return String::new();
+    }
+    let path = upload::expand_home(typed);
+    if path.is_absolute() {
+        return path.display().to_string();
+    }
+    let dev = ui
+        .data
+        .orders
+        .iter()
+        .find(|r| r.order.slug == slug)
+        .and_then(|r| r.order.dev_path.as_deref());
+    match dev {
+        Some(dev) => std::path::Path::new(dev).join(path).display().to_string(),
+        None => path.display().to_string(),
+    }
 }
 
 /// Text back from $EDITOR for field `index` of the open form.
@@ -597,15 +621,14 @@ pub fn run(ctx: &Ctx, action: &Action) -> Result<Option<Popup>> {
             ];
             lines.extend(dry.warnings.iter().map(|w| format!("warning: {w}")));
             lines.push("The link is copied to the clipboard when done.".into());
-            Ok(Some(Popup::Confirm {
-                scroll: Default::default(),
-                title: format!("upload {package_id}"),
+            Ok(Some(Popup::confirm(
+                format!("upload {package_id}"),
                 lines,
-                then: Effect::Upload(UploadJob::Package {
+                Effect::Upload(UploadJob::Package {
                     slug: slug.clone(),
                     package_id: package_id.clone(),
                 }),
-            }))
+            )))
         }
         Action::SentPreview(m) => {
             let channel = Channel::parse(&m.channel)?;
@@ -631,12 +654,11 @@ pub fn run(ctx: &Ctx, action: &Action) -> Result<Option<Popup>> {
                 format!("note: {}", note.unwrap_or("(none)")),
             ];
             lines.extend(dry.warnings.iter().map(|w| format!("warning: {w}")));
-            Ok(Some(Popup::Confirm {
-                scroll: Default::default(),
-                title: format!("mark sent {}", m.package_id),
+            Ok(Some(Popup::confirm(
+                format!("mark sent {}", m.package_id),
                 lines,
-                then: Effect::Call(Action::MarkSent(m.clone())),
-            }))
+                Effect::Call(Action::MarkSent(m.clone())),
+            )))
         }
         Action::MarkSent(m) => {
             let channel = Channel::parse(&m.channel)?;
@@ -662,10 +684,9 @@ pub fn run(ctx: &Ctx, action: &Action) -> Result<Option<Popup>> {
             }
             let file = upload::expand_home(path);
             let dry = artifacts::upload(ctx, Some(slug), &file, false, &NoUploader)?;
-            Ok(Some(Popup::Confirm {
-                scroll: Default::default(),
-                title: format!("upload artifact {slug}"),
-                lines: vec![
+            Ok(Some(Popup::confirm(
+                format!("upload artifact {slug}"),
+                vec![
                     format!("Upload {} for {slug}?", dry.local_path),
                     format!(
                         "size: {} ({} bytes)",
@@ -675,11 +696,11 @@ pub fn run(ctx: &Ctx, action: &Action) -> Result<Option<Popup>> {
                     "The order status does not change.".into(),
                     "The link is copied to the clipboard when done.".into(),
                 ],
-                then: Effect::Upload(UploadJob::Artifact {
+                Effect::Upload(UploadJob::Artifact {
                     slug: slug.clone(),
                     path: dry.local_path.into(),
                 }),
-            }))
+            )))
         }
         Action::NewOrder(n) => {
             let price_minor = opt_amount(&n.price)?;
@@ -735,7 +756,7 @@ pub fn run(ctx: &Ctx, action: &Action) -> Result<Option<Popup>> {
 
 /// Result popup of a write, so no write goes unacknowledged.
 fn done(title: String, lines: Vec<String>) -> Popup {
-    Popup::message(title, lines)
+    Popup::done(title, lines)
 }
 
 impl Action {
