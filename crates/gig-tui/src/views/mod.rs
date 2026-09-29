@@ -103,7 +103,7 @@ pub(crate) fn price(minor: Option<i64>) -> String {
 pub(crate) fn empty(frame: &mut Frame, area: Rect, theme: &Theme, lines: &[&str]) {
     let lines: Vec<Line> = lines
         .iter()
-        .map(|l| Line::from(Span::styled(format!(" {l}"), theme.dim())))
+        .map(|l| Line::from(Span::styled(format!(" {l}"), theme.muted())))
         .collect();
     frame.render_widget(Paragraph::new(lines), area);
 }

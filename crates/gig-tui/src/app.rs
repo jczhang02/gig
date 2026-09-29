@@ -450,11 +450,11 @@ const IDLE_POLL: Duration = Duration::from_secs(60);
 const UPLOAD_TICK: Duration = Duration::from_millis(80);
 
 impl App {
-    pub fn new(ctx: Ctx, settings: &Tui) -> Self {
+    pub fn new(ctx: Ctx, settings: &Tui, theme: Theme) -> Self {
         Self {
             ctx,
             ui: UiState::default(),
-            theme: Theme::new(settings.light),
+            theme,
             icons: Icons::new(settings.icons),
             refresh_every: (settings.refresh_seconds > 0)
                 .then(|| Duration::from_secs(settings.refresh_seconds)),

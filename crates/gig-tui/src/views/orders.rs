@@ -150,7 +150,7 @@ pub fn render(frame: &mut Frame, area: Rect, cx: &RenderCx) {
 }
 
 fn header(cx: &RenderCx, c: &Columns) -> Line<'static> {
-    let d = cx.theme.dim();
+    let d = cx.theme.muted();
     let mut spans = vec![
         Span::raw(" ".repeat(c.indent())),
         cell("slug", c.slug, d),
@@ -174,10 +174,14 @@ fn row_line(cx: &RenderCx, c: &Columns, r: &OrderRow) -> Line<'static> {
     let t = cx.theme;
     let o = &r.order;
     let closed = r.group == Group::Closed;
-    let text = if closed { t.dim() } else { t.text() };
+    let text = if closed { t.muted() } else { t.text() };
     let mut spans = vec![Span::raw(" ")];
     if c.icon > 0 {
-        spans.push(cell(cx.icons.project_type(o.project_type), c.icon, t.dim()));
+        spans.push(cell(
+            cx.icons.project_type(o.project_type),
+            c.icon,
+            t.muted(),
+        ));
     }
     spans.extend([
         cell(&o.slug, c.slug, text.add_modifier(Modifier::BOLD)),
@@ -186,7 +190,7 @@ fn row_line(cx: &RenderCx, c: &Columns, r: &OrderRow) -> Line<'static> {
         Span::raw(" "),
         cell(&r.next_action, c.next, text),
         Span::raw(" "),
-        cell_right(&days(r.days_in_status), c.days, t.dim()),
+        cell_right(&days(r.days_in_status), c.days, t.muted()),
         Span::raw(" "),
         cell_right(&price(o.price_minor), c.price, text),
     ]);
@@ -207,13 +211,13 @@ fn status_line(cx: &RenderCx, c: &Columns, r: &OrderRow, width: u16) -> Line<'st
     // (dim would be the least legible text on screen).
     let (text_, style) = match r.job.latest_status() {
         Some(s) => (s.to_string(), t.text().add_modifier(Modifier::ITALIC)),
-        None if r.order.dev_path.is_none() => ("(no project directory)".to_string(), t.dim()),
-        None if !r.job.found => ("(no JOB.md)".to_string(), t.dim()),
-        None => ("(no status entry in JOB.md)".to_string(), t.dim()),
+        None if r.order.dev_path.is_none() => ("(no project directory)".to_string(), t.muted()),
+        None if !r.job.found => ("(no JOB.md)".to_string(), t.muted()),
+        None => ("(no status entry in JOB.md)".to_string(), t.muted()),
     };
     Line::from(vec![
         Span::raw(" ".repeat(indent)),
-        Span::styled(lead, t.dim()),
+        Span::styled(lead, t.muted()),
         Span::styled(text::truncate(&text_, room), style),
     ])
 }

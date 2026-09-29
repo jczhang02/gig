@@ -41,14 +41,14 @@ fn header(frame: &mut Frame, area: Rect, cx: &RenderCx) {
     let m = &cx.state.data.money;
     let col = |label: &str, a: Amount, style: ratatui::style::Style| -> Vec<Line<'static>> {
         vec![
-            Line::from(Span::styled(label.to_string(), t.dim())),
+            Line::from(Span::styled(label.to_string(), t.muted())),
             Line::from(Span::styled(
                 major(a.gross),
                 style.add_modifier(Modifier::BOLD),
             )),
             Line::from(Span::styled(
                 format!("take-home {}", major(a.take_home)),
-                t.dim(),
+                t.muted(),
             )),
         ]
     };
@@ -137,7 +137,7 @@ fn bar_chart(frame: &mut Frame, area: Rect, cx: &RenderCx) {
     let chart = BarChart::vertical(bars)
         .bar_width(bar_width)
         .bar_gap(gap)
-        .label_style(t.dim());
+        .label_style(t.muted());
     frame.render_widget(chart, chart_area);
 }
 
@@ -149,7 +149,7 @@ fn outstanding(frame: &mut Frame, area: Rect, cx: &RenderCx) {
         t.title(),
     ))];
     if owed.is_empty() {
-        lines.push(Line::from(Span::styled(" nothing outstanding", t.dim())));
+        lines.push(Line::from(Span::styled(" nothing outstanding", t.muted())));
         frame.render_widget(Paragraph::new(lines), area);
         return;
     }
@@ -174,7 +174,7 @@ fn outstanding(frame: &mut Frame, area: Rect, cx: &RenderCx) {
     // " " slug _ price _ cur _ days __ title
     let fixed = 1 + slug_w + 1 + price_w + 1 + cur_w + 1 + DAYS + 2;
     let title_w = usize::from(area.width).saturating_sub(fixed);
-    let d = t.dim();
+    let d = t.muted();
     let mut head = vec![
         Span::raw(" "),
         cell("slug", slug_w, d),
@@ -204,9 +204,9 @@ fn outstanding(frame: &mut Frame, area: Rect, cx: &RenderCx) {
             Span::raw(" "),
             cell_right(&price(o.price_minor), price_w, t.text().fg(t.unpaid)),
             Span::raw(" "),
-            cell(&o.currency, cur_w, t.dim()),
+            cell(&o.currency, cur_w, t.muted()),
             Span::raw(" "),
-            cell_right(&days(o.days), DAYS, t.dim()),
+            cell_right(&days(o.days), DAYS, t.muted()),
         ];
         if title_w >= 6 {
             let title = cx
@@ -215,14 +215,14 @@ fn outstanding(frame: &mut Frame, area: Rect, cx: &RenderCx) {
                 .order(o.order_id)
                 .map_or("", |r| r.order.title.as_str());
             spans.push(Span::raw("  "));
-            spans.push(cell(title, title_w, t.dim()));
+            spans.push(cell(title, title_w, t.muted()));
         }
         lines.push(Line::from(spans));
     }
     if shown < owed.len() {
         lines.push(Line::from(Span::styled(
             format!(" +{} more", owed.len() - shown),
-            t.dim(),
+            t.muted(),
         )));
     }
     frame.render_widget(Paragraph::new(lines), area);

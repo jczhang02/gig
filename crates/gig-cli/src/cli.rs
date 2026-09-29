@@ -2,20 +2,39 @@
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
+const ABOUT: &str = "Agent-facing store for freelance orders. Output is always JSON.";
+
 #[derive(Parser, Debug)]
 #[command(
     name = "gig",
     version,
-    about = "Agent-facing store for freelance orders. Output is always JSON."
+    about = ABOUT,
+    args_conflicts_with_subcommands = true
 )]
 pub struct Cli {
+    #[command(subcommand)]
+    pub command: Option<Command>,
+    /// Dashboard flags for bare `gig`.
+    #[command(flatten)]
+    pub tui: TuiArgs,
+}
+
+/// The command surface before bare `gig` opened the dashboard: a subcommand
+/// is required and there are no top-level flags. Bare `gig` without a
+/// terminal parses with this so agents see exactly the old error.
+#[derive(Parser, Debug)]
+#[command(name = "gig", version, about = ABOUT)]
+pub struct CommandRequired {
     #[command(subcommand)]
     pub command: Command,
 }
 
 impl Cli {
     pub fn command_name(&self) -> String {
-        match &self.command {
+        let Some(command) = &self.command else {
+            return "tui".into();
+        };
+        match command {
             Command::Draft(d) => format!("draft {}", d.name()),
             Command::New(_) => "new".into(),
             Command::Ls(_) => "ls".into(),
@@ -91,7 +110,7 @@ pub enum Command {
     Backup,
     /// Print a shell completion script
     Completion(CompletionArgs),
-    /// Terminal dashboard for humans (not JSON)
+    /// Terminal dashboard for humans (not JSON); same as bare `gig`
     Tui(TuiArgs),
     /// Print the version
     Version,
@@ -515,9 +534,12 @@ pub struct CompletionArgs {
     pub shell: clap_complete::Shell,
 }
 
-#[derive(Args, Debug)]
+#[derive(Args, Debug, Default)]
 pub struct TuiArgs {
-    /// Light palette ([tui] light)
+    /// Dashboard theme, a built-in or a themes/<name>.toml file ([tui] theme)
+    #[arg(long, value_name = "NAME", conflicts_with = "light")]
+    pub theme: Option<String>,
+    /// Same as --theme gig-light ([tui] light)
     #[arg(long)]
     pub light: bool,
     /// Text labels without Nerd Font glyphs ([tui] icons = false)
@@ -526,12 +548,16 @@ pub struct TuiArgs {
     /// Auto-refresh period in seconds, 0 disables ([tui] refresh_seconds, default 2)
     #[arg(long, value_name = "SECONDS")]
     pub refresh: Option<u64>,
+    /// Print the available theme names, one per line, and exit
+    #[arg(long)]
+    pub list_themes: bool,
 }
 
 impl TuiArgs {
     /// Only flags actually given override the config.
     pub fn opts(&self) -> gig_tui::Opts {
         gig_tui::Opts {
+            theme: self.theme.clone(),
             light: self.light.then_some(true),
             icons: self.no_icons.then_some(false),
             refresh_seconds: self.refresh,

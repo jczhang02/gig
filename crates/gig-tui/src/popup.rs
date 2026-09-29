@@ -509,7 +509,7 @@ pub fn render(frame: &mut Frame, area: Rect, popup: &Popup, theme: &Theme) {
                 wrapped(lines, theme.text(), inner_width),
                 vec![Line::from(vec![
                     Span::styled(" y ", theme.key()),
-                    Span::styled("confirm   any other key cancels", theme.dim()),
+                    Span::styled("confirm   any other key cancels", theme.muted()),
                 ])],
                 Some(scroll),
             ),
@@ -531,7 +531,7 @@ pub fn render(frame: &mut Frame, area: Rect, popup: &Popup, theme: &Theme) {
                 progress_lines(*sent, *total, *frame, theme, inner_width),
                 vec![Line::from(Span::styled(
                     "One upload at a time; please wait.",
-                    theme.dim(),
+                    theme.muted(),
                 ))],
                 None,
             ),
@@ -539,7 +539,7 @@ pub fn render(frame: &mut Frame, area: Rect, popup: &Popup, theme: &Theme) {
                 title.clone(),
                 theme.title(),
                 wrapped(std::slice::from_ref(text), theme.text(), inner_width),
-                vec![Line::from(Span::styled("please wait", theme.dim()))],
+                vec![Line::from(Span::styled("please wait", theme.muted()))],
                 None,
             ),
             Popup::Message {
@@ -553,7 +553,7 @@ pub fn render(frame: &mut Frame, area: Rect, popup: &Popup, theme: &Theme) {
                 let ts = if *error {
                     theme.error()
                 } else if *ok {
-                    theme.title().fg(theme.ok)
+                    theme.title().fg(theme.accent)
                 } else {
                     theme.title()
                 };
@@ -563,7 +563,7 @@ pub fn render(frame: &mut Frame, area: Rect, popup: &Popup, theme: &Theme) {
                     wrapped(lines, style, inner_width),
                     vec![Line::from(vec![
                         Span::styled(" Enter/Esc ", theme.key()),
-                        Span::styled("close", theme.dim()),
+                        Span::styled("close", theme.muted()),
                     ])],
                     Some(scroll),
                 )
@@ -617,7 +617,7 @@ pub fn render(frame: &mut Frame, area: Rect, popup: &Popup, theme: &Theme) {
             format!("  ({hidden} more lines)")
         };
         if let Some(first) = footer.first_mut() {
-            first.push_span(Span::styled(more, theme.dim()));
+            first.push_span(Span::styled(more, theme.muted()));
         }
     }
     frame.render_widget(Paragraph::new(body).scroll((offset, 0)), body_area);
@@ -652,8 +652,8 @@ fn form_lines<'a>(form: &Form, t: &Theme, width: usize) -> Vec<Line<'a>> {
     let value_width = width.saturating_sub(LABEL + 2);
     for (i, f) in form.fields.iter().enumerate() {
         let focused = i == form.focus && !f.locked;
-        let label_style = if focused { t.key() } else { t.dim() };
-        let value_style = if f.locked { t.dim() } else { t.text() };
+        let label_style = if focused { t.key() } else { t.muted() };
+        let value_style = if f.locked { t.muted() } else { t.text() };
         let value = match &f.kind {
             FieldKind::Text(s) => {
                 if focused {
@@ -703,13 +703,13 @@ fn form_lines<'a>(form: &Form, t: &Theme, width: usize) -> Vec<Line<'a>> {
 fn form_hint<'a>(t: &Theme) -> Line<'a> {
     Line::from(vec![
         Span::styled(" Tab ", t.key()),
-        Span::styled("next  ", t.dim()),
+        Span::styled("next  ", t.muted()),
         Span::styled("Space ", t.key()),
-        Span::styled("choose  ", t.dim()),
+        Span::styled("choose  ", t.muted()),
         Span::styled("Enter ", t.key()),
-        Span::styled("submit / edit  ", t.dim()),
+        Span::styled("submit / edit  ", t.muted()),
         Span::styled("Esc ", t.key()),
-        Span::styled("cancel", t.dim()),
+        Span::styled("cancel", t.muted()),
     ])
 }
 
@@ -736,11 +736,11 @@ fn pick_lines<'a>(pick: &Pick, t: &Theme, width: usize) -> Vec<Line<'a>> {
 fn pick_hint<'a>(t: &Theme) -> Line<'a> {
     Line::from(vec![
         Span::styled(" Up/Dn ", t.key()),
-        Span::styled("choose  ", t.dim()),
+        Span::styled("choose  ", t.muted()),
         Span::styled("Enter ", t.key()),
-        Span::styled("pick  ", t.dim()),
+        Span::styled("pick  ", t.muted()),
         Span::styled("Esc ", t.key()),
-        Span::styled("cancel", t.dim()),
+        Span::styled("cancel", t.muted()),
     ])
 }
 
@@ -775,7 +775,7 @@ fn progress_lines<'a>(
         let filled = ((bar as f64) * ratio).round() as usize;
         Line::from(vec![
             Span::styled("\u{2588}".repeat(filled), t.key()),
-            Span::styled("\u{2591}".repeat(bar - filled), t.dim()),
+            Span::styled("\u{2591}".repeat(bar - filled), t.muted()),
             Span::styled(label, t.text()),
         ])
     };
@@ -1055,8 +1055,8 @@ mod tests {
         let routine = Popup::confirm("Title", vec!["x".into()], Effect::None);
         let danger = Popup::confirm_danger("Title", vec!["x".into()], Effect::None);
         assert_eq!(title_fg(&routine), Theme::DARK.accent);
-        assert_eq!(title_fg(&danger), Theme::DARK.error);
-        assert_eq!(title_fg(&Popup::done("Title", vec![])), Theme::DARK.ok);
+        assert_eq!(title_fg(&danger), Theme::DARK.unpaid);
+        assert_eq!(title_fg(&Popup::done("Title", vec![])), Theme::DARK.accent);
         let screen_text = screen(&routine, 80, 24);
         assert!(screen_text.contains("any other key cancels"));
         let mut p = Popup::confirm(

@@ -92,7 +92,7 @@ pub fn render(frame: &mut Frame, area: Rect, cx: &RenderCx) {
     let rows = cx.state.order_list();
     let c = Columns::fit(usize::from(area.width), cx, &rows);
 
-    let d = t.dim();
+    let d = t.muted();
     let mut header = vec![
         Span::raw(" ".repeat(1 + c.icon)),
         cell("slug", c.slug, d),
@@ -152,7 +152,7 @@ fn row_line(cx: &RenderCx, r: &OrderRow, c: &Columns) -> Line<'static> {
     let t = cx.theme;
     let o = &r.order;
     let text = if r.group == Group::Closed {
-        t.dim()
+        t.muted()
     } else {
         t.text()
     };
@@ -163,18 +163,26 @@ fn row_line(cx: &RenderCx, r: &OrderRow, c: &Columns) -> Line<'static> {
         .map_or("-".to_string(), |s| format!("{s}/5"));
     let mut spans = vec![Span::raw(" ")];
     if c.icon > 0 {
-        spans.push(cell(cx.icons.project_type(o.project_type), c.icon, t.dim()));
+        spans.push(cell(
+            cx.icons.project_type(o.project_type),
+            c.icon,
+            t.muted(),
+        ));
     }
     spans.extend([
         cell(&o.slug, c.slug, text.add_modifier(Modifier::BOLD)),
         Span::raw(" "),
         cell(&status_chip(cx, o.status), c.chip, status_style(cx, r)),
         Span::raw(" "),
-        cell(&date(day_part(&o.created_at), c.date), c.date, t.dim()),
+        cell(&date(day_part(&o.created_at), c.date), c.date, t.muted()),
         Span::raw(" "),
         cell_right(&score, SCORE, text),
         Span::raw("  "),
-        cell(&date(o.warranty_until.as_deref(), c.date), c.date, t.dim()),
+        cell(
+            &date(o.warranty_until.as_deref(), c.date),
+            c.date,
+            t.muted(),
+        ),
         Span::raw(" "),
         cell_right(&price(o.price_minor), c.price, text),
     ]);

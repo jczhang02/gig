@@ -92,9 +92,9 @@ fn draw_banner(frame: &mut Frame, area: Rect, cx: &RenderCx) {
         let label = cx.icons.label(cx.icons.view(v), v.title());
         let text = format!(" {} {label} ", v.index() + 1);
         let style = if v == cx.state.view {
-            t.text().bg(t.selection_bg).add_modifier(Modifier::BOLD)
+            t.text().bg(t.sel).add_modifier(Modifier::BOLD)
         } else {
-            t.dim()
+            t.muted()
         };
         tabs.push(Span::styled(text, style));
     }
@@ -113,7 +113,7 @@ fn draw_banner(frame: &mut Frame, area: Rect, cx: &RenderCx) {
         let mut spans = Vec::new();
         for (i, (label, amount, style)) in parts.iter().take(n).enumerate() {
             let lead = if i == 0 { "" } else { "  " };
-            spans.push(Span::styled(format!("{lead}{label}"), t.dim()));
+            spans.push(Span::styled(format!("{lead}{label}"), t.muted()));
             spans.push(Span::styled(major(*amount), *style));
         }
         spans.push(Span::raw(" "));
@@ -132,18 +132,18 @@ fn draw_hint(frame: &mut Frame, area: Rect, cx: &RenderCx) {
     let line = if matches!(cx.state.popup, Some(popup::Popup::Progress { .. })) {
         Line::from(Span::styled(
             " uploading; keys are ignored until it ends",
-            t.dim(),
+            t.muted(),
         ))
     } else if matches!(cx.state.popup, Some(popup::Popup::Busy { .. })) {
         Line::from(Span::styled(
             " working; keys are ignored until it ends",
-            t.dim(),
+            t.muted(),
         ))
     } else if cx.state.popup.is_some() {
         // The popup box carries its own key hints; global keys are off.
         Line::from(vec![
             Span::styled(" Esc ", t.key()),
-            Span::styled("close popup", t.dim()),
+            Span::styled("close popup", t.muted()),
         ])
     } else if filter.editing {
         let hint = "   Enter keep  Esc clear";
@@ -152,8 +152,8 @@ fn draw_hint(frame: &mut Frame, area: Rect, cx: &RenderCx) {
         Line::from(vec![
             Span::styled(" / ", t.key()),
             Span::styled(text::tail(&filter.text, room), t.text()),
-            Span::styled("_", t.dim()),
-            Span::styled(hint, t.dim()),
+            Span::styled("_", t.muted()),
+            Span::styled(hint, t.muted()),
         ])
     } else {
         let mut spans = Vec::new();
@@ -162,7 +162,7 @@ fn draw_hint(frame: &mut Frame, area: Rect, cx: &RenderCx) {
             spans.push(Span::styled(format!(" {err} "), t.error()));
         }
         if !filter.text.is_empty() {
-            spans.push(Span::styled(" filter ", t.dim()));
+            spans.push(Span::styled(" filter ", t.muted()));
             spans.push(Span::styled(filter.text.clone(), t.key()));
             spans.push(Span::raw(" "));
         }
@@ -192,7 +192,7 @@ fn draw_hint(frame: &mut Frame, area: Rect, cx: &RenderCx) {
         let pair = |k: &str, what: &str| {
             [
                 Span::styled(format!(" {k} "), t.key()),
-                Span::styled(format!("{what} "), t.dim()),
+                Span::styled(format!("{what} "), t.muted()),
             ]
         };
         for (k, what) in base {
@@ -450,7 +450,7 @@ mod tests {
             let slug_x = row7.find("tk-denoise").unwrap();
             let x = crate::text::width(&row7[..slug_x]) as u16;
             let c = &buf[(x, y as u16)];
-            assert_eq!(c.bg, Theme::DARK.selection_bg);
+            assert_eq!(c.bg, Theme::DARK.sel);
             assert!(!c.modifier.contains(Modifier::REVERSED));
             // Status colour: unpaid red.
             let chip_x = crate::text::width(&row7[..row7.find("delivered").unwrap()]) as u16;
@@ -565,14 +565,14 @@ mod tests {
         assert!(row7.starts_with('\u{258c}'), "selection marker: {row7}");
         assert_eq!(buf[(0, y)].fg, Theme::LIGHT.accent);
         let x = crate::text::width(&row7[..row7.find("tk-denoise").unwrap()]) as u16;
-        assert_eq!(buf[(x, y)].bg, Theme::LIGHT.selection_bg);
+        assert_eq!(buf[(x, y)].bg, Theme::LIGHT.sel);
         let chip_x = crate::text::width(&row7[..row7.find("delivered").unwrap()]) as u16;
         assert_eq!(buf[(chip_x, y)].fg, Theme::LIGHT.unpaid);
         // The second line reads as part of the row and is not dim.
         let below = text.lines().nth(usize::from(y) + 1).unwrap();
         assert!(below.contains("\u{21b3} 2026-09-20: 预览已发送"), "{below}");
         let sx = crate::text::width(&below[..below.find("预览").unwrap()]) as u16;
-        assert_eq!(buf[(sx, y + 1)].fg, Theme::LIGHT.fg);
+        assert_eq!(buf[(sx, y + 1)].fg, Theme::LIGHT.text);
         // Paid in warranty is amber; paid with the warranty over is not.
         let mut paid = 0;
         for r in &state.data.orders {
@@ -581,7 +581,7 @@ mod tests {
                 let (py, l) = line_of(&text, &format!(" {} ", r.order.slug)).unwrap();
                 let px = crate::text::width(&l[..l.find("paid").unwrap()]) as u16;
                 let want = if r.next_action == "archive" {
-                    Theme::LIGHT.fg
+                    Theme::LIGHT.text
                 } else {
                     Theme::LIGHT.warranty
                 };

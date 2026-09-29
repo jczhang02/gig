@@ -5,22 +5,21 @@ mod run;
 
 use clap::Parser;
 use serde_json::json;
+use std::io::IsTerminal;
 
 fn main() {
     let args = cli::Cli::parse();
-    if let cli::Command::Completion(c) = &args.command {
+    let Some(command) = &args.command else {
+        bare(&args.tui);
+    };
+    if let cli::Command::Completion(c) = command {
         // The one raw-output command: `gig completion zsh > _gig`.
         let mut cmd = <cli::Cli as clap::CommandFactory>::command();
         clap_complete::generate(c.shell, &mut cmd, "gig", &mut std::io::stdout());
         return;
     }
-    if let cli::Command::Tui(t) = &args.command {
-        // The second raw-output command: a terminal UI, no JSON envelope.
-        if let Err(e) = gig_tui::run(t.opts()) {
-            eprintln!("gig tui: {e}");
-            std::process::exit(1);
-        }
-        return;
+    if let cli::Command::Tui(t) = command {
+        dashboard(t);
     }
     let command = args.command_name();
     match run::run(args) {
@@ -43,4 +42,29 @@ fn main() {
             std::process::exit(1);
         }
     }
+}
+
+/// Bare `gig`: the dashboard in a terminal. Without one (agents, pipes) it
+/// fails exactly as before the dashboard existed: clap's missing-subcommand
+/// error, exit 2. `--list-themes` works anywhere.
+fn bare(t: &cli::TuiArgs) -> ! {
+    if !t.list_themes && !(std::io::stdin().is_terminal() && std::io::stdout().is_terminal()) {
+        // Exits with clap's missing-subcommand error (help on stderr, exit 2).
+        cli::CommandRequired::parse();
+    }
+    dashboard(t)
+}
+
+/// The second raw-output command: a terminal UI, no JSON envelope.
+fn dashboard(t: &cli::TuiArgs) -> ! {
+    let result = if t.list_themes {
+        gig_tui::list_themes(&mut std::io::stdout(), &mut std::io::stderr())
+    } else {
+        gig_tui::run(t.opts())
+    };
+    if let Err(e) = result {
+        eprintln!("gig: {e}");
+        std::process::exit(1);
+    }
+    std::process::exit(0)
 }

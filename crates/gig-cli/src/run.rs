@@ -48,7 +48,12 @@ fn text_arg(value: Option<String>) -> Result<Option<String>> {
 }
 
 pub fn run(cli: Cli) -> Result<Output> {
-    match cli.command {
+    let Some(command) = cli.command else {
+        return Err(Error::InvalidInput(
+            "gig without a command draws a terminal UI and has no JSON output".into(),
+        ));
+    };
+    match command {
         Command::Version => out(json!({ "version": env!("CARGO_PKG_VERSION") })),
         Command::Completion(a) => {
             let mut cmd = Cli::command();

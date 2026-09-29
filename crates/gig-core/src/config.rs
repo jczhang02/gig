@@ -61,6 +61,12 @@ impl Paths {
         }
     }
 
+    /// User theme files for the dashboard, `<config_dir>/themes/<name>.toml`.
+    /// Optional; gig never creates it.
+    pub fn themes_dir(&self) -> PathBuf {
+        self.config_dir.join("themes")
+    }
+
     pub fn ensure_dirs(&self) -> Result<()> {
         for dir in [
             &self.data_dir,
@@ -192,7 +198,11 @@ pub struct S3 {
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(default, deny_unknown_fields)]
 pub struct Tui {
-    /// Light palette instead of the dark default.
+    /// Theme name: a built-in or a file in `Paths::themes_dir()`. Unset means
+    /// `gig-dark`, or `gig-light` when `light` is true.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub theme: Option<String>,
+    /// Alias of `theme = "gig-light"` when `theme` is unset.
     pub light: bool,
     /// Nerd Font glyphs next to the text labels.
     pub icons: bool,
@@ -203,6 +213,7 @@ pub struct Tui {
 impl Default for Tui {
     fn default() -> Self {
         Self {
+            theme: None,
             light: false,
             icons: true,
             refresh_seconds: 2,
@@ -211,14 +222,18 @@ impl Default for Tui {
 }
 
 impl Tui {
-    /// Apply `GIG_TUI_LIGHT`, `GIG_TUI_ICONS` and `GIG_TUI_REFRESH_SECONDS`.
+    /// Apply `GIG_TUI_THEME`, `GIG_TUI_LIGHT`, `GIG_TUI_ICONS` and
+    /// `GIG_TUI_REFRESH_SECONDS`.
     /// Called by `gig tui` only, after its flags, for the env > flags > file
     /// precedence; `Config::load` leaves these variables alone.
     pub fn apply_env_overrides(&mut self) -> Result<()> {
         self.apply_overrides(|k| std::env::var(k).ok().filter(|v| !v.is_empty()))
     }
 
-    fn apply_overrides(&mut self, env: impl Fn(&str) -> Option<String>) -> Result<()> {
+    pub fn apply_overrides(&mut self, env: impl Fn(&str) -> Option<String>) -> Result<()> {
+        if let Some(v) = env("GIG_TUI_THEME") {
+            self.theme = Some(v);
+        }
         if let Some(v) = env("GIG_TUI_LIGHT") {
             self.light = parse_bool("GIG_TUI_LIGHT", &v)?;
         }
@@ -506,13 +521,16 @@ endpoint = "https://x"
 
     #[test]
     fn tui_section_refuses_unknown_fields() {
-        assert!(Config::parse("[tui]\ntheme = \"dark\"\n").is_err());
+        assert!(Config::parse("[tui]\ncolour = \"dark\"\n").is_err());
+        let cfg = Config::parse("[tui]\ntheme = \"nord\"\n").unwrap();
+        assert_eq!(cfg.tui.theme.as_deref(), Some("nord"));
         assert!(Config::parse("[tui]\nrefresh_seconds = -1\n").is_err());
     }
 
     #[test]
     fn tui_env_overrides() {
         let vars: BTreeMap<&str, &str> = [
+            ("GIG_TUI_THEME", "nord"),
             ("GIG_TUI_LIGHT", "1"),
             ("GIG_TUI_ICONS", "false"),
             ("GIG_TUI_REFRESH_SECONDS", "10"),
@@ -524,6 +542,7 @@ endpoint = "https://x"
         assert_eq!(
             tui,
             Tui {
+                theme: Some("nord".into()),
                 light: true,
                 icons: false,
                 refresh_seconds: 10
@@ -553,6 +572,10 @@ endpoint = "https://x"
         cfg.set("tui.light", "true").unwrap();
         assert_eq!(cfg.tui.refresh_seconds, 7);
         assert!(cfg.tui.light);
+        // Unset theme stays out of `config get tui`, so its JSON is unchanged.
+        assert!(cfg.get("tui.theme").is_err());
+        cfg.set("tui.theme", "dracula").unwrap();
+        assert_eq!(cfg.tui.theme.as_deref(), Some("dracula"));
     }
 
     #[test]

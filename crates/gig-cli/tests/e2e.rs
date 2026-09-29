@@ -420,3 +420,71 @@ fn migrate_dry_run_reports_without_writing() {
 fn rusqlite_open(p: &Path) -> rusqlite::Connection {
     rusqlite::Connection::open(p).unwrap()
 }
+
+#[test]
+fn list_themes_needs_no_database_and_shows_user_files() {
+    let root = tempfile::tempdir().unwrap();
+    let run = || {
+        Command::new(env!("CARGO_BIN_EXE_gig"))
+            .arg("--list-themes")
+            .env("GIG_HOME", root.path())
+            .stdin(std::process::Stdio::null())
+            .output()
+            .unwrap()
+    };
+    let out = run();
+    assert!(out.status.success());
+    let names = String::from_utf8(out.stdout).unwrap();
+    assert_eq!(
+        names.lines().collect::<Vec<_>>(),
+        [
+            "gig-dark",
+            "gig-light",
+            "catppuccin-mocha",
+            "catppuccin-latte",
+            "tokyonight",
+            "gruvbox-dark",
+            "nord",
+            "dracula"
+        ]
+    );
+    assert!(!root.path().join("data").exists(), "no database created");
+
+    let themes = root.path().join("config/themes");
+    fs::create_dir_all(&themes).unwrap();
+    fs::write(themes.join("broken.toml"), "bg = \"#000000\"\n").unwrap();
+    let out = run();
+    assert!(out.status.success());
+    assert_eq!(String::from_utf8(out.stdout).unwrap().lines().count(), 8);
+    let err = String::from_utf8(out.stderr).unwrap();
+    assert!(err.starts_with("gig: theme "), "{err}");
+    assert!(
+        err.contains("broken.toml: missing key \"surface\""),
+        "{err}"
+    );
+
+    let out = Command::new(env!("CARGO_BIN_EXE_gig"))
+        .args(["tui", "--list-themes"])
+        .env("GIG_HOME", root.path())
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    assert!(String::from_utf8(out.stdout)
+        .unwrap()
+        .starts_with("gig-dark\n"));
+}
+
+#[test]
+fn bare_gig_without_a_terminal_still_requires_a_command() {
+    let root = tempfile::tempdir().unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_gig"))
+        .env("GIG_HOME", root.path())
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    assert!(out.stdout.is_empty());
+    let err = String::from_utf8(out.stderr).unwrap();
+    assert!(err.contains("Usage: gig <COMMAND>"), "{err}");
+    assert!(!err.contains("--theme"), "{err}");
+}

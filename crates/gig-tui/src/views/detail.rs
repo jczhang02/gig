@@ -60,7 +60,7 @@ pub fn render(frame: &mut Frame, area: Rect, cx: &RenderCx) {
     };
     shown.push(Line::from(Span::styled(
         text::truncate(&marker, usize::from(area.width)),
-        cx.theme.dim(),
+        cx.theme.muted(),
     )));
     frame.render_widget(Paragraph::new(shown), area);
 }
@@ -131,26 +131,26 @@ pub fn lines(cx: &RenderCx, r: &OrderRow) -> Vec<Item> {
     );
     let mut id_line = vec![
         Span::styled(o.slug.clone(), t.title()),
-        Span::styled("  ", t.dim()),
-        Span::styled(type_label, t.dim()),
+        Span::styled("  ", t.muted()),
+        Span::styled(type_label, t.muted()),
     ];
     if let Some(p) = &o.platform {
-        id_line.push(Span::styled(format!("  {p}"), t.dim()));
+        id_line.push(Span::styled(format!("  {p}"), t.muted()));
     }
     out.push(Item::new(id_line, 0));
     out.push(Item::new(
         vec![
             Span::styled(status_chip(cx, o.status), status_style(cx, r)),
-            Span::styled(format!("  {} in status", days(r.days_in_status)), t.dim()),
+            Span::styled(format!("  {} in status", days(r.days_in_status)), t.muted()),
         ],
         0,
     ));
     let cut = format!("cut {:.0}%", o.cut_ratio * 100.0);
     let money = match o.price_minor {
         Some(p) => vec![
-            Span::styled("price ", t.dim()),
+            Span::styled("price ", t.muted()),
             Span::styled(format!("{} {}", price(Some(p)), o.currency), t.text()),
-            Span::styled(format!("  {cut}  take-home "), t.dim()),
+            Span::styled(format!("  {cut}  take-home "), t.muted()),
             Span::styled(
                 format!("{} {}", price(Some(take_home(p, o.cut_ratio))), o.currency),
                 t.text(),
@@ -158,7 +158,7 @@ pub fn lines(cx: &RenderCx, r: &OrderRow) -> Vec<Item> {
         ],
         None => vec![
             Span::styled("no price", t.text()),
-            Span::styled(format!("  {cut}"), t.dim()),
+            Span::styled(format!("  {cut}"), t.muted()),
         ],
     };
     out.push(Item::new(money, 0));
@@ -167,7 +167,7 @@ pub fn lines(cx: &RenderCx, r: &OrderRow) -> Vec<Item> {
     }
     if r.group == Group::Closed {
         if let Some(reason) = &o.cancel_reason {
-            out.push(kv(cx, "cancelled", reason.clone(), t.dim()));
+            out.push(kv(cx, "cancelled", reason.clone(), t.muted()));
         }
     }
 
@@ -208,7 +208,7 @@ pub fn lines(cx: &RenderCx, r: &OrderRow) -> Vec<Item> {
         let mut spans = vec![
             Span::raw(" ".repeat(ITEM)),
             Span::styled(text::fit(&p.package_id, id_w), t.text()),
-            Span::styled(fixed.trim_end().to_string(), t.dim()),
+            Span::styled(fixed.trim_end().to_string(), t.muted()),
         ];
         if !link.is_empty() {
             spans.push(Span::raw("  "));
@@ -274,7 +274,7 @@ pub fn lines(cx: &RenderCx, r: &OrderRow) -> Vec<Item> {
         out.push(Item::new(
             vec![
                 Span::raw(" ".repeat(ITEM)),
-                Span::styled(prefix.clone(), t.dim()),
+                Span::styled(prefix.clone(), t.muted()),
                 Span::styled(delta, t.key()),
                 Span::styled(desc.next().unwrap_or("").to_string(), t.text()),
             ],
@@ -305,7 +305,7 @@ pub fn lines(cx: &RenderCx, r: &OrderRow) -> Vec<Item> {
         out.push(Item::new(
             vec![
                 Span::raw(" ".repeat(ITEM)),
-                Span::styled(prefix.clone(), t.dim()),
+                Span::styled(prefix.clone(), t.muted()),
                 Span::styled(format!("{first}{more}"), t.text()),
             ],
             ITEM + text::width(&prefix),
@@ -332,7 +332,7 @@ pub fn lines(cx: &RenderCx, r: &OrderRow) -> Vec<Item> {
                 t.text(),
             ));
             if let Some(note) = &s.note {
-                out.push(item(note.clone(), t.dim()));
+                out.push(item(note.clone(), t.muted()));
             }
         }
     }
@@ -358,7 +358,7 @@ fn section_note(cx: &RenderCx, out: &mut Vec<Item>, title: &str, note: &str) {
     out.push(Item::new(
         vec![
             Span::styled(title.to_string(), cx.theme.title()),
-            Span::styled(format!("  {note}"), cx.theme.dim()),
+            Span::styled(format!("  {note}"), cx.theme.muted()),
         ],
         ITEM,
     ));
@@ -374,7 +374,7 @@ fn item(text: String, style: Style) -> Item {
 fn kv(cx: &RenderCx, k: &str, v: String, style: Style) -> Item {
     Item::new(
         vec![
-            Span::styled(format!("{k} "), cx.theme.dim()),
+            Span::styled(format!("{k} "), cx.theme.muted()),
             Span::styled(v, style),
         ],
         0,
@@ -389,7 +389,7 @@ fn push_entry(cx: &RenderCx, out: &mut Vec<Item>, entry: &str, style: Style) {
         out.push(Item::new(
             vec![
                 Span::raw(" ".repeat(ITEM)),
-                Span::styled(lead, cx.theme.dim()),
+                Span::styled(lead, cx.theme.muted()),
                 Span::styled(l.to_string(), style),
             ],
             ENTRY,

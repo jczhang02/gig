@@ -28,7 +28,7 @@ pub fn render(frame: &mut Frame, area: Rect, cx: &RenderCx) {
     let title_w = rest * 55 / 100;
     let material_w = rest.saturating_sub(title_w);
 
-    let d = t.dim();
+    let d = t.muted();
     let mut lines = vec![Line::from(vec![
         Span::raw(" "),
         cell("slug", slug, d),
@@ -70,7 +70,7 @@ pub fn render(frame: &mut Frame, area: Rect, cx: &RenderCx) {
             Span::raw(" "),
             cell(&dr.slug, slug, t.text().add_modifier(Modifier::BOLD)),
             Span::raw(" "),
-            cell_right(&age, AGE, t.dim()),
+            cell_right(&age, AGE, t.muted()),
             Span::raw(" "),
             cell(dr.title.as_deref().unwrap_or("-"), title_w, t.text()),
             Span::raw(" "),
@@ -78,7 +78,7 @@ pub fn render(frame: &mut Frame, area: Rect, cx: &RenderCx) {
             cell(
                 &text::truncate_left(dr.material_path.as_deref().unwrap_or("-"), material_w),
                 material_w,
-                t.dim(),
+                t.muted(),
             ),
         ]);
         lines.push(if i == selected {
