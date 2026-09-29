@@ -369,7 +369,22 @@ pub fn popup_key(ui: &mut UiState, key: KeyEvent) -> Effect {
     let Some(popup) = ui.popup.as_mut() else {
         return Effect::None;
     };
-    match popup.handle_key(key) {
+    let left = match &*popup {
+        Popup::Form(form) => Some(form.focus),
+        _ => None,
+    };
+    let out = popup.handle_key(key);
+    // Leaving the slug field checks it, so the error shows before submit
+    // (section 12.3). An empty slug is only reported on submit.
+    if let (Some(from), Some(Popup::Form(form))) = (left, ui.popup.as_ref()) {
+        let is_slug = form.fields.get(from).is_some_and(|f| f.label == "slug");
+        if form.focus != from && is_slug && !form.fields[from].value().trim().is_empty() {
+            let mut form = form.clone();
+            validate(ui, &mut form);
+            ui.popup = Some(Popup::Form(form));
+        }
+    }
+    match out {
         PopupKey::None => Effect::None,
         PopupKey::Close => {
             // Closing a refusal brings back the form that was refused, with

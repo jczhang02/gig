@@ -48,11 +48,21 @@ impl Catalog {
                 let mut files: Vec<(String, PathBuf)> = entries
                     .filter_map(|e| e.ok())
                     .map(|e| e.path())
-                    .filter(|p| p.is_file())
-                    .filter_map(|p| theme_name(&p).map(|n| (n, p)))
+                    .filter(|p| p.is_file() && p.extension().is_some_and(|x| x == "toml"))
+                    .map(|p| {
+                        let stem = p.file_stem().map(|s| s.to_string_lossy().into_owned());
+                        (stem.unwrap_or_default(), p)
+                    })
                     .collect();
                 files.sort();
                 for (name, path) in files {
+                    // A file whose name cannot be a theme name is reported,
+                    // not skipped silently.
+                    if theme_name(&path).is_none() {
+                        let detail = "file name must be lowercase letters, digits and -".into();
+                        broken.push(Broken { path, name, detail });
+                        continue;
+                    }
                     match read_and_parse(&path, &name) {
                         Ok(t) => user.push(t),
                         Err(detail) => broken.push(Broken { path, name, detail }),
@@ -287,8 +297,13 @@ bar_now  = "#B4BEFE"
             cat.get("nord").unwrap().accent,
             Color::Rgb(0xb4, 0xbe, 0xfe)
         );
-        assert_eq!(cat.broken.len(), 1);
-        assert_eq!(cat.broken[0].name, "zz-broken");
+        let broken: Vec<&str> = cat.broken.iter().map(|b| b.name.as_str()).collect();
+        assert_eq!(broken, ["Upper", "zz-broken"]);
+        let (_, w) = cat.pick(Some("Upper"));
+        assert_eq!(
+            w.unwrap(),
+            "theme Upper: file name must be lowercase letters, digits and -, using gig-dark"
+        );
 
         let (t, w) = cat.pick(Some("zz-broken"));
         assert_eq!(t, Theme::GIG_DARK);

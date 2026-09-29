@@ -138,6 +138,8 @@ pub struct UiState {
     pub view: View,
     pub filters: [Filter; 4],
     pub help_open: bool,
+    /// Scroll of the help popup when it is taller than the terminal.
+    pub help_scroll: Scroll,
     /// Full-screen detail (narrow terminals, and History `Enter`).
     pub detail_open: bool,
     /// Last refresh error, shown on the message row until the next success.
@@ -172,6 +174,7 @@ impl Default for UiState {
             view: View::Orders,
             filters: Default::default(),
             help_open: false,
+            help_scroll: Scroll::default(),
             detail_open: false,
             error: None,
             toast: None,
@@ -405,7 +408,9 @@ impl UiState {
             match key.code {
                 KeyCode::Esc | KeyCode::Char('?') => self.help_open = false,
                 KeyCode::Char('q') => return Outcome::Quit,
-                _ => {}
+                code => {
+                    self.help_scroll.key(code);
+                }
             }
             return Outcome::None;
         }
@@ -444,6 +449,7 @@ impl UiState {
             KeyCode::Char('q') => Outcome::Quit,
             KeyCode::Char('?') => {
                 self.help_open = true;
+                self.help_scroll.offset = 0;
                 Outcome::None
             }
             KeyCode::Char('r') => Outcome::Refresh,
@@ -865,8 +871,16 @@ mod tests {
         // Global keys are swallowed while help is open.
         assert_eq!(press(&mut s, KeyCode::Char('2')), Outcome::None);
         assert_eq!(s.view, View::Orders);
+        // Scroll keys move the help when it does not fit.
+        s.help_scroll.max.set(3);
+        press(&mut s, KeyCode::Down);
+        press(&mut s, KeyCode::PageDown);
+        assert_eq!(s.help_scroll.offset, 3);
         press(&mut s, KeyCode::Esc);
         assert!(!s.help_open);
+        press(&mut s, KeyCode::Char('?'));
+        assert_eq!(s.help_scroll.offset, 0);
+        press(&mut s, KeyCode::Esc);
         let ctrl_c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
         assert_eq!(s.handle_key(ctrl_c, 80), Outcome::Quit);
     }

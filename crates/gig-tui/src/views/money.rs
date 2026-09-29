@@ -66,7 +66,11 @@ pub fn geometry(width: u16, term_width: u16) -> (u16, u16) {
 pub fn render(frame: &mut Frame, area: Rect, cx: &RenderCx) {
     let term = frame.area();
     let class = WidthClass::of(term.width);
-    let h = plot_height(term.height);
+    // Tiles, gap, heading, gap: 6 rows. The chart needs `h + 4` rows; in a
+    // short body its plot shrinks, and below one plot row the chart and its
+    // heading are left out rather than drawn empty.
+    let spare = area.height.saturating_sub(6 + 4);
+    let h = plot_height(term.height).min(spare);
     // Top to bottom; a block that does not fit is left out.
     let mut y = area.y;
     let mut take = |rows: u16| -> Option<Rect> {
@@ -75,10 +79,14 @@ pub fn render(frame: &mut Frame, area: Rect, cx: &RenderCx) {
         (y <= area.bottom()).then_some(r)
     };
     let tiles_r = take(3);
-    take(1);
-    let heading_r = take(1);
-    take(1);
-    let chart_r = take(h + 4);
+    let (heading_r, chart_r) = if h > 0 {
+        take(1);
+        let heading = take(1);
+        take(1);
+        (heading, take(h + 4))
+    } else {
+        (None, None)
+    };
     take(1);
     let table_r = take(0).map(|r| Rect {
         height: area.bottom().saturating_sub(r.y),
@@ -163,13 +171,15 @@ fn tiles(frame: &mut Frame, area: Rect, cx: &RenderCx, class: WidthClass) {
             .map(|(label, a, alarm, extra)| {
                 let value = text::money(a.gross);
                 let pad = value_w.saturating_sub(text::width(&value) + 1 + currency.len());
+                // The context line ends in `…` when it does not fit.
+                let room = usize::from(area.width).saturating_sub(label_w + 2 + value_w + 2);
                 Line::from(vec![
                     Span::styled(text::fit(label, label_w), t.muted()),
                     Span::raw("  "),
                     Span::styled(value, value_style(a, *alarm)),
                     Span::styled(format!(" {currency}"), t.muted()),
                     gap(pad + 2),
-                    Span::styled(context(a, extra), t.muted()),
+                    Span::styled(text::truncate(&context(a, extra), room), t.muted()),
                 ])
             })
             .collect();
@@ -180,13 +190,14 @@ fn tiles(frame: &mut Frame, area: Rect, cx: &RenderCx, class: WidthClass) {
     for (i, (label, a, alarm, extra)) in tiles.iter().enumerate() {
         let x = area.x + w * i as u16;
         let width = if i == 2 { area.right() - x } else { w };
+        let fit = |s: &str| text::truncate(s, usize::from(width.saturating_sub(1)));
         let lines = vec![
-            Line::from(Span::styled(label.clone(), t.muted())),
+            Line::from(Span::styled(fit(label), t.muted())),
             Line::from(vec![
                 Span::styled(text::money(a.gross), value_style(a, *alarm)),
                 Span::styled(format!(" {currency}"), t.muted()),
             ]),
-            Line::from(Span::styled(context(a, extra), t.muted())),
+            Line::from(Span::styled(fit(&context(a, extra)), t.muted())),
         ];
         frame.render_widget(
             Paragraph::new(lines),
@@ -333,6 +344,11 @@ fn chart(frame: &mut Frame, area: Rect, cx: &RenderCx, h: u16, term_width: u16) 
     if max == 0 {
         for i in 0..(12 * s) {
             put(buf, area.x + i, base_y, "\u{2508}", Style::new().fg(t.dim));
+        }
+        // The current month keeps its `bar_now` footprint (section 11.2).
+        let bx = area.x + last as u16 * s + off;
+        for dx in 0..b {
+            put(buf, bx + dx, base_y, "\u{2508}", Style::new().fg(t.bar_now));
         }
         let msg = "no payments in the last 12 months";
         let mx = area.x + (12 * s).saturating_sub(msg.len() as u16) / 2;

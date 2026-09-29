@@ -244,9 +244,11 @@ pub fn footer_line(cx: &RenderCx, g1: &[Pair], g2: &[Pair]) -> Line<'static> {
 }
 
 /// One column of the help popup: the heading, then keys right-aligned in
-/// a column as wide as the widest key (at least 4), 2 cells, the label,
-/// and the precondition in `muted`.
-fn key_column(cx: &RenderCx, heading: &str, keys: &[Entry]) -> Vec<Line<'static>> {
+/// a 4-cell column, 2 cells, the label, and the precondition in `muted`
+/// (section 12.4). A longer key (`Enter`) reaches left of the column; the
+/// lines then start with that many cells, returned as the overflow, and the
+/// caller draws the column that much further left.
+fn key_column(cx: &RenderCx, heading: &str, keys: &[Entry]) -> (Vec<Line<'static>>, u16) {
     let t = cx.theme;
     let key_w = keys
         .iter()
@@ -261,7 +263,11 @@ fn key_column(cx: &RenderCx, heading: &str, keys: &[Entry]) -> Vec<Line<'static>
         .map(|(_, l, _)| text::width(l))
         .max()
         .unwrap_or(0);
-    let mut out = vec![Line::from(Span::styled(heading.to_string(), t.title()))];
+    let overflow = key_w - 4;
+    let mut out = vec![Line::from(vec![
+        Span::raw(" ".repeat(overflow)),
+        Span::styled(heading.to_string(), t.title()),
+    ])];
     for (k, label, when) in keys {
         let mut spans = vec![
             Span::styled(format!("{k:>key_w$}"), t.key()),
@@ -276,7 +282,7 @@ fn key_column(cx: &RenderCx, heading: &str, keys: &[Entry]) -> Vec<Line<'static>
         }
         out.push(Line::from(spans));
     }
-    out
+    (out, overflow as u16)
 }
 
 /// The `?` popup: `global` on the left, the current view's keys on the
@@ -284,9 +290,10 @@ fn key_column(cx: &RenderCx, heading: &str, keys: &[Entry]) -> Vec<Line<'static>
 pub fn render(frame: &mut Frame, area: Rect, cx: &RenderCx) {
     let t = cx.theme;
     let (heading, keys) = view_keys(cx.state);
-    let left = key_column(cx, "global", GLOBAL_KEYS);
-    let right = key_column(cx, heading, keys);
-    let left_w = left.iter().map(Line::width).max().unwrap_or(0) + 3;
+    let (left, left_over) = key_column(cx, "global", GLOBAL_KEYS);
+    let (right, right_over) = key_column(cx, heading, keys);
+    // Width of the left column from its 4-cell key column, plus the gap.
+    let left_w = left.iter().map(Line::width).max().unwrap_or(0) - usize::from(left_over) + 3;
     let footer = Line::from(vec![
         Span::styled(format!("theme {}", t.name), t.muted()),
         Span::raw("   "),
@@ -302,32 +309,63 @@ pub fn render(frame: &mut Frame, area: Rect, cx: &RenderCx) {
         height: inner.height.saturating_sub(2),
         ..inner
     };
+    // Overflowing keys use the popup padding (left) or the gap (right).
+    let left_over = left_over.min(body.x - area.x);
     let right_x = (left_w as u16).min(body.width);
-    let cut = |lines: Vec<Line<'static>>, h: u16| -> Vec<Line<'static>> {
-        let h = usize::from(h);
-        if lines.len() <= h || h == 0 {
-            return lines;
+    // Both columns scroll together (Up/Down/PgUp/PgDn/Home/End); at the
+    // end only the top marker shows, as in the detail pane.
+    let h = usize::from(body.height);
+    let total = left.len().max(right.len());
+    let max = if total <= h || h < 3 {
+        0
+    } else {
+        total + 1 - h
+    };
+    let scroll = &cx.state.help_scroll;
+    scroll.max.set(u16::try_from(max).unwrap_or(u16::MAX));
+    let offset = usize::from(scroll.offset).min(max);
+    let window = |lines: Vec<Line<'static>>, over: u16| -> Vec<Line<'static>> {
+        if max == 0 {
+            return lines.into_iter().take(h).collect();
         }
-        let more = lines.len() - (h - 1);
-        let mut kept: Vec<Line<'static>> = lines.into_iter().take(h - 1).collect();
-        kept.push(Line::from(Span::styled(
-            format!("\u{2193} {more} more"),
-            t.muted(),
-        )));
-        kept
+        let pad = " ".repeat(usize::from(over));
+        let marker = |s: String| Line::from(Span::styled(format!("{pad}{s}"), t.muted()));
+        let top = usize::from(offset > 0);
+        let mut shown = h - top;
+        if offset + shown < total {
+            shown -= 1;
+        }
+        let mut out = Vec::new();
+        if top > 0 {
+            out.push(marker(format!("\u{2191} {offset} above")));
+        }
+        let len = lines.len();
+        out.extend(lines.into_iter().skip(offset).take(shown));
+        if offset + shown < total {
+            while out.len() < h - 1 {
+                out.push(Line::raw(""));
+            }
+            let below = len.saturating_sub(offset + shown);
+            if below > 0 {
+                out.push(marker(format!("\u{2193} {below} more")));
+            }
+        }
+        out
     };
     frame.render_widget(
-        Paragraph::new(cut(left, body.height)),
+        Paragraph::new(window(left, left_over)),
         Rect {
-            width: right_x,
+            x: body.x - left_over,
+            width: right_x + left_over,
             ..body
         },
     );
+    let right_over = right_over.min(right_x);
     frame.render_widget(
-        Paragraph::new(cut(right, body.height)),
+        Paragraph::new(window(right, right_over)),
         Rect {
-            x: body.x + right_x,
-            width: body.width - right_x,
+            x: body.x + right_x - right_over,
+            width: body.width - right_x + right_over,
             ..body
         },
     );

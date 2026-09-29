@@ -347,10 +347,10 @@ Under NO_COLOR the scrim only removes bold and underline.
 
 - Rows: the 2-cell left padding (its first cell is the marker column), the label right-aligned in 14 cells (`muted`), 2 cells, the value (`text`).
 - Focused field: `▎` in `accent` in the marker column, the whole inner row on `sel`, the label turns `text`; the terminal cursor sits in the value.
-- Empty unfocused field: a placeholder in italic `dim` (`slug, lowercase-with-dashes`).
+- Empty unfocused field: a placeholder in italic `dim` (`slug, lowercase-with-dashes`, `short human title`, `e.g. 800`).
 - Select: `‹ cv_ml ›`, arrows `muted`. Toggle: `[x] yes` / `[ ] no`, box `muted`.
 - `$EDITOR` fields: empty shows `Enter opens $EDITOR` (italic `dim`); filled shows the first line in `text` and `(+3 lines)` in `muted`.
-- Validation: under the field, starting at the value column, `! slug already exists` in `unpaid`. Submit is refused while any field has an error; the message row says which.
+- Validation: under the field, starting at the value column, `! slug already exists` in `unpaid`. The slug is checked when focus leaves a non-empty slug field and again on submit; typing in the field clears its error. Submit is refused while any field has an error; the message row says which.
 - Footer inside the box after one blank row: `Tab next  Space choose  Enter submit  Esc cancel`, keys bold `key`, labels `muted`.
 
 ### 12.4 Other popups
@@ -359,7 +359,7 @@ Under NO_COLOR the scrim only removes bold and underline.
 - Refusal (gig-core error): title ` refused `, first line the code in bold (`invalid_state`), then the message verbatim in `text`, wrapped at the popup width.
 - Result: title ` done `, created files in `muted`, the short link underlined `text`, `copied to clipboard` in `muted` (or `clipboard unavailable, link shown above`).
 - Progress: one row, fill `█` plus a partial `▏..▉` in `accent` on a `─` track in `border`, then the percentage in `text` and `12.1 / 18.9 MB` in `muted`. Single PUT: the braille spinner in `accent` at 80 ms per frame plus `uploading` in `muted`. These are the only motion in the app.
-- Help: two columns, `global` and the current view's keys (order keys whenever an order detail is open). Column headings bold. Keys right-aligned in a 4-cell column, bold `key`; label `text`; conditional keys add their precondition in `muted`: `when queued or delivered` (`s`), `when delivered` (`p`), `when not archived` (`c`), `when queued or in progress` (`x`), `when a package is checked` (`u`, `m`). Footer: `theme gig-dark   ·   T cycles, [tui] theme keeps it`.
+- Help: two columns, `global` and the current view's keys (order keys whenever an order detail is open). Column headings bold. Keys right-aligned in a 4-cell column, bold `key` (a longer key, `Enter`, reaches left into the padding or the gap); label `text`; the right column starts 3 cells after the widest left row; conditional keys add their precondition in `muted`: `when queued or delivered` (`s`), `when delivered` (`p`), `when not archived` (`c`), `when queued or in progress` (`x`), `when a package is checked` (`u`, `m`). Footer: `theme gig-dark   ·   T cycles, [tui] theme keeps it`. When the keys do not fit, both columns scroll together with `Up`/`Down`/`PgUp`/`PgDn`/`Home`/`End`, with `↑ N above` and `↓ N more` in `muted` as in the detail pane.
 
 ## 13. Status chips
 
@@ -404,7 +404,7 @@ Hue logic: the accent is each theme's signature hue that is not red, amber or bl
 
 ### 14.4 Where the theme applies
 
-`bg` is painted on every cell of every frame (the terminal's own background is never shown), `surface` in popups. Text colours come only from the slots; no `Color::Reset` except under NO_COLOR.
+`bg` is painted on every cell of every frame (the terminal's own background is never shown), `surface` in popups. Text colours come only from the slots; no `Color::Reset` except under NO_COLOR. The one exception is the cell covered by the right half of a wide glyph: a last pass over each frame resets it to the default cell, so that when CJK text moves one cell left, the cell the terminal cleared (the orphaned half of the old glyph) always differs from the previous frame and is redrawn in `bg`.
 
 ### 14.5 256-colour terminals
 
@@ -417,7 +417,7 @@ When `NO_COLOR` is set and non-empty: every slot becomes `Color::Reset`, the `bg
 ## 15. Theme file format
 
 - Location: `<config_dir>/themes/<name>.toml`, that is `$XDG_CONFIG_HOME/gig/themes/<name>.toml` (default `~/.config/gig/themes/`), or `$GIG_HOME/config/themes/<name>.toml` when `GIG_HOME` is set. The directory is optional and is not created by gig.
-- Name: the file stem. Allowed: `[a-z0-9][a-z0-9-]*`. Other files in the directory are ignored.
+- Name: the file stem. Allowed: `[a-z0-9][a-z0-9-]*`. A `.toml` file with any other stem is reported like a broken file (`file name must be lowercase letters, digits and -`); files that are not `.toml` are ignored.
 - Content: exactly the 15 slot keys of the built-in themes, each a string `"#rrggbb"` (hex digits in either case). No other keys, no sections, no inheritance. A missing key, an unknown key or a malformed value makes the file invalid; the error names the key (`theme mocha-soft: missing key "bar"`, `theme mocha-soft: "muted" is not #rrggbb`).
 - Contrast on load: the thresholds of section 16.1 are checked; a failing file still loads, and the first failure is shown as a toast (`theme mocha-soft: muted 3.9:1 on sel, needs 4.5`).
 - Loaded when the TUI starts and for `--list-themes`; `T` cycles through the themes loaded at start (no hot reload).
@@ -780,7 +780,7 @@ Annotations: tile values bold (`1,600 CNY` unpaid); chart Apr/May/Jun/Jul bars i
     2025                       2026                                                                                     
                                                                                                                         
  Outstanding  2               1,600                                                                                     
-    order                      CNY  since  title                                                                        
+     order                      CNY  since  title                                                                        
  ▎  sers-colitis-analysis      800    34d  小鼠结肠炎 SERS 光谱分析与图表改版                                          
     tk-dtf-compact             800     0d  TK DTF 生产图纵向压缩工具                                                   
                                                                                                                         
@@ -799,18 +799,20 @@ Annotations: tile values bold (`1,600 CNY` unpaid); chart Apr/May/Jun/Jul bars i
 ```
 ╭─ keys ───────────────────────────────────────────────────────────────╮
 │                                                                      │
-│  global                  orders                                      │
-│     ?  keys                 s  start      when queued or delivered   │
-│     q  quit                 p  paid       when delivered             │
-│     r  refresh              $  price                                 │
-│   1-4  views                c  change     when not archived          │
-│   Tab  next view            n  note                                  │
-│     /  filter               k  scorecard                             │
-│   Esc  close, clear         x  cancel     when queued or in progress │
-│     T  next theme           u  upload     when a package is checked  │
-│  Home  first row            m  mark sent  when a package is checked  │
+│  global                orders                                        │
+│     ?  keys               s  start      when queued or delivered     │
+│     q  quit               p  paid       when delivered               │
+│     r  refresh            $  price                                   │
+│   1-4  views              c  change     when not archived            │
+│   Tab  next view          n  note                                    │
+│     /  filter             k  scorecard                               │
+│   Esc  close, clear       x  cancel     when queued or in progress   │
+│     T  next theme         A  archive preview                         │
+│    ↑↓  select             u  upload     when a package is checked    │
+│ Enter  open               m  mark sent  when a package is checked    │
 │                                                                      │
 │  theme gig-dark   ·   T cycles, [tui] theme keeps it                 │
+│                                                                      │
 ╰──────────────────────────────────────────────────────────────────────╯
 ```
 

@@ -298,6 +298,37 @@ fn a_taken_slug_is_refused_in_the_form() {
 }
 
 #[test]
+fn leaving_the_slug_field_checks_it() {
+    let mut h = Harness::new();
+    h.register("tk-taken", Some(1000));
+    h.key(KeyCode::Char('N'));
+    let slug_error = |h: &Harness| match &h.ui.popup {
+        Some(Popup::Form(form)) => form.field("slug").unwrap().error.clone(),
+        other => panic!("form, got {other:?}"),
+    };
+    // Tabbing past an empty slug says nothing yet.
+    h.key(KeyCode::Tab);
+    assert_eq!(slug_error(&h), None);
+    h.key(KeyCode::BackTab);
+    h.chars("Bad Slug");
+    assert_eq!(slug_error(&h), None, "not while typing");
+    h.key(KeyCode::Tab);
+    assert_eq!(
+        slug_error(&h).as_deref(),
+        Some("lowercase letters, digits, - _ . only")
+    );
+    h.key(KeyCode::BackTab);
+    h.backspaces(8);
+    h.chars("tk-taken");
+    h.key(KeyCode::Down);
+    assert_eq!(slug_error(&h).as_deref(), Some("slug already exists"));
+    h.key(KeyCode::Up);
+    h.chars("-2");
+    h.key(KeyCode::Tab);
+    assert_eq!(slug_error(&h), None);
+}
+
+#[test]
 fn new_order_scaffolds_like_the_cli() {
     let mut h = Harness::new();
     h.key(KeyCode::Char('N'));

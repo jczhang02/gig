@@ -7,7 +7,7 @@ Status: agreed design, 2026-09-29 (grilled with JC). Implementation follows this
 A terminal dashboard for JC, the one human interface to gig. Agents keep using the JSON CLI; the TUI is for what JC does by hand: see who owes money and what comes next, record payments and notes, score orders, register orders and drafts, send packages the agent has built. It never touches project files beyond what `gig new` already does.
 
 - Crate `gig-tui` (Rust, ratatui + crossterm), calling `gig-core` directly. Same state machine, same rules as the CLI.
-- Entry: `gig` with no subcommand launches the dashboard; `gig tui` stays as an alias. Bare `gig` starts the dashboard only when stdin and stdout are terminals; otherwise (agents, pipes) it behaves exactly as before: clap's missing-subcommand error, exit 2. It is the second non-JSON command after `gig completion`. Flags (on bare `gig` and on `gig tui`): `--theme <name>`, `--light` (alias of `--theme gig-light`), `--no-icons`, `--refresh <seconds>` (default 2, 0 disables), `--list-themes` (prints the theme names, one per line, and exits).
+- Entry: `gig` with no subcommand launches the dashboard; `gig tui` stays as an alias. Bare `gig` starts the dashboard only when stdin and stdout are terminals; otherwise (agents, pipes) it behaves exactly as before: clap's missing-subcommand error, exit 2. It is the second non-JSON command after `gig completion`. Flags (on bare `gig` and on `gig tui`): `--theme <name>`, `--light` (alias of `--theme gig-light`; giving both is a usage error), `--no-icons`, `--refresh <seconds>` (default 2, 0 disables), `--list-themes` (prints the theme names, one per line, and exits).
 - Runs anywhere; inside a project directory it preselects that order.
 
 ## 2. Views

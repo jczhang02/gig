@@ -453,6 +453,7 @@ fn list_themes_needs_no_database_and_shows_user_files() {
     let themes = root.path().join("config/themes");
     fs::create_dir_all(&themes).unwrap();
     fs::write(themes.join("broken.toml"), "bg = \"#000000\"\n").unwrap();
+    fs::write(themes.join("Bad_Name.toml"), "").unwrap();
     let out = run();
     assert!(out.status.success());
     assert_eq!(String::from_utf8(out.stdout).unwrap().lines().count(), 8);
@@ -460,6 +461,10 @@ fn list_themes_needs_no_database_and_shows_user_files() {
     assert!(err.starts_with("gig: theme "), "{err}");
     assert!(
         err.contains("broken.toml: missing key \"surface\""),
+        "{err}"
+    );
+    assert!(
+        err.contains("Bad_Name.toml: file name must be lowercase letters, digits and -"),
         "{err}"
     );
 
@@ -472,6 +477,25 @@ fn list_themes_needs_no_database_and_shows_user_files() {
     assert!(String::from_utf8(out.stdout)
         .unwrap()
         .starts_with("gig-dark\n"));
+}
+
+#[test]
+fn dashboard_errors_name_the_command_as_typed() {
+    let root = tempfile::tempdir().unwrap();
+    let run = |args: &[&str]| {
+        let out = Command::new(env!("CARGO_BIN_EXE_gig"))
+            .args(args)
+            .env("GIG_HOME", root.path())
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .output()
+            .unwrap();
+        (out.status.code(), String::from_utf8(out.stderr).unwrap())
+    };
+    // No terminal: `gig tui` fails to enter raw mode.
+    let (code, err) = run(&["tui"]);
+    assert_eq!(code, Some(1));
+    assert!(err.starts_with("gig tui: "), "{err}");
 }
 
 #[test]

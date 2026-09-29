@@ -284,15 +284,24 @@ pub(crate) fn calendar_days(stamp: &str, today: &str) -> Option<i64> {
     Some((to - from).whole_days())
 }
 
-/// Split `orders.notes` into entries. Lines not starting with a `[stamp]`
-/// continue the previous note (a note text may contain newlines).
+/// Split `orders.notes` into entries. A note starts with `[stamp] text`
+/// (what `gig note` writes) or, in older notes, with a bare `YYYY-MM-DD text`
+/// or `YYYY-MM-DDThh:mm:ssZ text`. Other lines continue the previous note (a
+/// note text may contain newlines).
 pub fn parse_notes(notes: &str) -> Vec<Note> {
     let mut out: Vec<Note> = Vec::new();
     for line in notes.lines() {
-        let stamped = line
+        let bracketed = line
             .strip_prefix('[')
             .and_then(|rest| rest.split_once("] "))
             .filter(|(at, _)| day_part(at).is_some());
+        let bare = || {
+            let (at, text) = line.split_once(' ')?;
+            let rest = at.get(10..)?;
+            (day_part(at).is_some() && (rest.is_empty() || rest.starts_with('T')))
+                .then_some((at, text))
+        };
+        let stamped = bracketed.or_else(bare);
         match (stamped, out.last_mut()) {
             (Some((at, text)), _) => out.push(Note {
                 at: at.to_string(),
@@ -460,6 +469,26 @@ pub(crate) mod tests {
         assert_eq!(calendar_days("bogus", "2026-09-29"), None);
         assert_eq!(day_part("2026-09-02"), Some("2026-09-02"));
         assert_eq!(day_part("2026-9-2"), None);
+    }
+
+    #[test]
+    fn notes_split_on_bare_dates() {
+        let text = "核验并修改现有 Python 光谱分析流程\n2026-08-22 模型优化阶段完成\n2026-08-22 Phase 3 完成\nsecond line\n2026-08-23T09:00:00Z instant\n2026-08-24: not a stamp\n20260825 nor this\n[2026-08-21T15:34:31Z] quote draft\n";
+        let n = parse_notes(text);
+        let got: Vec<(&str, &str)> = n.iter().map(|n| (n.at.as_str(), n.text.as_str())).collect();
+        assert_eq!(
+            got,
+            vec![
+                ("", "核验并修改现有 Python 光谱分析流程"),
+                ("2026-08-22", "模型优化阶段完成"),
+                ("2026-08-22", "Phase 3 完成\nsecond line"),
+                (
+                    "2026-08-23T09:00:00Z",
+                    "instant\n2026-08-24: not a stamp\n20260825 nor this"
+                ),
+                ("2026-08-21T15:34:31Z", "quote draft"),
+            ]
+        );
     }
 
     #[test]

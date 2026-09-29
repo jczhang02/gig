@@ -259,7 +259,12 @@ fn row_line(cx: &RenderCx, c: &Columns, r: &OrderRow, selected: bool) -> Line<'s
     spans.push(cell(&status_chip(cx, o.status), STATUS, chip));
     spans.push(gap(GAP));
     if c.next {
-        spans.push(cell(&next_short(&r.next_action), NEXT, ink));
+        // Closed orders have no next step: an empty dim `·`, not `none`.
+        if closed {
+            spans.push(cell(DOT, NEXT, t.dim()));
+        } else {
+            spans.push(cell(&next_short(&r.next_action), NEXT, ink));
+        }
         spans.push(gap(GAP));
     }
     spans.push(days_cell(r, DAYS, cx));

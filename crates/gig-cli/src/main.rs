@@ -19,7 +19,7 @@ fn main() {
         return;
     }
     if let cli::Command::Tui(t) = command {
-        dashboard(t);
+        dashboard(t, "gig tui");
     }
     let command = args.command_name();
     match run::run(args) {
@@ -52,18 +52,19 @@ fn bare(t: &cli::TuiArgs) -> ! {
         // Exits with clap's missing-subcommand error (help on stderr, exit 2).
         cli::CommandRequired::parse();
     }
-    dashboard(t)
+    dashboard(t, "gig")
 }
 
-/// The second raw-output command: a terminal UI, no JSON envelope.
-fn dashboard(t: &cli::TuiArgs) -> ! {
+/// The second raw-output command: a terminal UI, no JSON envelope. Errors
+/// go to stderr after `prefix`, the command as typed (`gig` or `gig tui`).
+fn dashboard(t: &cli::TuiArgs, prefix: &str) -> ! {
     let result = if t.list_themes {
         gig_tui::list_themes(&mut std::io::stdout(), &mut std::io::stderr())
     } else {
         gig_tui::run(t.opts())
     };
     if let Err(e) = result {
-        eprintln!("gig: {e}");
+        eprintln!("{prefix}: {e}");
         std::process::exit(1);
     }
     std::process::exit(0)

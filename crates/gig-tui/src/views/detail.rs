@@ -202,7 +202,11 @@ fn pack(items: &[String], sep: &str, width: usize) -> Vec<String> {
 
 pub fn render(frame: &mut Frame, area: Rect, cx: &RenderCx, full: bool) {
     let Some(row) = cx.state.selected_order() else {
-        empty(frame, area, cx.theme, &["no order selected"]);
+        // Beside an empty list the pane stays blank: the list's own empty
+        // state (section 8.1) already says why.
+        if full {
+            empty(frame, area, cx.theme, &["no order selected"]);
+        }
         return;
     };
     let width = usize::from(area.width).min(MEASURE);
@@ -402,14 +406,16 @@ fn rows(cx: &RenderCx, r: &OrderRow, width: usize, full: bool) -> Vec<Row> {
             };
             let mut parts = vec![
                 Span::styled(p.kind.to_string(), t.muted()),
-                Span::styled(format!(" {DOT} "), t.muted()),
+                Span::styled(format!(" {DOT} "), t.dim()),
                 Span::styled(p.status.to_string(), status_style),
             ];
             if let Some(c) = p.channel {
-                parts.push(Span::styled(format!(" {DOT} {}", c.as_str()), t.muted()));
+                parts.push(Span::styled(format!(" {DOT} "), t.dim()));
+                parts.push(Span::styled(c.as_str().to_string(), t.muted()));
             }
             if let Some(d) = p.sent_at.as_deref().and_then(day_part) {
-                parts.push(Span::styled(format!(" {DOT} {}", b.date(d)), t.muted()));
+                parts.push(Span::styled(format!(" {DOT} "), t.dim()));
+                parts.push(Span::styled(b.date(d), t.muted()));
             }
             let mut line = vec![Span::raw(" ".repeat(BODY))];
             line.extend(parts);

@@ -21,12 +21,14 @@ const MAX_MATERIAL: usize = 40;
 /// Narrowest material column worth drawing.
 const MIN_MATERIAL: usize = 12;
 
-/// Title and material widths for a list `width` cells wide; material 0
-/// when dropped (it goes first).
-pub fn columns(width: usize, longest_material: usize) -> (usize, usize) {
+/// Title and material widths for a list `width` cells wide. The title keeps
+/// its natural width (at least 16) before material gets any room; material
+/// is 0 when dropped (it goes first, section 10.1).
+pub fn columns(width: usize, longest_title: usize, longest_material: usize) -> (usize, usize) {
     let rest = width.saturating_sub(2 + SLUG + GAP + AGE + GAP);
     let want = longest_material.min(MAX_MATERIAL);
-    let room = rest.saturating_sub(MIN_TITLE + GAP);
+    let title = longest_title.max(MIN_TITLE).min(rest);
+    let room = rest.saturating_sub(title + GAP);
     if want == 0 || room < MIN_MATERIAL.min(want) {
         return (rest, 0);
     }
@@ -44,7 +46,13 @@ pub fn render(frame: &mut Frame, area: Rect, cx: &RenderCx) {
         .map(text::width)
         .max()
         .unwrap_or(0);
-    let (title_w, material_w) = columns(usize::from(area.width), longest);
+    let longest_title = drafts
+        .iter()
+        .filter_map(|d| d.title.as_deref())
+        .map(text::width)
+        .max()
+        .unwrap_or(0);
+    let (title_w, material_w) = columns(usize::from(area.width), longest_title, longest);
 
     let m = t.muted();
     let mut header = vec![
@@ -150,4 +158,24 @@ pub fn render_notes(frame: &mut Frame, area: Rect, cx: &RenderCx) {
     }
     lines.extend(body);
     frame.render_widget(Paragraph::new(lines), area);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::columns;
+
+    #[test]
+    fn material_gives_way_to_the_title() {
+        // 60 cells for title and material: a 30-cell title and a 26-cell
+        // path both fit; the title takes what is left.
+        let rest = 2 + 22 + 2 + 4 + 2;
+        assert_eq!(columns(rest + 60, 30, 26), (32, 26));
+        // Less room: the title keeps its 30 cells, material shrinks.
+        assert_eq!(columns(rest + 50, 30, 26), (30, 18));
+        // Too little left for material: dropped, the title takes it all.
+        assert_eq!(columns(rest + 40, 30, 26), (40, 0));
+        // Short titles keep the 16-cell minimum and material the rest.
+        assert_eq!(columns(rest + 40, 5, 26), (16, 22));
+        assert_eq!(columns(rest + 40, 5, 0), (40, 0));
+    }
 }

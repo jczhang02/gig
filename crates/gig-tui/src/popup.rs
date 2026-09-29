@@ -578,14 +578,19 @@ pub fn open(
     } else {
         Style::new().bg(theme.surface).fg(theme.text)
     };
-    let max_title = usize::from(rect.width.saturating_sub(6));
+    // `╭─ title ─╮`: one edge cell before the padded title (section 12.1).
+    let border = Style::new().fg(color);
+    let max_title = usize::from(rect.width.saturating_sub(7));
     let block = Block::bordered()
         .border_type(BorderType::Rounded)
-        .border_style(Style::new().fg(color))
-        .title(Span::styled(
-            format!(" {} ", text::truncate(title, max_title)),
-            title_style,
-        ))
+        .border_style(border)
+        .title(Line::from(vec![
+            Span::styled("\u{2500}", border),
+            Span::styled(
+                format!(" {} ", text::truncate(title, max_title)),
+                title_style,
+            ),
+        ]))
         .style(fill);
     let inner = block.inner(rect);
     frame.render_widget(block, rect);
@@ -913,6 +918,7 @@ const LABEL: usize = 14;
 fn placeholder(label: &str) -> Option<&'static str> {
     Some(match label {
         "slug" => "slug, lowercase-with-dashes",
+        "title" => "short human title",
         "price" | "amount" => "e.g. 800",
         "price delta" => "e.g. 200 or -100",
         "date" => "YYYY-MM-DD",

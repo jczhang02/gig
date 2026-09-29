@@ -6,6 +6,7 @@ use crate::app::{Tone, UiState, View};
 use crate::icons::Icons;
 use crate::theme::Theme;
 use crate::{help, popup, text, views};
+use ratatui::buffer::CellWidth;
 use ratatui::layout::Rect;
 use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
@@ -166,6 +167,36 @@ pub fn draw(frame: &mut Frame, cx: &RenderCx) {
     }
     if let Some(p) = &cx.state.popup {
         popup::render(frame, area, p, cx.theme);
+    }
+    settle_wide_glyphs(frame.buffer_mut(), t);
+}
+
+/// Last pass over the frame (section 14.4: bg on every cell of every frame).
+///
+/// The cells a wide glyph covers are reset to the default cell. Paragraph
+/// leaves them holding the style painted underneath, so after a redraw that
+/// moves CJK text one cell to the left the previous and next frame agree on
+/// such a cell and ratatui's diff skips it, while the terminal has already
+/// cleared it (it was the orphaned half of the old glyph) to its own default
+/// background: a hole in the page. With every covered cell at its default in
+/// every frame, a covered cell that becomes visible always differs and is
+/// redrawn. Any other cell still on the default background gets `bg`.
+fn settle_wide_glyphs(buf: &mut ratatui::buffer::Buffer, t: &Theme) {
+    let area = buf.area;
+    for y in area.top()..area.bottom() {
+        let mut x = area.left();
+        while x < area.right() {
+            let cell = &mut buf[(x, y)];
+            if !t.no_color() && cell.bg == ratatui::style::Color::Reset {
+                cell.bg = t.bg;
+            }
+            // The width ratatui's diff uses, so both agree on what is covered.
+            let w = cell.cell_width().max(1);
+            for k in x + 1..x.saturating_add(w).min(area.right()) {
+                buf[(k, y)].reset();
+            }
+            x = x.saturating_add(w);
+        }
     }
 }
 
@@ -411,7 +442,8 @@ mod tests {
         let s = shell(buf.area, &state);
         let detail = s.pane.expect("detail pane at 200 columns");
         assert!(detail.x > s.body.x + s.body.width);
-        assert!(all(&buf).contains("no order selected"));
+        // Beside an empty list the pane is blank.
+        assert!(!all(&buf).contains("no order selected"));
         // Pane layout stays inside the frame.
         assert!(detail.right() <= 200 && s.footer.bottom() <= 50);
     }
@@ -520,6 +552,30 @@ mod tests {
     }
 
     #[test]
+    fn empty_list_leaves_the_pane_blank() {
+        for w in [120, 200] {
+            let text = all(&render(w, 36, &UiState::default(), true));
+            assert!(text.contains("nothing needs you"), "{text}");
+            assert!(!text.contains("no order selected"), "{text}");
+        }
+    }
+
+    #[test]
+    fn closed_orders_have_an_empty_next_cell() {
+        let mut state = sample();
+        state.show_closed = true;
+        let buf = render(200, 50, &state, true);
+        let text = all(&buf);
+        for slug in ["o8", "o9"] {
+            let (y, line) = line_of(&text, &format!(" {slug} ")).unwrap();
+            assert!(!line.contains("none"), "{line}");
+            let x = crate::text::width(&line[..line.find("\u{b7}").unwrap()]) as u16;
+            assert_eq!(buf[(x, y as u16)].fg, Theme::DARK.dim, "{line}");
+        }
+        assert!(text.contains("archive"), "open rows keep their next step");
+    }
+
+    #[test]
     fn narrow_enter_shows_detail_full_screen() {
         let state = UiState {
             detail_open: true,
@@ -546,11 +602,34 @@ mod tests {
                 "mark sent",
                 "when a package is checked",
                 "theme gig-dark",
-                "\u{256d}",
+                "\u{256d}\u{2500} keys \u{2500}",
             ] {
                 assert!(text.contains(s), "{w}x{h}: {s}\n{text}");
             }
         }
+        // Mockup 17.4: a 4-cell key column; `Enter` reaches into the padding.
+        let state = UiState {
+            help_open: true,
+            ..UiState::default()
+        };
+        let text = all(&render(120, 36, &state, true));
+        for s in [
+            "\u{2502}  global                orders",
+            "\u{2502}     ?  keys               s  start      when queued or delivered",
+            "\u{2502} Enter  open               m  mark sent",
+        ] {
+            assert!(text.contains(s), "{s}\n{text}");
+        }
+        // Too short for every key: both columns scroll, with markers.
+        let mut state = state;
+        let text = all(&render(60, 16, &state, true));
+        assert!(text.contains("\u{2193} 5 more"), "{text}");
+        assert!(!text.contains("above"), "{text}");
+        state.help_scroll.offset = 99;
+        let text = all(&render(60, 16, &state, true));
+        assert!(text.contains("\u{2191} 9 above"), "{text}");
+        assert!(text.contains("PgDn  scroll detail"), "{text}");
+        assert!(!text.contains("more"), "{text}");
     }
 
     #[test]
@@ -1226,9 +1305,21 @@ mod tests {
         for m in &mut empty.data.money.by_month {
             m.amount = crate::data::money::Amount::default();
         }
-        let text = all(&render(120, 36, &empty, true));
+        let buf = render(120, 36, &empty, true);
+        let text = all(&buf);
         assert!(text.contains("no payments in the last 12 months"));
         assert!(!text.contains('\u{2500}'), "{text}");
+        // The current month's footprint is `bar_now`, the rest `dim`.
+        let (y, base) = line_of(&text, "\u{2508}").unwrap();
+        let fgs: Vec<_> = (0..buf.area.width)
+            .filter(|&x| buf[(x, y as u16)].symbol() == "\u{2508}")
+            .map(|x| buf[(x, y as u16)].fg)
+            .collect();
+        assert!(fgs.contains(&Theme::DARK.dim), "{base}");
+        let now = fgs.iter().filter(|&&c| c == Theme::DARK.bar_now).count();
+        assert!(now > 0 && now < 10, "{base}");
+        let first_now = fgs.iter().position(|&c| c == Theme::DARK.bar_now).unwrap();
+        assert!(first_now > fgs.len() * 10 / 12, "{base}");
     }
 
     #[test]
@@ -1394,6 +1485,94 @@ mod tests {
         let cur = term.get_cursor_position().unwrap();
         let sx = crate::text::width(&slug[..slug.find("sers").unwrap()]) as u16;
         assert_eq!((cur.x, cur.y), (sx + 15, y));
+    }
+
+    /// A terminal grid that, like tmux or xterm, clears the other half of a
+    /// wide glyph to the default cell when either half is overwritten.
+    struct Screen(Vec<Vec<(ratatui::buffer::Cell, u16)>>);
+
+    impl Screen {
+        fn new(w: u16, h: u16) -> Self {
+            Screen(vec![
+                vec![(Default::default(), 1); usize::from(w)];
+                usize::from(h)
+            ])
+        }
+
+        /// Width 0 marks the covered half of a wide glyph.
+        fn put(&mut self, x: u16, y: u16, c: &ratatui::buffer::Cell) {
+            let row = &mut self.0[usize::from(y)];
+            let (x, w) = (usize::from(x), usize::from(c.cell_width().max(1)));
+            for k in x..(x + w).min(row.len()) {
+                let (start, len) = match row[k].1 {
+                    0 => (k - 1, 2),
+                    n => (k, usize::from(n)),
+                };
+                if len > 1 {
+                    for j in start..(start + len).min(row.len()) {
+                        row[j] = (Default::default(), 1);
+                    }
+                }
+            }
+            row[x] = (c.clone(), w as u16);
+            for k in x + 1..(x + w).min(row.len()) {
+                row[k] = (Default::default(), 0);
+            }
+        }
+    }
+
+    #[test]
+    fn moving_cjk_leaves_no_hole_in_the_page() {
+        let (w, h) = (120, 36);
+        let icons = Icons::new(true);
+        let theme = Theme::DARK;
+        let frame = |title: &str| {
+            let mut state = sample();
+            for r in &mut state.data.orders {
+                if r.order.id == 7 {
+                    r.order.title = title.into();
+                }
+            }
+            let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
+            let done = term
+                .draw(|f| {
+                    draw(
+                        f,
+                        &RenderCx {
+                            state: &state,
+                            theme: &theme,
+                            icons: &icons,
+                        },
+                    )
+                })
+                .unwrap();
+            done.buffer.clone()
+        };
+        // The pane title shifts one cell left: `与` covered one more cell
+        // than `具` now does.
+        let titles = [
+            "小鼠结肠炎 SERS 光谱分析与图表改版",
+            "TK DTF 生产图纵向压缩工具",
+            "x小鼠结肠炎 SERS 光谱分析与图表改版",
+            "小鼠结肠炎 SERS 光谱分析与图表改版",
+        ];
+        let mut prev = Buffer::empty(Rect::new(0, 0, w, h));
+        let mut screen = Screen::new(w, h);
+        for title in titles {
+            let next = frame(title);
+            for (x, y, c) in prev.diff(&next) {
+                screen.put(x, y, c);
+            }
+            for (y, row) in screen.0.iter().enumerate() {
+                for (x, (c, cw)) in row.iter().enumerate() {
+                    assert!(
+                        *cw == 0 || c.bg != ratatui::style::Color::Reset,
+                        "{title}: hole at {x},{y}"
+                    );
+                }
+            }
+            prev = next;
+        }
     }
 
     #[test]
