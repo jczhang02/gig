@@ -331,6 +331,36 @@ fn adopt_registers_without_touching_files() {
 }
 
 #[test]
+fn config_set_edits_the_file_in_place() {
+    let env = Env::new();
+    let cfg = env.root.path().join("config/config.toml");
+    let before = format!("# hand-written\n{}", fs::read_to_string(&cfg).unwrap())
+        .replace("warranty_days = 15", "warranty_days = 15 # days");
+    fs::write(&cfg, &before).unwrap();
+    let v = env.ok(&["config", "set", "general.warranty_days", "30"]);
+    assert_eq!(
+        v,
+        serde_json::json!({ "key": "general.warranty_days", "value": 30 })
+    );
+    assert_eq!(
+        fs::read_to_string(&cfg).unwrap(),
+        before.replace("= 15 #", "= 30 #")
+    );
+    let v = env.ok(&["config", "set", "tui.mouse", "false"]);
+    assert_eq!(v, serde_json::json!({ "key": "tui.mouse", "value": false }));
+    assert!(fs::read_to_string(&cfg)
+        .unwrap()
+        .ends_with("\n[tui]\nmouse = false\n"));
+    // Schema ranges apply to the CLI too; a refusal writes nothing.
+    let after = fs::read_to_string(&cfg).unwrap();
+    assert_eq!(
+        env.err(&["config", "set", "tui.refresh_seconds", "90"]),
+        "invalid_input"
+    );
+    assert_eq!(fs::read_to_string(&cfg).unwrap(), after);
+}
+
+#[test]
 fn config_and_doctor() {
     let env = Env::new();
     let p = env.ok(&["config", "path"]);

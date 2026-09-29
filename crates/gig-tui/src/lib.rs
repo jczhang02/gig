@@ -37,6 +37,8 @@ pub struct Opts {
     pub icons: Option<bool>,
     /// `--refresh <seconds>`; 0 disables the timer.
     pub refresh_seconds: Option<u64>,
+    /// `--mouse` / `--no-mouse`.
+    pub mouse: Option<bool>,
 }
 
 /// Effective settings: config file, then flags, then `GIG_TUI_*` (spec
@@ -86,6 +88,9 @@ fn apply_flags(config: &Tui, opts: &Opts) -> Tui {
     }
     if let Some(v) = opts.refresh_seconds {
         tui.refresh_seconds = v;
+    }
+    if let Some(v) = opts.mouse {
+        tui.mouse = v;
     }
     tui
 }
@@ -164,6 +169,7 @@ mod tests {
             light: false,
             icons: true,
             refresh_seconds: 5,
+            mouse: true,
         };
         assert_eq!(resolve(&cfg, &Opts::default(), &[]), cfg);
         let got = resolve(
@@ -173,6 +179,7 @@ mod tests {
                 light: Some(true),
                 icons: Some(false),
                 refresh_seconds: Some(0),
+                mouse: Some(false),
             },
             &[],
         );
@@ -182,7 +189,8 @@ mod tests {
                 theme: Some("gig-light".into()),
                 light: true,
                 icons: false,
-                refresh_seconds: 0
+                refresh_seconds: 0,
+                mouse: false,
             }
         );
     }

@@ -78,7 +78,7 @@ The complete design system (colour roles, typography, spacing, glyphs, width cla
 
 ## 5. Config
 
-`[tui]` section in config.toml, all optional: `theme = "gig-dark"`, `light = false` (alias: `theme = "gig-light"` when `theme` is unset), `icons = true`, `refresh_seconds = 2`. Flags override config; `GIG_TUI_*` env overrides both (`GIG_TUI_THEME`, `GIG_TUI_LIGHT`, `GIG_TUI_ICONS`, `GIG_TUI_REFRESH_SECONDS`).
+`[tui]` section in config.toml, all optional: `theme = "gig-dark"`, `light = false` (alias: `theme = "gig-light"` when `theme` is unset), `icons = true`, `refresh_seconds = 2`, `mouse = true`. Flags override config; `GIG_TUI_*` env overrides both (`GIG_TUI_THEME`, `GIG_TUI_LIGHT`, `GIG_TUI_ICONS`, `GIG_TUI_REFRESH_SECONDS`, `GIG_TUI_MOUSE`).
 
 Themes: built-in `gig-dark`, `gig-light`, `catppuccin-mocha`, `catppuccin-latte`, `tokyonight`, `gruvbox-dark`, `nord`, `dracula`. User themes are TOML files in the themes directory, `$XDG_CONFIG_HOME/gig/themes/<name>.toml` (`$GIG_HOME/config/themes/` under `GIG_HOME`), with the same keys as the built-ins, selectable by name; a user file shadows a built-in of the same name. An unknown or invalid theme falls back to `gig-dark` with a warning and never blocks startup. `T` cycles themes for the session. Format and rules: TUI-DESIGN.md sections 14 and 15.
 

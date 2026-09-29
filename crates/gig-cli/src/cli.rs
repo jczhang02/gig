@@ -548,6 +548,12 @@ pub struct TuiArgs {
     /// Auto-refresh period in seconds, 0 disables ([tui] refresh_seconds, default 2)
     #[arg(long, value_name = "SECONDS")]
     pub refresh: Option<u64>,
+    /// Mouse clicks and wheel ([tui] mouse, default on)
+    #[arg(long, overrides_with = "no_mouse")]
+    pub mouse: bool,
+    /// Leave the mouse to the terminal for native text selection ([tui] mouse = false)
+    #[arg(long, overrides_with = "mouse")]
+    pub no_mouse: bool,
     /// Print the available theme names, one per line, and exit
     #[arg(long)]
     pub list_themes: bool,
@@ -561,6 +567,35 @@ impl TuiArgs {
             light: self.light.then_some(true),
             icons: self.no_icons.then_some(false),
             refresh_seconds: self.refresh,
+            mouse: if self.no_mouse {
+                Some(false)
+            } else {
+                self.mouse.then_some(true)
+            },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    fn mouse(args: &[&str]) -> Option<bool> {
+        let cli = Cli::try_parse_from([&["gig", "tui"], args].concat()).unwrap();
+        match cli.command {
+            Some(Command::Tui(t)) => t.opts().mouse,
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn mouse_flags_override_only_when_given() {
+        assert_eq!(mouse(&[]), None);
+        assert_eq!(mouse(&["--mouse"]), Some(true));
+        assert_eq!(mouse(&["--no-mouse"]), Some(false));
+        // The last one wins.
+        assert_eq!(mouse(&["--no-mouse", "--mouse"]), Some(true));
+        assert_eq!(mouse(&["--mouse", "--no-mouse"]), Some(false));
     }
 }

@@ -7,6 +7,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+mod edit;
+pub mod schema;
+
 pub const DB_FILE_NAME: &str = "gig-v2.db";
 pub const LEGACY_DB_FILE_NAME: &str = "gig.db";
 
@@ -208,6 +211,8 @@ pub struct Tui {
     pub icons: bool,
     /// Auto-refresh period; 0 disables the timer.
     pub refresh_seconds: u64,
+    /// Mouse capture: clicks and the wheel. `M` toggles it at runtime.
+    pub mouse: bool,
 }
 
 impl Default for Tui {
@@ -217,13 +222,14 @@ impl Default for Tui {
             light: false,
             icons: true,
             refresh_seconds: 2,
+            mouse: true,
         }
     }
 }
 
 impl Tui {
-    /// Apply `GIG_TUI_THEME`, `GIG_TUI_LIGHT`, `GIG_TUI_ICONS` and
-    /// `GIG_TUI_REFRESH_SECONDS`.
+    /// Apply `GIG_TUI_THEME`, `GIG_TUI_LIGHT`, `GIG_TUI_ICONS`,
+    /// `GIG_TUI_REFRESH_SECONDS` and `GIG_TUI_MOUSE`.
     /// Called by `gig tui` only, after its flags, for the env > flags > file
     /// precedence; `Config::load` leaves these variables alone.
     pub fn apply_env_overrides(&mut self) -> Result<()> {
@@ -244,6 +250,9 @@ impl Tui {
             self.refresh_seconds = v.parse().map_err(|_| {
                 Error::Config("GIG_TUI_REFRESH_SECONDS must be a non-negative integer".into())
             })?;
+        }
+        if let Some(v) = env("GIG_TUI_MOUSE") {
+            self.mouse = parse_bool("GIG_TUI_MOUSE", &v)?;
         }
         Ok(())
     }
@@ -323,14 +332,50 @@ impl Config {
         Ok(())
     }
 
+    /// Write this config to `path`, editing the existing file in place: only
+    /// keys whose value differs are touched, keys this config does not hold
+    /// are removed, and comments, key order and formatting survive.
     pub fn save(&self, path: &Path) -> Result<()> {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| Error::PathUnavailable(parent.to_path_buf(), e))?;
-            secure_dir(parent)?;
+        let want = toml::Table::try_from(self)?;
+        let (_, mut doc) = edit::read_doc(path)?;
+        edit::merge(doc.as_item_mut(), &want, "")?;
+        edit::write_atomic(path, &doc.to_string())
+    }
+
+    /// `gig config set` and the dashboard's Settings view: validate `raw` for
+    /// `key` (through `schema` when the key is listed there), set that one key
+    /// in the file in place, and write it atomically. Returns the file's
+    /// config after the write, without `GIG_*` overrides. Nothing is written
+    /// when anything is refused.
+    pub fn set_in_file(path: &Path, key: &str, raw: &str) -> Result<Self> {
+        let (text, mut doc) = edit::read_doc(path)?;
+        let current = Self::parse(&text)?;
+        let value = current.value_for(key, raw)?;
+        edit::set_key(&mut doc, key, &value)?;
+        let new_text = doc.to_string();
+        let cfg = Self::parse(&new_text).map_err(|e| match e {
+            Error::TomlDe(e) => Error::InvalidInput(format!("invalid value for {key}: {e}")),
+            other => other,
+        })?;
+        if new_text != text || !path.exists() {
+            edit::write_atomic(path, &new_text)?;
         }
-        let text = toml::to_string_pretty(self)?;
-        std::fs::write(path, text).map_err(|e| Error::PathUnavailable(path.to_path_buf(), e))
+        Ok(cfg)
+    }
+
+    /// The typed value `raw` stands for at `key`: schema keys are validated,
+    /// others are coerced to the type of the current value.
+    fn value_for(&self, key: &str, raw: &str) -> Result<toml::Value> {
+        if key.split('.').any(|p| SECRET_KEYS.contains(&p)) {
+            return Err(Error::Secrets(format!(
+                "{key} belongs in secrets.toml, not config"
+            )));
+        }
+        if schema::entry(key).is_some() {
+            return schema::validate(key, raw);
+        }
+        let existing = self.get(key).ok();
+        Ok(coerce(raw, existing.as_ref()))
     }
 
     /// Dot-notation read used by `gig config get`.
@@ -345,14 +390,9 @@ impl Config {
         Ok(cur.clone())
     }
 
-    /// Dot-notation write used by `gig config set`. Values are parsed as TOML when
-    /// possible, else stored as strings.
+    /// Dot-notation write in memory, with the same checks as `set_in_file`.
     pub fn set(&mut self, key: &str, raw: &str) -> Result<()> {
-        if key.split('.').any(|p| SECRET_KEYS.contains(&p)) {
-            return Err(Error::Secrets(format!(
-                "{key} belongs in secrets.toml, not config"
-            )));
-        }
+        let value = self.value_for(key, raw)?;
         let mut root = toml::Value::try_from(&*self)?;
         let parts: Vec<&str> = key.split('.').collect();
         let (last, dirs) = parts
@@ -370,8 +410,6 @@ impl Config {
         let table = cur
             .as_table_mut()
             .ok_or_else(|| Error::InvalidInput(format!("{key} is not a table path")))?;
-        let existing = table.get(*last).cloned();
-        let value = coerce(raw, existing.as_ref());
         table.insert((*last).to_string(), value);
         *self = root.try_into().map_err(|e: toml::de::Error| {
             Error::InvalidInput(format!("invalid value for {key}: {e}"))
@@ -534,6 +572,7 @@ endpoint = "https://x"
             ("GIG_TUI_LIGHT", "1"),
             ("GIG_TUI_ICONS", "false"),
             ("GIG_TUI_REFRESH_SECONDS", "10"),
+            ("GIG_TUI_MOUSE", "off"),
         ]
         .into();
         let mut tui = Tui::default();
@@ -545,7 +584,8 @@ endpoint = "https://x"
                 theme: Some("nord".into()),
                 light: true,
                 icons: false,
-                refresh_seconds: 10
+                refresh_seconds: 10,
+                mouse: false,
             }
         );
 
@@ -576,6 +616,105 @@ endpoint = "https://x"
         assert!(cfg.get("tui.theme").is_err());
         cfg.set("tui.theme", "dracula").unwrap();
         assert_eq!(cfg.tui.theme.as_deref(), Some("dracula"));
+    }
+
+    #[test]
+    fn mouse_defaults_on_and_parses() {
+        assert!(Config::parse("").unwrap().tui.mouse);
+        assert!(!Config::parse("[tui]\nmouse = false\n").unwrap().tui.mouse);
+        let mut tui = Tui::default();
+        let err = tui
+            .apply_overrides(|k| (k == "GIG_TUI_MOUSE").then(|| "sometimes".to_string()))
+            .unwrap_err();
+        assert_eq!(err.code(), "config");
+    }
+
+    #[test]
+    fn set_in_file_keeps_comments_and_key_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let text = "\
+# gig config, edited by hand
+[tui]
+# keep it calm
+theme = \"nord\"
+refresh_seconds = 5  # seconds
+
+[general]
+warranty_days = 15
+dev_root = \"/tmp/p\"   # custom order: after warranty_days
+";
+        std::fs::write(&path, text).unwrap();
+        let cfg = Config::set_in_file(&path, "general.warranty_days", "30").unwrap();
+        assert_eq!(cfg.general.warranty_days, 30);
+        let got = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(
+            got,
+            text.replace("warranty_days = 15", "warranty_days = 30")
+        );
+
+        // A new key in an existing table goes at its end; the rest is untouched.
+        Config::set_in_file(&path, "tui.mouse", "false").unwrap();
+        let got = std::fs::read_to_string(&path).unwrap();
+        assert!(got.starts_with("# gig config, edited by hand\n[tui]\n# keep it calm\n"));
+        assert!(got.contains("refresh_seconds = 5  # seconds\nmouse = false\n"));
+        assert!(got.contains("dev_root = \"/tmp/p\"   # custom order"));
+        assert!(!Config::load(&path).unwrap().tui.mouse);
+        // No stray temp files.
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn set_in_file_creates_a_fresh_file_with_the_right_table() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sub/config.toml");
+        Config::set_in_file(&path, "tui.refresh_seconds", "9").unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "[tui]\nrefresh_seconds = 9\n"
+        );
+        Config::set_in_file(&path, "delivery.uploader", "s3:bj").unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "[tui]\nrefresh_seconds = 9\n\n[delivery]\nuploader = \"s3:bj\"\n"
+        );
+    }
+
+    #[test]
+    fn set_in_file_refuses_without_writing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let text = "[general]\nwarranty_days = 15 # days\n";
+        std::fs::write(&path, text).unwrap();
+        for (key, raw, code) in [
+            ("general.warranty_days", "400", "invalid_input"),
+            ("tui.refresh_seconds", "-1", "invalid_input"),
+            ("general.default_cut_ratio", "2", "invalid_input"),
+            ("general.nope", "1", "invalid_input"),
+            ("delivery.link_ttl_seconds", "soon", "invalid_input"),
+            ("delivery.s3.x.secret_key", "k", "secrets"),
+        ] {
+            let err = Config::set_in_file(&path, key, raw).unwrap_err();
+            assert_eq!(err.code(), code, "{key}={raw}: {err}");
+        }
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
+    }
+
+    #[test]
+    fn save_edits_in_place() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let text = "# top\n[general]\nwarranty_days = 15 # days\n";
+        std::fs::write(&path, text).unwrap();
+        let mut cfg = Config::load(&path).unwrap();
+        cfg.general.warranty_days = 20;
+        cfg.save(&path).unwrap();
+        let got = std::fs::read_to_string(&path).unwrap();
+        assert!(got.starts_with("# top\n[general]\nwarranty_days = 20 # days\n"));
+        assert_eq!(Config::load(&path).unwrap(), cfg);
+        // Saving again changes nothing.
+        cfg.save(&path).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), got);
     }
 
     #[test]

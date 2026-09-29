@@ -282,7 +282,7 @@ Any failure is `unsafe_package` with the offending path in the message. Nothing 
 - `gig config split-secrets [--yes]`
   Reads a v1 `config.toml` that still contains `access_key`, `secret_key`, `short_link.token`, writes them to `secrets.toml` (0600) and rewrites `config.toml` without them (v2 layout, `delivery.uploader` from `default_uploader`, `link_ttl_seconds` hoisted). Prints only the field names moved, never the values. Without `--yes` it reports what it would move. This is the step that runs at handover before the first v2 command.
 - `gig doctor [--fix]` Checks: dev_path/archive_path exist; package zip files exist; `.gig/JOB.md` and `.gig/QUOTE.md` present for active orders; `delivery/` gitignored; config has no secrets; secrets available for the configured uploader; templates_dir has every required template. `--fix` only repairs paths that can be found by slug under dev_root/archive_root.
-- `gig config get KEY | set KEY VALUE | path` `path` prints all resolved paths.
+- `gig config get KEY | set KEY VALUE | path` `path` prints all resolved paths. `set` edits config.toml in place (comments, key order and formatting kept; atomic write) and validates the keys of the settings schema (`gig_core::config::schema`: ranges and types, error code `invalid_input`).
 - `gig backup` Copies the database to backups dir with a timestamp.
 - `gig completion SHELL`
 - `gig version`

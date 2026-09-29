@@ -94,13 +94,12 @@ fn run_config(c: ConfigCmd) -> Result<Output> {
         }
         _ => {}
     }
-    let (paths, mut config) = Ctx::without_db()?;
+    let (paths, config) = Ctx::without_db()?;
     match c {
         ConfigCmd::Get { key } => out(json!({ "key": key, "value": config.get(&key)? })),
         ConfigCmd::Set { key, value } => {
-            config.set(&key, &value)?;
-            config.save(&paths.config_file)?;
-            out(json!({ "key": key, "value": config.get(&key)? }))
+            let written = gig_core::config::Config::set_in_file(&paths.config_file, &key, &value)?;
+            out(json!({ "key": key, "value": written.get(&key)? }))
         }
         ConfigCmd::Path | ConfigCmd::SplitSecrets { .. } => unreachable!(),
     }
