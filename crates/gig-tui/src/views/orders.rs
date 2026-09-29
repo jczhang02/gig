@@ -37,7 +37,7 @@ impl Columns {
             .map(|r| text::width(&r.order.slug))
             .max()
             .unwrap_or(4);
-        let slug = longest.clamp(4, 20);
+        let mut slug = longest.clamp(4, 20);
         let chip = chip_width(cx);
         let days = 4;
         let price = rows
@@ -47,7 +47,13 @@ impl Columns {
             .unwrap_or(1)
             .clamp(5, 10);
         // Leading space, then gaps before chip, next, days, price, title.
-        let fixed = 1 + icon + slug + chip + days + price + 5 * GAP;
+        let mut fixed = 1 + icon + slug + chip + days + price + 5 * GAP;
+        // Very narrow: the slug column gives way first (down to 4 cells).
+        if fixed > width {
+            let cut = (fixed - width).min(slug - 4);
+            slug -= cut;
+            fixed -= cut;
+        }
         let rest = width.saturating_sub(fixed);
         let mut next = (rest * 45 / 100).clamp(8.min(rest), 24);
         let mut title = rest.saturating_sub(next);
@@ -186,4 +192,47 @@ fn status_line(cx: &RenderCx, c: &Columns, r: &OrderRow, width: u16) -> Line<'st
         Span::raw(" ".repeat(indent)),
         Span::styled(text::truncate(&text_, room), style),
     ])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::UiState;
+    use crate::data::tests::sample_snapshot;
+    use crate::icons::Icons;
+    use crate::theme::Theme;
+
+    #[test]
+    fn rows_never_exceed_the_width() {
+        let mut data = sample_snapshot("2026-09-29");
+        data.orders[0].order.title = "图像去噪与超分辨率批处理工具开发".repeat(4);
+        // orders[3] is id 7, delivered, so it is in the active list.
+        data.orders[3].order.slug = "a-rather-long-slug-for-a-row".into();
+        let state = UiState {
+            data,
+            ..UiState::default()
+        };
+        for icons in [true, false] {
+            let icons = Icons::new(icons);
+            let cx = RenderCx {
+                state: &state,
+                theme: &Theme::DARK,
+                icons: &icons,
+            };
+            let rows = state.order_list();
+            for width in 40..=250usize {
+                let cols = Columns::fit(width, &cx, &rows);
+                if width >= 80 {
+                    assert!(cols.title >= MIN_TITLE, "title shown at {width}");
+                }
+                for r in &rows {
+                    let w = row_line(&cx, &cols, r).width();
+                    assert!(w <= width, "{w} > {width}");
+                    let s = status_line(&cx, &cols, r, width as u16).width();
+                    assert!(s <= width, "status line {s} > {width}");
+                }
+                assert!(header(&cx, &cols).width() <= width);
+            }
+        }
+    }
 }

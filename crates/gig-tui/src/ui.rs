@@ -124,6 +124,11 @@ fn draw_hint(frame: &mut Frame, area: Rect, cx: &RenderCx) {
             " uploading; keys are ignored until it ends",
             t.dim(),
         ))
+    } else if matches!(cx.state.popup, Some(popup::Popup::Busy { .. })) {
+        Line::from(Span::styled(
+            " working; keys are ignored until it ends",
+            t.dim(),
+        ))
     } else if cx.state.popup.is_some() {
         // The popup box carries its own key hints; global keys are off.
         Line::from(vec![
@@ -310,6 +315,19 @@ mod tests {
         state.filters[0].text = "tk-".into();
         let buf = render(80, 24, &state, false);
         assert!(row(&buf, 23).contains("/ tk-_"));
+    }
+
+    #[test]
+    fn busy_popup_hint_says_keys_are_ignored() {
+        let state = UiState {
+            popup: Some(popup::Popup::Busy {
+                title: "working".into(),
+                text: "checking the package...".into(),
+            }),
+            ..UiState::default()
+        };
+        let buf = render(80, 24, &state, false);
+        assert!(row(&buf, 23).contains("keys are ignored"));
     }
 
     #[test]
