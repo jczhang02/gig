@@ -123,7 +123,7 @@ class SkillShape(unittest.TestCase):
 
 
 def gig_bin():
-    candidate = Path(os.environ.get("GIG_BIN", Path.home() / "dev/gig/target/debug/gig"))
+    candidate = Path(os.environ.get("GIG_BIN", Path.home() / "Documents/dev-tools/gig/target/debug/gig"))
     if not candidate.is_file():
         raise AssertionError(f"gig binary not found at {candidate}; build gig v2 or set GIG_BIN")
     return candidate
