@@ -69,10 +69,15 @@ pub fn archive(ctx: &Ctx, key: Option<&str>, opts: &ArchiveOptions) -> Result<Ar
             git_dirty = git_status(src);
             walk_large(src, src, &mut large_files)?;
         }
+        Some(src) if order.legacy_id.is_some() => git_dirty.push(format!(
+            "(legacy order; {} is gone, nothing to move)",
+            src.display()
+        )),
         Some(src) => blockers.push(format!(
             "project directory {} does not exist",
             src.display()
         )),
+        None if order.legacy_id.is_some() => {}
         None => blockers.push("order has no dev_path".into()),
     }
     if !opts.purge && destination.exists() {
@@ -110,8 +115,23 @@ pub fn archive(ctx: &Ctx, key: Option<&str>, opts: &ArchiveOptions) -> Result<Ar
         return Ok(report(order, true));
     }
     require_yes(opts.yes, "archive")?;
-    let src = source.clone().expect("checked above");
     let now = clock::now();
+    let src = match &source {
+        Some(s) if s.is_dir() => s.clone(),
+        _ => {
+            // Legacy order without a directory: record the archive only.
+            repo_orders::append_note(
+                &ctx.conn,
+                order.id,
+                &now,
+                "archived without a directory (legacy)",
+            )?;
+            repo_orders::set_text(&ctx.conn, order.id, "archived_at", Some(&now))?;
+            repo_orders::set_status(&ctx.conn, order.id, OrderStatus::Archived)?;
+            let order = repo_orders::find_by_id(&ctx.conn, order.id)?;
+            return Ok(report(order, false));
+        }
+    };
     if opts.purge {
         std::fs::remove_dir_all(&src).map_err(|e| Error::PathUnavailable(src.clone(), e))?;
         repo_orders::append_note(

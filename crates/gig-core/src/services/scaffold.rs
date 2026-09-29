@@ -12,11 +12,29 @@ pub struct Scaffolded {
     pub warnings: Vec<String>,
 }
 
+/// Draft notes are embedded under a `##` heading in JOB.md: drop the notes' own
+/// title line and push every other heading one level down.
+pub fn demote_notes(notes: &str) -> String {
+    let mut out = Vec::new();
+    for (i, line) in notes.lines().enumerate() {
+        if i == 0 && line.starts_with("# ") {
+            continue;
+        }
+        if line.starts_with('#') {
+            out.push(format!("#{line}"));
+        } else {
+            out.push(line.to_string());
+        }
+    }
+    out.join("\n").trim().to_string()
+}
+
 pub fn template_context(
     order: &Order,
     draft_notes: Option<&str>,
     warranty_days: i64,
 ) -> serde_json::Value {
+    let draft_notes = draft_notes.map(demote_notes);
     serde_json::json!({
         "slug": order.slug,
         "title": order.title,
@@ -123,6 +141,20 @@ pub fn adoption_warnings(dev_path: &Path) -> Vec<String> {
         w.push("not a git repository".into());
     }
     w
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn demotes_headings_and_drops_title() {
+        let notes = "# slug: T\n\n- a\n\n## 客户原话\n\nx\n\n### deeper\n";
+        assert_eq!(
+            demote_notes(notes),
+            "- a\n\n### 客户原话\n\nx\n\n#### deeper"
+        );
+    }
 }
 
 #[cfg(test)]

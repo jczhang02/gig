@@ -12,6 +12,8 @@ use std::path::{Path, PathBuf};
 pub struct Report {
     pub problems: Vec<Problem>,
     pub fixed: Vec<String>,
+    /// Orders migrated from v1 that are closed and have no directory on disk; expected, not checked.
+    pub legacy_closed_without_dir: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -30,9 +32,18 @@ fn problem(out: &mut Vec<Problem>, scope: impl Into<String>, message: impl Into<
 pub fn run(ctx: &Ctx, fix: bool) -> Result<Report> {
     let mut problems = Vec::new();
     let mut fixed = Vec::new();
+    let mut legacy_closed_without_dir = Vec::new();
 
     for order in repo_orders::list(&ctx.conn, true)? {
         let scope = format!("#{} {}", order.id, order.slug);
+        // v1 archived projects were often deleted after archiving; nothing to repair.
+        if order.legacy_id.is_some() && !order.status.is_active() {
+            let root = order.archive_path.as_deref().or(order.dev_path.as_deref());
+            if !root.map(Path::new).is_some_and(Path::is_dir) {
+                legacy_closed_without_dir.push(scope);
+                continue;
+            }
+        }
         let root = if order.status == OrderStatus::Archived {
             order.archive_path.as_deref()
         } else {
@@ -86,7 +97,7 @@ pub fn run(ctx: &Ctx, fix: bool) -> Result<Report> {
                     ),
                 }
             }
-            None if order.status != OrderStatus::Cancelled => {
+            None if order.status != OrderStatus::Cancelled && order.legacy_id.is_none() => {
                 problem(&mut problems, &scope, "no directory recorded")
             }
             None => {}
@@ -150,7 +161,11 @@ pub fn run(ctx: &Ctx, fix: bool) -> Result<Report> {
             ),
         );
     }
-    Ok(Report { problems, fixed })
+    Ok(Report {
+        problems,
+        fixed,
+        legacy_closed_without_dir,
+    })
 }
 
 /// v1 stored some package paths relative to the project directory.
