@@ -66,6 +66,7 @@ pub fn upload(
                 order.slug,
                 clock::now_compact()
             )),
+            progress: None,
         },
     )?;
     let expires_at = result

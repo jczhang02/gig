@@ -95,7 +95,7 @@ impl S3Uploader {
         });
     }
 
-    fn multipart_upload(&self, local: &Path, key: &str) -> Result<()> {
+    fn multipart_upload(&self, local: &Path, key: &str, opts: &UploadOpts) -> Result<()> {
         let mut file = std::fs::File::open(local)
             .map_err(|e| Error::PathUnavailable(local.to_path_buf(), e))?;
         let file_size = file
@@ -155,6 +155,7 @@ impl S3Uploader {
             );
             remaining -= chunk as u64;
             part_number += 1;
+            opts.report(file_size - remaining, file_size);
         }
         let completed = CompletedMultipartUpload::builder()
             .set_parts(Some(parts))
@@ -229,9 +230,10 @@ impl Uploader for S3Uploader {
             .map_err(|e| Error::PathUnavailable(local.to_path_buf(), e))?
             .len();
         if file_size >= MULTIPART_THRESHOLD {
-            self.multipart_upload(local, object_key)?;
+            self.multipart_upload(local, object_key, opts)?;
         } else {
             self.put_object(local, object_key)?;
+            opts.report(file_size, file_size);
         }
         let ttl = self.link_ttl_seconds;
         let url = self.presigned_get_url(object_key, &file_name, ttl)?;

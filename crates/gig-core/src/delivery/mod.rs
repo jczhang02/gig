@@ -9,15 +9,41 @@ use crate::config::{Config, Paths};
 use crate::secrets;
 use crate::{Error, Result};
 use serde::{Deserialize, Serialize};
+use std::fmt;
 use std::net::IpAddr;
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
 use time::OffsetDateTime;
 
-#[derive(Debug, Clone, Default)]
+/// Upload progress callback: `(bytes sent, total bytes)`.
+pub type Progress = Arc<dyn Fn(u64, u64) + Send + Sync>;
+
+#[derive(Clone, Default)]
 pub struct UploadOpts {
     /// Backend object key; the local basename when None.
     pub object_key: Option<String>,
+    /// Called by the uploader as bytes go out: after each multipart part, and
+    /// once when a single PUT has finished. The CLI passes None.
+    pub progress: Option<Progress>,
+}
+
+impl UploadOpts {
+    /// Report progress when a callback is set.
+    pub fn report(&self, sent: u64, total: u64) {
+        if let Some(p) = &self.progress {
+            p(sent, total);
+        }
+    }
+}
+
+impl fmt::Debug for UploadOpts {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("UploadOpts")
+            .field("object_key", &self.object_key)
+            .field("progress", &self.progress.as_ref().map(|_| ".."))
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -257,6 +283,38 @@ mod tests {
         assert_eq!(r.url, "https://s3.example.test/long?signature=abc");
         assert_eq!(r.short_url.as_deref(), Some("https://go.example.test/a1b2"));
         assert_eq!(r.file_size, 123);
+    }
+
+    struct ReportingUploader;
+
+    impl Uploader for ReportingUploader {
+        fn name(&self) -> &str {
+            "test:progress"
+        }
+        fn upload(&self, local: &Path, opts: &UploadOpts) -> Result<UploadResult> {
+            opts.report(1, 2);
+            opts.report(2, 2);
+            StaticUploader.upload(local, opts)
+        }
+    }
+
+    #[test]
+    fn progress_reaches_the_inner_uploader() {
+        use std::sync::Mutex;
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let sink = seen.clone();
+        let opts = UploadOpts {
+            object_key: None,
+            progress: Some(Arc::new(move |sent, total| {
+                sink.lock().unwrap().push((sent, total))
+            })),
+        };
+        let u = ShorteningUploader::new(Box::new(ReportingUploader), Box::new(StaticLinker));
+        u.upload(&PathBuf::from("x.zip"), &opts).unwrap();
+        assert_eq!(*seen.lock().unwrap(), vec![(1, 2), (2, 2)]);
+        // Without a callback, reporting is a no-op.
+        UploadOpts::default().report(1, 1);
+        assert!(format!("{opts:?}").contains("progress: Some"));
     }
 
     #[test]

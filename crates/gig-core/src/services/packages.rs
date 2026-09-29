@@ -267,6 +267,7 @@ pub fn upload(
         &checked.layout.zip_path,
         &UploadOpts {
             object_key: Some(object_key(&order, package_id, &clock::now_compact())),
+            progress: None,
         },
     )?;
     let expires_at = result
