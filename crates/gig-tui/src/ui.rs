@@ -5,7 +5,7 @@ use crate::app::{UiState, View, WIDE_COLUMNS};
 use crate::data::money::major;
 use crate::icons::Icons;
 use crate::theme::Theme;
-use crate::{help, popup, views};
+use crate::{help, popup, text, views};
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
@@ -101,23 +101,33 @@ fn draw_banner(frame: &mut Frame, area: Rect, cx: &RenderCx) {
     let tabs = Line::from(tabs);
     let tabs_width = tabs.width();
     frame.render_widget(Paragraph::new(tabs), area);
+    // Owed is the number the dashboard is for: when space is short the
+    // year goes first, then the month.
     let m = &cx.state.data.money;
-    let money = Line::from(vec![
-        Span::styled("owed ", t.dim()),
-        Span::styled(major(m.outstanding.gross), t.text().fg(t.unpaid)),
-        Span::styled("  month ", t.dim()),
-        Span::styled(major(m.month.gross), t.text()),
-        Span::styled("  year ", t.dim()),
-        Span::styled(format!("{} ", major(m.year.gross)), t.text()),
-    ])
-    .right_aligned();
-    if usize::from(area.width) > tabs_width + money.width() {
-        frame.render_widget(Paragraph::new(money), area);
+    let parts = [
+        ("owed ", m.outstanding.gross, t.text().fg(t.unpaid)),
+        ("month ", m.month.gross, t.text()),
+        ("year ", m.year.gross, t.text()),
+    ];
+    for n in (1..=parts.len()).rev() {
+        let mut spans = Vec::new();
+        for (i, (label, amount, style)) in parts.iter().take(n).enumerate() {
+            let lead = if i == 0 { "" } else { "  " };
+            spans.push(Span::styled(format!("{lead}{label}"), t.dim()));
+            spans.push(Span::styled(major(*amount), *style));
+        }
+        spans.push(Span::raw(" "));
+        let money = Line::from(spans).right_aligned();
+        if usize::from(area.width) > tabs_width + money.width() {
+            frame.render_widget(Paragraph::new(money), area);
+            break;
+        }
     }
 }
 
 fn draw_hint(frame: &mut Frame, area: Rect, cx: &RenderCx) {
     let t = cx.theme;
+    let width = usize::from(area.width);
     let filter = cx.state.filter();
     let line = if matches!(cx.state.popup, Some(popup::Popup::Progress { .. })) {
         Line::from(Span::styled(
@@ -136,23 +146,39 @@ fn draw_hint(frame: &mut Frame, area: Rect, cx: &RenderCx) {
             Span::styled("close popup", t.dim()),
         ])
     } else if filter.editing {
+        let hint = "   Enter keep  Esc clear";
+        // Long input keeps its end (and the cursor) in view.
+        let room = width.saturating_sub(3 + 1 + text::width(hint));
         Line::from(vec![
             Span::styled(" / ", t.key()),
-            Span::styled(filter.text.clone(), t.text()),
+            Span::styled(text::tail(&filter.text, room), t.text()),
             Span::styled("_", t.dim()),
-            Span::styled("   Enter keep  Esc clear", t.dim()),
+            Span::styled(hint, t.dim()),
         ])
-    } else if let Some(err) = &cx.state.error {
-        Line::from(Span::styled(format!(" {err}"), t.error()))
     } else {
         let mut spans = Vec::new();
+        if let Some(err) = &cx.state.error {
+            let err = text::truncate(err, (width * 2 / 3).max(1));
+            spans.push(Span::styled(format!(" {err} "), t.error()));
+        }
         if !filter.text.is_empty() {
             spans.push(Span::styled(" filter ", t.dim()));
             spans.push(Span::styled(filter.text.clone(), t.key()));
             spans.push(Span::raw(" "));
         }
-        let keys: &[(&str, &str)] = if cx.state.detail_open {
+        if cx.state.view == View::Orders && cx.state.show_closed && !cx.state.detail_open {
+            spans.push(Span::styled(" +archived, cancelled ", t.title()));
+        }
+        let base: &[(&str, &str)] = if cx.state.detail_open {
             &[("Esc", "back"), ("?", "help"), ("q", "quit")]
+        } else if cx.state.view == View::Money {
+            &[
+                ("1-4", "view"),
+                ("Tab", "next"),
+                ("r", "refresh"),
+                ("?", "help"),
+                ("q", "quit"),
+            ]
         } else {
             &[
                 ("1-4", "view"),
@@ -163,9 +189,28 @@ fn draw_hint(frame: &mut Frame, area: Rect, cx: &RenderCx) {
                 ("q", "quit"),
             ]
         };
-        for (k, what) in keys {
-            spans.push(Span::styled(format!(" {k} "), t.key()));
-            spans.push(Span::styled(format!("{what} "), t.dim()));
+        let pair = |k: &str, what: &str| {
+            [
+                Span::styled(format!(" {k} "), t.key()),
+                Span::styled(format!("{what} "), t.dim()),
+            ]
+        };
+        for (k, what) in base {
+            spans.extend(pair(k, what));
+        }
+        // Then the keys of what is on screen, while they fit.
+        let mut used: usize = spans.iter().map(Span::width).sum();
+        for (k, what) in help::keys_for(cx.state)
+            .iter()
+            .filter(|(k, _)| *k != "Up/Dn")
+        {
+            let p = pair(k, what);
+            let w: usize = p.iter().map(Span::width).sum();
+            if used + w > width {
+                break;
+            }
+            used += w;
+            spans.extend(p);
         }
         Line::from(spans)
     };
@@ -546,7 +591,107 @@ mod tests {
         assert_eq!(paid, 2, "one in warranty, one to archive");
         state.view = View::History;
         let buf = render_with(80, 24, &state, true, Theme::LIGHT);
-        assert!(all(&buf).contains("warranty"));
+        let text = all(&buf);
+        assert!(text.contains("until") && text.contains("4/5"), "{text}");
+    }
+
+    #[test]
+    fn banner_keeps_owed_when_narrow() {
+        let mut state = UiState::default();
+        state.data.money.outstanding.gross = 123_456_700;
+        state.data.money.month.gross = 234_567_800;
+        state.data.money.year.gross = 987_654_321;
+        let top = row(&render(80, 24, &state, true), 0);
+        assert!(top.contains("owed 1234567"), "{top}");
+        assert!(!top.contains("year"), "{top}");
+    }
+
+    #[test]
+    fn hint_line_lists_view_keys_that_fit() {
+        let state = sample();
+        let wide = row(&render(200, 50, &state, true), 49);
+        for k in [" s start", " p paid", " PgDn scroll detail"] {
+            assert!(wide.contains(k), "{k}: {wide}");
+        }
+        let narrow = row(&render(80, 24, &state, false), 23);
+        assert!(narrow.contains("q quit"), "{narrow}");
+        // From History, the detail shows the order keys.
+        let hist = UiState {
+            view: View::History,
+            detail_open: true,
+            ..sample()
+        };
+        let line = row(&render(200, 50, &hist, true), 49);
+        assert!(
+            line.contains("Esc back") && line.contains(" x cancel"),
+            "{line}"
+        );
+        let help = all(&render(
+            200,
+            50,
+            &UiState {
+                help_open: true,
+                ..hist
+            },
+            true,
+        ));
+        assert!(help.contains("upload package") && help.contains("order detail"));
+        // The help's global column is not cut.
+        let help = all(&render(
+            80,
+            24,
+            &UiState {
+                help_open: true,
+                ..UiState::default()
+            },
+            false,
+        ));
+        assert!(help.contains("close / clear filter"), "{help}");
+        // Long filter text keeps its end and the cursor.
+        let mut f = UiState::default();
+        f.filters[0].editing = true;
+        f.filters[0].text = format!("{}END", "x".repeat(100));
+        assert!(row(&render(80, 24, &f, false), 23).contains("END_"));
+        // A long refresh error is cut and the keys stay.
+        let e = UiState {
+            error: Some(format!("db: {}", "locked ".repeat(30))),
+            ..UiState::default()
+        };
+        let line = row(&render(80, 24, &e, false), 23);
+        assert!(
+            line.contains('\u{2026}') && line.contains("1-4 view"),
+            "{line}"
+        );
+    }
+
+    #[test]
+    fn money_list_says_what_it_leaves_out() {
+        let mut state = sample();
+        state.view = View::Money;
+        for i in 0..20 {
+            state.data.money.owed.push(crate::data::money::Owed {
+                order_id: 7,
+                slug: format!("owed-{i:02}"),
+                price_minor: Some(100_000 + i),
+                currency: "CNY".into(),
+                days: Some(30 - i),
+            });
+        }
+        let text = all(&render(80, 24, &state, false));
+        assert!(text.contains("owed-00"), "{text}");
+        assert!(text.contains(" more"), "{text}");
+        assert!(!text.contains("owed-19"));
+        assert!(
+            text.contains("received per month, 2025-10 to 2026-09"),
+            "{text}"
+        );
+        // `/` does nothing in Money.
+        let slash = crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Char('/'),
+            crossterm::event::KeyModifiers::NONE,
+        );
+        state.handle_key(slash, 80);
+        assert!(!state.filter().editing);
     }
 
     #[test]

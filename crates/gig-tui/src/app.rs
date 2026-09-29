@@ -309,7 +309,8 @@ impl UiState {
                 self.switch(self.view.prev());
                 Outcome::None
             }
-            KeyCode::Char('/') => {
+            // Money has no list to filter.
+            KeyCode::Char('/') if self.view != View::Money => {
                 self.filter_mut().editing = true;
                 Outcome::None
             }

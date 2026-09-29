@@ -29,8 +29,12 @@ pub struct Columns {
 
 /// Cells between columns.
 const GAP: usize = 1;
+/// Cells between the price and the title.
+const TITLE_GAP: usize = 2;
 /// Narrowest title worth showing.
-const MIN_TITLE: usize = 6;
+pub(crate) const MIN_TITLE: usize = 6;
+/// Narrowest next action kept when the slug column shrinks.
+const MIN_NEXT: usize = 8;
 
 impl Columns {
     pub fn fit(width: usize, cx: &RenderCx, rows: &[&OrderRow]) -> Self {
@@ -49,20 +53,37 @@ impl Columns {
             .max()
             .unwrap_or(1)
             .clamp(5, 10);
-        // Leading space, then gaps before chip, next, days, price, title.
-        let mut fixed = 1 + icon + slug + chip + days + price + 5 * GAP;
-        // Very narrow: the slug column gives way first (down to 4 cells).
+        // Leading space, gaps before chip, next, days and price, and two
+        // cells before the title so a right-aligned price does not run
+        // into it.
+        let mut fixed = 1 + icon + slug + chip + days + price + 4 * GAP + TITLE_GAP;
+        // Narrow: the slug column gives way first, down to 8 cells to keep a
+        // next action and a title, then down to 4.
+        let want = MIN_NEXT + MIN_TITLE;
+        let cut = (fixed + want)
+            .saturating_sub(width)
+            .min(slug.saturating_sub(8));
+        slug -= cut;
+        fixed -= cut;
         if fixed > width {
-            let cut = (fixed - width).min(slug - 4);
+            let cut = (fixed - width).min(slug - 4.min(slug));
             slug -= cut;
             fixed -= cut;
         }
         let rest = width.saturating_sub(fixed);
-        let mut next = (rest * 45 / 100).clamp(8.min(rest), 24);
-        let mut title = rest.saturating_sub(next);
+        // The next action is what the row is for: at least 15 cells when
+        // there is room (26 fits "warranty until 2026-10-10"); the title
+        // takes the rest.
+        let mut next = (rest * 45 / 100).clamp(15.min(rest), 26);
+        let mut title = rest - next;
         if title < MIN_TITLE {
-            next = rest;
-            title = 0;
+            if rest >= MIN_NEXT + MIN_TITLE {
+                title = MIN_TITLE;
+                next = rest - MIN_TITLE;
+            } else {
+                next = rest;
+                title = 0;
+            }
         }
         Self {
             icon,
@@ -143,13 +164,8 @@ fn header(cx: &RenderCx, c: &Columns) -> Line<'static> {
         cell_right("price", c.price, d),
     ];
     if c.title > 0 {
-        let title = if cx.state.show_closed {
-            "title (+ archived, cancelled)"
-        } else {
-            "title"
-        };
-        spans.push(Span::raw(" "));
-        spans.push(cell(title, c.title, d));
+        spans.push(Span::raw("  "));
+        spans.push(cell("title", c.title, d));
     }
     Line::from(spans)
 }
@@ -175,7 +191,7 @@ fn row_line(cx: &RenderCx, c: &Columns, r: &OrderRow) -> Line<'static> {
         cell_right(&price(o.price_minor), c.price, text),
     ]);
     if c.title > 0 {
-        spans.push(Span::raw(" "));
+        spans.push(Span::raw("  "));
         spans.push(cell(&o.title, c.title, text));
     }
     Line::from(spans)
@@ -232,6 +248,13 @@ mod tests {
                 let cols = Columns::fit(width, &cx, &rows);
                 if width >= 80 {
                     assert!(cols.title >= MIN_TITLE, "title shown at {width}");
+                }
+                if width >= 60 {
+                    // The detail pane leaves 60 columns at 110.
+                    assert!(cols.title >= MIN_TITLE, "title shown at {width}");
+                }
+                if width >= 200 {
+                    assert!(cols.next >= 25, "a full warranty date at {width}");
                 }
                 for r in &rows {
                     let w = row_line(&cx, &cols, r).width();
