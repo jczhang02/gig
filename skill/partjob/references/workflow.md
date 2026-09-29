@@ -287,6 +287,12 @@ QUOTE.md: 项目, 材料编号, 接受日期, 币种及总价, 商务状态, 付
 
 四条都过才交付.
 
+演练记录 (2026-09-29, 全部在 scratch 的 GIG_HOME 里做, 没有碰真实数据库和项目文件):
+1. 回放: tk-dtf-compact 从 `gig draft new` 到 `gig archive --yes` 走通. 输入只有 QUOTE.md 里已有的四项 (价格, 原话, 类型, 材料路径), 没有重复提问. 生成的 JOB.md 骨架比真实 tk 的多 "客户原始需求", "接单前笔记", "待客户确认" 三节, 其余一致. 真实交付内容 (158 MB, 含中文命名的批处理结果) 用 `--client-named results/` 一次通过校验, 21 个豁免文件全部列为 warning.
+2. 冷启动: tk-dtf-compact, bllc-reproduction, 以及 `~/dev/partjobs` 根目录各开一个新会话跑 `/partjob status`, 三次都准确说出状态, 下一步, 未收款 (sers 33 天) 和待归档的单, 并指出了 bllc 的 JOB.md 不是模板结构.
+3. 压力用例: 在 gig 的单元测试和端到端测试里 (软链接, 隐藏文件, `..`, 反斜杠, 密钥文件名, 非 ASCII 文件名, 未列入 manifest 的文件, zip 与 manifest 不一致, 改包后未重新 check). 全部拒绝.
+4. 迁移对账: 22 单 id, slug, 状态映射, 价格, 平台, 币种逐条一致, 结果在 `~/dev/partjobs-workflow/migration/reconcile.txt`.
+
 ### 交付后 (每单归档时的记分卡, 存进 gig)
 
 | 指标 | 好的方向 |
