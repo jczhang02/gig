@@ -4,7 +4,7 @@ The full spec is `docs/v2/SPEC.md` in the gig repository. This lists what an age
 
 ## Conventions
 
-- Every command prints exactly one JSON document on stdout: `{"ok": true, "command": "...", "data": {...}, "warnings": [...]}` or `{"ok": false, "command": "...", "error": {"code": "...", "message": "..."}}`. Exit 0 on success, 1 on a domain error, 2 on a usage error. Only `gig completion` and `gig tui` (JC's dashboard, not for agents) print raw text.
+- Every command prints exactly one JSON document on stdout: `{"ok": true, "command": "...", "data": {...}, "warnings": [...]}` or `{"ok": false, "command": "...", "error": {"code": "...", "message": "..."}}`. Exit 0 on success, 1 on a domain error, 2 on a usage error. Only `gig completion`, `gig --list-themes` and the dashboard (`gig tui`, or bare `gig` in a terminal; JC's, not for agents) print raw text. Bare `gig` without a terminal is still a usage error (exit 2).
 - Naming the order: every command accepts `--order <slug>`; inside a project directory it can be omitted.
 - Irreversible or outward commands need `--yes`; without it they only rehearse (`"dry_run": true`): `draft drop`, `package upload`, `package sent`, `artifact upload`, `archive`, `cancel`, `delete`.
 - Money is a decimal in major units, at most two fractional digits (`800`, `800.50`). Dates are `YYYY-MM-DD`.
@@ -51,7 +51,7 @@ gig config split-secrets [--yes]
 gig migrate --from OLD.db [--to NEW.db] [--dry-run] [--fix-path OLD=NEW]
 gig backup
 gig completion zsh                           raw text
-gig tui [--light] [--no-icons] [--refresh N]  JC's dashboard; agents never run it
+gig tui [--theme NAME] [--light] [--no-icons] [--refresh N]  JC's dashboard (bare gig in a terminal); agents never run it
 gig version
 ```
 

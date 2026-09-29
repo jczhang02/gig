@@ -1397,6 +1397,59 @@ mod tests {
     }
 
     #[test]
+    fn every_view_every_theme_every_size() {
+        let base = rich();
+        let mut states = Vec::new();
+        for v in View::ALL {
+            states.push(UiState {
+                view: v,
+                ..base.clone()
+            });
+        }
+        states.push(UiState {
+            detail_open: true,
+            ..base.clone()
+        });
+        states.push(UiState {
+            help_open: true,
+            ..base.clone()
+        });
+        states.push(UiState {
+            popup: Some(new_order_popup(true)),
+            ..base.clone()
+        });
+        states.push(UiState {
+            view: View::Money,
+            ..money_state()
+        });
+        states.push(UiState::default());
+        let mut themes: Vec<Theme> = Theme::BUILTIN.to_vec();
+        themes.push(Theme::DARK.for_mode(crate::theme::ColorMode::NoColor));
+        themes.push(Theme::DARK.for_mode(crate::theme::ColorMode::Indexed));
+        for theme in &themes {
+            for (w, h) in [
+                (80, 24),
+                (120, 36),
+                (200, 50),
+                (60, 16),
+                (110, 30),
+                (160, 40),
+            ] {
+                for icons in [true, false] {
+                    for st in &states {
+                        let buf = render_with(w, h, st, icons, theme.clone());
+                        assert_eq!(buf.area, Rect::new(0, 0, w, h));
+                        // Every row fits the frame exactly.
+                        for y in 0..h {
+                            assert!(crate::text::width(&row(&buf, y)) <= usize::from(w));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn toggle_and_filter_change_the_rows() {
         let mut state = sample();
         state.show_closed = true;
