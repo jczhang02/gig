@@ -1096,13 +1096,147 @@ mod tests {
         assert!(row(&buf, 23).contains("? keys"));
     }
 
-    #[test]
-    fn money_list_says_what_it_leaves_out() {
+    /// Money with the months of mockup 17.3: Apr to Jul paid, Sep (the
+    /// current month) zero.
+    fn money_state() -> UiState {
         let mut state = sample();
         state.view = View::Money;
+        state.data.money = crate::data::money::Money::default();
+        state.data.money.by_month = crate::data::money::last_months("2026-09-29", 12)
+            .into_iter()
+            .map(|label| {
+                let gross = match label.as_str() {
+                    "2026-04" => 1_000_000,
+                    "2026-05" => 310_000,
+                    "2026-06" => 1_285_000,
+                    "2026-07" => 360_000,
+                    _ => 0,
+                };
+                crate::data::money::Month {
+                    label,
+                    amount: crate::data::money::Amount {
+                        gross,
+                        take_home: gross * 6 / 10,
+                    },
+                }
+            })
+            .collect();
+        state.data.money.outstanding.gross = 160_000;
+        state.data.money.outstanding.take_home = 96_000;
+        state.data.money.year.gross = 2_955_000;
+        state.data.money.year.take_home = 1_773_000;
+        for (id, days) in [(7, 34), (6, 0)] {
+            state.data.money.owed.push(crate::data::money::Owed {
+                order_id: id,
+                slug: format!("o{id}"),
+                price_minor: Some(80_000),
+                currency: "CNY".into(),
+                days: Some(days),
+            });
+        }
+        state
+    }
+
+    #[test]
+    fn money_matches_mockup_17_3() {
+        let state = money_state();
+        let buf = render(120, 36, &state, true);
+        let rows: Vec<String> = (0..36)
+            .map(|y| row(&buf, y).trim_end().to_string())
+            .collect();
+        assert_eq!(rows[2], " outstanding                            received in September                  received in 2026");
+        assert_eq!(rows[3], " 1,600 CNY                              0 CNY                                  29,550 CNY");
+        assert_eq!(rows[4], " take-home 960 \u{b7} 2 orders               take-home 0                            take-home 17,730 \u{b7} 4 months");
+        assert_eq!(rows[6], " Received per month                                                                         Oct 2025 - Sep 2026  \u{b7}  CNY");
+        assert_eq!(rows[8], format!("{}12.9k", " ".repeat(75)));
+        assert_eq!(
+            rows[10],
+            format!(
+                "{}10.0k{}\u{2588}\u{2588}\u{2588}\u{2588}\u{2588}",
+                " ".repeat(57),
+                " ".repeat(13)
+            )
+        );
+        let baseline: String = (0..12)
+            .map(|m| {
+                let mid = if (6..10).contains(&m) {
+                    "\u{2500}"
+                } else {
+                    "\u{2508}"
+                };
+                format!("\u{2500}\u{2500}{}\u{2500}\u{2500}", mid.repeat(5))
+            })
+            .collect();
+        assert_eq!(rows[19], format!(" {baseline}"));
+        assert_eq!(rows[20], "    Oct      Nov      Dec      Jan      Feb      Mar      Apr      May      Jun      Jul      Aug      Sep");
+        assert_eq!(rows[21], "    2025                       2026");
+        assert_eq!(rows[23], " Outstanding  2               1,600");
+        assert_eq!(
+            rows[24],
+            "     order                      CNY  since  title"
+        );
+        assert!(
+            rows[25].starts_with(" \u{258e} \u{f0ad} o7                         800    34d  "),
+            "{:?}",
+            rows[25]
+        );
+        // Colours: current month's zero footprint in bar_now, past bars in
+        // bar, labels not in the bar colour, owed value bold unpaid.
+        assert_eq!(buf[(104, 19)].fg, Theme::DARK.bar_now);
+        assert_eq!(buf[(3, 19)].fg, Theme::DARK.dim);
+        assert_eq!(buf[(1, 19)].fg, Theme::DARK.border);
+        assert_eq!(buf[(76, 9)].fg, Theme::DARK.bar);
+        assert_eq!(buf[(76, 8)].fg, Theme::DARK.text);
+        assert_eq!(buf[(1, 3)].fg, Theme::DARK.unpaid);
+        assert!(buf[(1, 3)].modifier.contains(Modifier::BOLD));
+        let sep = &buf[(103, 20)];
+        assert!(
+            sep.modifier.contains(Modifier::BOLD),
+            "current month label bold"
+        );
+    }
+
+    #[test]
+    fn money_chart_rows_and_months_at_every_size() {
+        let state = money_state();
+        for (w, h, plot) in [(80, 24, 6u16), (120, 36, 10), (200, 50, 10)] {
+            let buf = render(w, h, &state, true);
+            let rows: Vec<String> = (0..h).map(|y| row(&buf, y)).collect();
+            let months = rows.iter().position(|r| r.contains("Nov")).unwrap();
+            for m in [
+                "Oct", "Nov", "Dec", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep",
+            ] {
+                assert!(rows[months].contains(m), "{w}x{h}: {m}");
+            }
+            // Chart: label row, plot rows, baseline, months, years.
+            let heading = rows
+                .iter()
+                .position(|r| r.contains("Received per month"))
+                .unwrap();
+            let first = heading + 2;
+            let baseline = months - 1;
+            assert_eq!(baseline - first, usize::from(plot) + 1, "{w}x{h}");
+            assert_eq!(months + 1 - first + 1, usize::from(plot) + 4);
+            assert!(rows[baseline].contains('\u{2508}') && rows[baseline].contains('\u{2500}'));
+            assert!(rows[months + 1].contains("2025") && rows[months + 1].contains("2026"));
+            assert!(rows.iter().any(|r| r.contains("12.9k")));
+        }
+        // No payments: a dotted baseline and a line saying so.
+        let mut empty = money_state();
+        for m in &mut empty.data.money.by_month {
+            m.amount = crate::data::money::Amount::default();
+        }
+        let text = all(&render(120, 36, &empty, true));
+        assert!(text.contains("no payments in the last 12 months"));
+        assert!(!text.contains('\u{2500}'), "{text}");
+    }
+
+    #[test]
+    fn money_table_selects_and_says_what_it_leaves_out() {
+        let mut state = money_state();
         for i in 0..20 {
             state.data.money.owed.push(crate::data::money::Owed {
-                order_id: 7,
+                order_id: 100 + i,
                 slug: format!("owed-{i:02}"),
                 price_minor: Some(100_000 + i),
                 currency: "CNY".into(),
@@ -1110,13 +1244,24 @@ mod tests {
             });
         }
         let text = all(&render(80, 24, &state, false));
-        assert!(text.contains("owed-00"), "{text}");
-        assert!(text.contains(" more"), "{text}");
+        assert!(text.contains("\u{2193} 21 more"), "{text}");
+        let text = all(&render(120, 36, &state, false));
+        assert!(text.contains("owed-00") && text.contains(" more"), "{text}");
         assert!(!text.contains("owed-19"));
-        assert!(
-            text.contains("received per month, 2025-10 to 2026-09"),
-            "{text}"
-        );
+        // The selection moves in the table and stays in view.
+        for _ in 0..21 {
+            state.handle_key(
+                crossterm::event::KeyEvent::new(
+                    crossterm::event::KeyCode::Down,
+                    crossterm::event::KeyModifiers::NONE,
+                ),
+                120,
+            );
+        }
+        assert_eq!(state.selected_owed(), Some(119));
+        let text = all(&render(120, 36, &state, false));
+        let (_, l) = line_of(&text, "owed-19").expect("selected row in view");
+        assert!(l.starts_with(" \u{258e}"), "{l}");
         // `/` does nothing in Money.
         let slash = crossterm::event::KeyEvent::new(
             crossterm::event::KeyCode::Char('/'),
@@ -1172,33 +1317,6 @@ mod tests {
         let text = all(&render(200, 50, &state, true));
         assert!(text.contains("4/5"), "scorecard score");
         assert!(line_of(&text, " o8 ").is_some(), "archived in history");
-
-        state.view = View::Money;
-        state.data.money.owed.push(crate::data::money::Owed {
-            order_id: 7,
-            slug: "tk-denoise".into(),
-            price_minor: Some(80000),
-            currency: "CNY".into(),
-            days: Some(59),
-        });
-        state.data.money.outstanding.gross = 80000;
-        state.data.money.outstanding.take_home = 48000;
-        if let Some(m) = state.data.money.by_month.last_mut() {
-            m.amount.gross = 120000;
-        }
-        for (w, h) in [(80, 24), (200, 50)] {
-            let text = all(&render(w, h, &state, true));
-            for s in [
-                "outstanding",
-                "take-home 480",
-                "received per month",
-                "1200",
-                "09",
-            ] {
-                assert!(text.contains(s), "{w}x{h}: {s}");
-            }
-            assert!(line_of(&text, "tk-denoise").is_some_and(|(_, l)| l.contains("59d")));
-        }
 
         state.view = View::Drafts;
         state.data.drafts.push(gig_core::models::Draft {
