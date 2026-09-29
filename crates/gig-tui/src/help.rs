@@ -61,15 +61,22 @@ pub fn view_keys(view: View) -> &'static [(&'static str, &'static str)] {
     }
 }
 
-/// Keys of what is on screen: the order keys whenever an order detail is
-/// open (from History too, where every order action works), else the
-/// view's own keys.
-pub fn keys_for(state: &crate::app::UiState) -> &'static [(&'static str, &'static str)] {
-    if state.detail_open {
-        ORDERS_KEYS
+/// Keys of what is on screen at `width` columns: the order keys whenever
+/// an order detail is open (from History too, where every order action
+/// works) less the list-only `a` and `Enter`, else the view's own keys
+/// (less the detail scroll when Orders has no detail pane).
+pub fn keys_for(state: &crate::app::UiState, width: u16) -> Vec<(&'static str, &'static str)> {
+    let (keys, drop): (_, &[&str]) = if state.detail_open {
+        (ORDERS_KEYS, &["a", "Enter"])
+    } else if state.view == View::Orders && !state.detail_shown(width) {
+        (ORDERS_KEYS, &["PgDn"])
     } else {
-        view_keys(state.view)
-    }
+        (view_keys(state.view), &[])
+    };
+    keys.iter()
+        .filter(|(k, _)| !drop.contains(k))
+        .copied()
+        .collect()
 }
 
 fn key_lines<'a>(cx: &RenderCx, heading: &'a str, keys: &[(&'a str, &'a str)]) -> Vec<Line<'a>> {
@@ -86,7 +93,7 @@ fn key_lines<'a>(cx: &RenderCx, heading: &'a str, keys: &[(&'a str, &'a str)]) -
 /// Rounded box centred in `area`, clamped to it.
 pub fn render(frame: &mut Frame, area: Rect, cx: &RenderCx) {
     let view = cx.state.view;
-    let keys = keys_for(cx.state);
+    let keys = keys_for(cx.state, area.width);
     let heading = if cx.state.detail_open {
         "order detail"
     } else {
@@ -113,6 +120,6 @@ pub fn render(frame: &mut Frame, area: Rect, cx: &RenderCx) {
         Layout::horizontal([Constraint::Length(left_w), Constraint::Min(0)]).areas(inner);
     frame.render_widget(Paragraph::new(global), left);
     if !keys.is_empty() {
-        frame.render_widget(Paragraph::new(key_lines(cx, heading, keys)), right);
+        frame.render_widget(Paragraph::new(key_lines(cx, heading, &keys)), right);
     }
 }

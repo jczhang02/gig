@@ -200,7 +200,7 @@ fn draw_hint(frame: &mut Frame, area: Rect, cx: &RenderCx) {
         }
         // Then the keys of what is on screen, while they fit.
         let mut used: usize = spans.iter().map(Span::width).sum();
-        for (k, what) in help::keys_for(cx.state)
+        for (k, what) in help::keys_for(cx.state, area.width)
             .iter()
             .filter(|(k, _)| *k != "Up/Dn")
         {
