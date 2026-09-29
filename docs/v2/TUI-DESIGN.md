@@ -176,7 +176,7 @@ Row 1 is blank spacing when idle and doubles as the message row, so no row of ch
 
 - Left: the filter while typing or active, `/ sers▏` in `accent` followed by `3 of 5` in `muted`.
 - Right, right-aligned to the margin: one toast at a time.
-  - `copied go.jczhang.cc/a30bd870` (`text`), `saved tui.theme = nord` (`text`, after a change in Settings or the theme picker), `theme mine reloaded` (`text`, hot reload), warnings such as `unknown theme "nrod", using gig-dark` (`warranty`). Toasts clear after 3 s or on the next key.
+  - `copied go.jczhang.cc/a30bd870` (`text`), `saved tui.theme = nord` (`text`, after a change in Settings or the theme picker), `theme mine reloaded` (`text`, hot reload), `mouse off, the terminal selects text; M turns it on` and `mouse on` (`text`, after `M`), warnings such as `unknown theme "nrod", using gig-dark` (`warranty`). Toasts clear after 3 s or on the next key or click.
   - Errors that are not shown in a refusal popup (for example the clipboard is unavailable, or `$EDITOR` failed) in `unpaid`. Errors stay until the next key.
 
 ### 7.3 Footer (row H-1)
@@ -195,7 +195,7 @@ Group 1, the actions that fit the selected order's state (a hint, not a guard; g
 | archived or cancelled (History) | `y copy link  e JOB.md` |
 | no order selected | (empty) |
 
-At Narrow, `Enter detail` is prepended to group 1. In Drafts group 1 is `Enter notes  N new draft  P promote`; in Money `Enter open order  y copy link`.
+At Narrow, `Enter detail` is prepended to group 1. In Drafts group 1 is `Enter notes  N new draft  P promote`; in Money `Enter open order  y copy link`, followed by `Esc close month` while a month is listed (section 11.4).
 
 Group 2 per view:
 
@@ -325,6 +325,29 @@ Vertical budget at H = 36: banner 1, message 1, tiles 3, blank 1, heading 1, bla
 
 Heading `Outstanding  2` (bold word, `muted` count) with the total right-aligned in the price column (`muted`). Header row (`muted`): `order`, `CNY`, `since`, `title`. Rows: marker, type glyph, slug 22, gap 2, price 6, gap 2, days since delivery 5 (right; bold `unpaid` at >= `OVERDUE_DAYS`), gap 2, title (rest; dropped at Narrow). Sorted by days descending. Up/Down select, `Enter` opens the order, `y` copies its link.
 
+### 11.4 Month drill-down (TUI-SPEC 8.2)
+
+A click on a month of the chart (anywhere in its slot: value label, bar, baseline, month and year rows) lists the orders paid in that month between the chart and the outstanding table. A second click on the same month, or `Esc`, closes it; a click on another month switches. Nothing else in the view moves: the tiles and the chart keep their rows, and the table below gets what is left.
+
+```
+      Apr          May          Jun          Jul          Aug          Sep          month row; `Jun` picked: bold text, accent underline
+                                                                                    year row (blank here)
+                                                                                    (blank)
+ Received in June 2026  8    12,850                                                 heading bold, count and total muted
+     order                      CNY   paid  title                                   header muted
+    xlsx-formula-reconstr…   5,000  06-20  Excel 第6列反推公式链路                   rows: glyph, slug 22, price 6, paid 5, title
+    bert-crf                 3,000  06-01  Bert Crf                                 archived rows in `archived`
+                                                                                    (blank)
+ Outstanding  2               1,600
+```
+
+- The picked month's label is bold `text` with an `accent` underline, the way the active tab is marked ("where you are", principle 2); bars keep their colours.
+- Heading: `Received in <Month> <year>` in bold `text` (the words of the tile and the chart heading), 2 cells, the count in `muted`, the month total right-aligned in the price column (`muted`), as the outstanding heading.
+- Header row (`muted`): `order`, the currency code, `paid`, `title`. Rows: 2 blank cells (no marker: the rows are not selectable by key), the type glyph, slug 22, gap 2, price 6 (right), gap 2, the payment day `MM-DD` 5 (right, `muted`), gap 2, the title (rest; dropped at Narrow). Newest payment first. Archived rows are drawn in `archived`, as everywhere.
+- A month without payments shows `no payments in <Month> <year>` in `muted` under the heading.
+- Height: every row when it fits; otherwise the block takes what leaves the outstanding table its heading, header and one row, and its last row says `↓ n more`. The block always gets at least its heading, header and one row.
+- A click on a row jumps to the order: in Orders when it is still open (paid, in warranty or waiting to be archived), else in History; either way the order is selected. The outstanding table works the same way into Orders.
+
 ## 12. Popups and forms
 
 ### 12.1 Frame and placement
@@ -411,6 +434,28 @@ Theme picker (`T`, or the theme row): a form-width popup (`min(64, W - 4)`, `bor
 - Broken files: name and `! <error>` in `muted`, no swatches, not selectable (the cursor skips them). Interpretation of "listed dimmed": `muted` rather than `dim`, because the error carries information and the dim rule of section 2 forbids that.
 - Live preview: while the picker is open the whole frame, the picker included, is drawn with the highlighted theme. Esc (or `T`) closes and the theme in use comes back, since nothing was changed. Enter writes `tui.theme` through gig-core, applies it, and toasts `saved tui.theme = <name>`; a refusal goes under the Settings row when Settings is open, else to the message row.
 - `c` on a built-in writes `<config_dir>/themes/<name>-copy.toml` in the section 15 format (a comment naming the source, then the 15 slots aligned), creating the directory, and opens it in `$EDITOR` with the TUI suspended. An existing copy is opened as it is, never overwritten. After the editor the catalogue is reloaded and the cursor sits on the copy, previewing it; Enter keeps it. On a user theme `c` shows the `warranty` toast `c copies a built-in; <name> is a theme file already`.
+
+### 12.6 Mouse (TUI-SPEC 8.2)
+
+Mouse support adds no drawing of its own: no hover, no pressed state, no cursor change. The only visible additions are the month drill-down (11.4) and toasts (7.2). Every frame records where it drew what can be clicked; a click resolves against the last frame, the region drawn last winning.
+
+| where | click | double-click | wheel |
+|---|---|---|---|
+| banner tab (number and word) | switches to that view; closes Settings and the full-screen detail | | |
+| Orders, History row (both lines of the selected row) | selects | opens the full-screen detail (at every width) | moves the selection by one row |
+| Drafts row | selects; an open notes pane follows | opens the notes (pane or popup, as `Enter`) | moves the selection |
+| Money outstanding row, drill-down row | jumps to the order (11.4) | | moves the outstanding selection |
+| Money chart slot | picks the month (11.4) | | |
+| short link (list second line, detail Packages) | copies the full URL, toast `copied ...` | | |
+| detail pane or full-screen detail | | | scrolls 3 rows |
+| footer key hint | presses that key (whole pair: key and label) | | |
+| Settings row (its label, help and error lines) | moves the cursor; leaving a row being typed cancels the typing | `Enter` on the row (toggle flips, theme opens the picker, numbers and text start typing) | moves the cursor |
+| popup | a click outside is `Esc` (cancel a confirm, discard a form, close a message or help, restore the theme in the picker) | | scrolls the body (confirm, message, help), moves a pick list or the picker |
+| popup footer hint (`y yes`, `Esc no`, `Enter close`, `Enter submit`, ...) | presses that key | | |
+| form field | focuses it (a filled slug is checked on leaving, as with Tab); on the focused field a toggle flips, a select moves on, an `$EDITOR` field opens the editor | | |
+| pick list item, theme picker row | highlights (the picker previews) | `Enter` (pick, keep) | |
+
+Interpretations made while implementing: hints that name no single key (`1-4`, `+ -`, `↑↓`) are not buttons; the empty-state lines (`N new order`) are text, not buttons; two clicks count as a double-click when they hit the same target within 400 ms; the link in the upload result popup is not clickable (the upload already copied it); moves, drags, releases and the right and middle buttons do nothing, and motion does not redraw. `M` turns capture off for the session (native selection in the terminal) and on again, with a toast; it writes nothing, so Settings shows `this session no` on the `tui.mouse` row. Capture is released on quit, on an error, on a panic and while `$EDITOR` runs, and comes back after the editor.
 
 ## 13. Status chips
 
@@ -903,6 +948,7 @@ Keep and update the existing `TestBackend` tests (literal strings change: `in_pr
 - Theme files: a valid file loads; missing, unknown and malformed keys each give the named error; a user file shadows a built-in; unknown names fall back to gig-dark with a warning.
 - Settings: precedence config < flag < env for `theme`, and the `light` alias per layer.
 - `text.rs`: `group(29550) == "29,550"`, `compact(12850) == "12.9k"`, `compact(800) == "800"`, `compact(10000) == "10.0k"`, middle truncation keeps the last 10 cells.
+- Mouse (`mouse.rs`): regions to targets, the modal layer, hint pairs to keys, double-click timing with injected timestamps; mouse events after a `TestBackend` frame select rows, open the detail on a double-click, switch tabs, press footer and popup hints, close popups from outside, scroll the pane under the pointer, copy links, drill into a month and jump from its rows; `tests/mouse.rs` drives `M` and the `tui.mouse` row through the app in a temp GIG_HOME.
 - CLI: `gig --list-themes` prints 8 names without a database; bare `gig` with stdout not a terminal behaves exactly as today (clap's missing-subcommand error, exit 2); every JSON command's output is unchanged.
 
 ## 19. Change list
@@ -937,6 +983,11 @@ Rule references are to sections of this file.
 | `crates/gig-tui/src/settings.rs` (new) | the `,` overlay: state from gig-core's schema, keys by kind, rendering of 12.5 | 12.5 |
 | `crates/gig-tui/src/picker.rs` (new) | the theme picker: rows, swatches, preview, `c` | 12.5 |
 | `crates/gig-tui/src/themes.rs` | `to_toml`, `copy_builtin`, `Stamps` for hot reload, `Catalog.user` | 12.5, 15 |
+| `crates/gig-tui/src/mouse.rs` (new) | hit-test layer: `Target`, `Pane`, `Hits` (recorded by every frame in `UiState`, a modal layer per popup), hint pairs to keys, double-click timing | 12.6 |
+| `crates/gig-tui/src/terminal.rs` | mouse capture on and off (`set_mouse`), released by `leave` on every exit and around `$EDITOR` | 12.6 |
+| `crates/gig-tui/src/app.rs` | `UiState::handle_mouse` (click, double-click, wheel, click outside a popup), `M` and `set_mouse`, `money_month`; the loop reads mouse events and skips redraws for motion | 11.4, 12.6 |
+| views, `ui.rs`, `popup.rs`, `picker.rs`, `settings.rs`, `help.rs` | record their clickable regions and wheel panes while drawing; Money draws the month drill-down; help lists `M` | 11.4, 12.6 |
+| `crates/gig-tui/src/data/money.rs` | `Month.order_ids`, newest payment first | 11.4 |
 | `crates/gig-tui/src/app.rs` | `,` and `T` open the overlay and the picker; `write_setting` through `Config::set_in_file`, applied to theme, icons, refresh timer, mouse flag and `ctx.config`; `tick` re-scans theme files | 12.5, 15 |
 | `docs/v2/TUI-SPEC.md` | section 8 (settings and mouse), `T` and `,` in the key list, hot reload in scope | |
 | `README.md`, `skill/partjob/references/gig.md` | say bare `gig` opens the dashboard in a terminal, `gig tui` stays; mention `--theme` and the themes directory | |

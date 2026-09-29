@@ -12,7 +12,7 @@ A terminal dashboard for JC, the one human interface to gig. Agents keep using t
 
 ## 2. Views
 
-Keys in the whole app: `?` help, `q` quit, `r` refresh, `1..4` jump to a view, `Tab` next view, `/` filter the current list, `T` theme picker, `,` settings (section 8.1), `Esc` close a popup or clear the filter.
+Keys in the whole app: `?` help, `q` quit, `r` refresh, `1..4` jump to a view, `Tab` next view, `/` filter the current list, `T` theme picker, `,` settings (section 8.1), `M` mouse on/off (section 8.2), `Esc` close a popup or clear the filter.
 
 ### 2.1 Orders (default)
 
@@ -114,3 +114,4 @@ Decided by the agent on JC's instruction after a shortened grill; every point fo
 - Wheel scrolls whatever pane the pointer is over (list, detail, popup body, settings).
 - Money: clicking a bar selects that month and lists its paid orders under the chart; clicking an outstanding row jumps to that order in Orders. History: click selects, double-click opens the detail.
 - No hover effects, no drag-resize, no context menus.
+- Implemented 2026-09-29; the full click, double-click and wheel table, the month drill-down anatomy and the interpretations made while implementing are TUI-DESIGN.md sections 11.4 and 12.6. In short: double-click is `Enter` except that an Orders row opens the full-screen detail at every width; the wheel over a list moves its selection; a drill-down row jumps to Orders, or to History when the order is archived; the upload result's link is not clickable.
