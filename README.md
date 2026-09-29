@@ -92,6 +92,10 @@ gig archive --order pdf-tool --yes
 Commands that send, delete, move or cancel need `--yes`; without it they print
 what they would do and change nothing.
 
+## Dashboard
+
+`gig tui` is the one human interface: orders with their next action, drafts, money (outstanding, this month, this year, a 12-month chart), history; record payments, notes, scorecards, changes; register orders and drafts; send packages the agent has built. Flags `--light`, `--no-icons`, `--refresh <seconds>`; `[tui]` in config.toml holds the same. Design: `docs/v2/TUI-SPEC.md`.
+
 ## Package safety
 
 A client package is `delivery/<id>/` (client files only), `delivery/<id>.manifest.toml`
