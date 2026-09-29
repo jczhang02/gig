@@ -13,3 +13,6 @@ gig-core = { path = "../gig-core" }
 ratatui = { workspace = true }
 crossterm = { workspace = true }
 unicode-width = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

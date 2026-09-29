@@ -2,6 +2,7 @@
 //! the bottom. Whitespace and colour instead of borders (spec section 3).
 
 use crate::app::{UiState, View, WIDE_COLUMNS};
+use crate::data::money::major;
 use crate::icons::Icons;
 use crate::theme::Theme;
 use crate::{help, views};
@@ -97,14 +98,14 @@ fn draw_banner(frame: &mut Frame, area: Rect, cx: &RenderCx) {
     let tabs = Line::from(tabs);
     let tabs_width = tabs.width();
     frame.render_widget(Paragraph::new(tabs), area);
-    // Filled from the snapshot by the Money ticket.
+    let m = &cx.state.data.money;
     let money = Line::from(vec![
         Span::styled("owed ", t.dim()),
-        Span::styled("-", t.text().fg(t.unpaid)),
+        Span::styled(major(m.outstanding.gross), t.text().fg(t.unpaid)),
         Span::styled("  month ", t.dim()),
-        Span::styled("-", t.text()),
+        Span::styled(major(m.month.gross), t.text()),
         Span::styled("  year ", t.dim()),
-        Span::styled("- ", t.text()),
+        Span::styled(format!("{} ", major(m.year.gross)), t.text()),
     ])
     .right_aligned();
     if usize::from(area.width) > tabs_width + money.width() {
@@ -221,6 +222,18 @@ mod tests {
         assert!(all(&buf).contains("Detail"));
         // Pane layout stays inside the frame.
         assert!(detail.right() <= 200 && s.hint.bottom() <= 50);
+    }
+
+    #[test]
+    fn banner_shows_snapshot_money() {
+        let mut state = UiState::default();
+        state.data.money.outstanding.gross = 130000;
+        state.data.money.month.gross = 80050;
+        state.data.money.year.gross = 1_200_000;
+        let top = row(&render(200, 50, &state, true), 0);
+        assert!(top.contains("owed 1300"), "{top}");
+        assert!(top.contains("month 800.50"), "{top}");
+        assert!(top.contains("year 12000"), "{top}");
     }
 
     #[test]

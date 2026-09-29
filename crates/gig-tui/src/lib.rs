@@ -10,6 +10,7 @@ pub mod help;
 pub mod icons;
 pub mod popup;
 pub mod terminal;
+pub mod text;
 pub mod theme;
 pub mod ui;
 pub mod upload;

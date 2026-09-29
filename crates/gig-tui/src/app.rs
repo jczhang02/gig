@@ -95,6 +95,9 @@ impl Default for UiState {
 pub enum Outcome {
     None,
     Quit,
+    /// Reload the snapshot. Returned by `r`, and by every action handler once
+    /// its gig-core call has returned (success or refusal), so the lists
+    /// show the new state (spec section 4).
     Refresh,
     /// Not a global key: the current view gets it (later tickets).
     Unhandled(KeyEvent),
