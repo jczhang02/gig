@@ -162,17 +162,17 @@ fn run_with_db(ctx: &Ctx, cmd: Command) -> Result<Output> {
         Command::Ls(a) => {
             out(json!({ "orders": orders::list(ctx, a.all)?, "today": clock::today() }))
         }
-        Command::Show(a) => out(orders::show(ctx, a.key.as_deref())?),
-        Command::Start(a) => out(orders::start(ctx, a.key.as_deref())?),
+        Command::Show(a) => out(orders::show(ctx, a.get())?),
+        Command::Start(a) => out(orders::start(ctx, a.get())?),
         Command::Change(a) => out(orders::change(
             ctx,
-            a.key.as_deref(),
+            a.order.as_deref().or(a.key.as_deref()),
             &a.desc,
             parse_amount(&a.price_delta)?,
         )?),
         Command::Price(a) => out(orders::price(
             ctx,
-            a.key.as_deref(),
+            a.order.as_deref().or(a.key.as_deref()),
             parse_amount(&a.amount)?,
             &a.reason,
         )?),
@@ -181,14 +181,14 @@ fn run_with_db(ctx: &Ctx, cmd: Command) -> Result<Output> {
             let amount = a.amount.as_deref().map(parse_amount).transpose()?;
             out(orders::paid(
                 ctx,
-                a.key.as_deref(),
+                a.order.as_deref().or(a.key.as_deref()),
                 a.date.as_deref(),
                 amount,
             )?)
         }
         Command::Scorecard(a) => out(orders::scorecard(
             ctx,
-            a.key.as_deref(),
+            a.order.as_deref().or(a.key.as_deref()),
             &orders::ScorecardInput {
                 decisions: a.decisions,
                 repeat_questions: a.repeat_questions,
@@ -200,7 +200,7 @@ fn run_with_db(ctx: &Ctx, cmd: Command) -> Result<Output> {
         )?),
         Command::Archive(a) => out(archive::archive(
             ctx,
-            a.key.as_deref(),
+            a.order.as_deref().or(a.key.as_deref()),
             &archive::ArchiveOptions {
                 yes: a.yes,
                 before_warranty_end: a.before_warranty_end,
@@ -208,8 +208,13 @@ fn run_with_db(ctx: &Ctx, cmd: Command) -> Result<Output> {
                 purge: a.purge,
             },
         )?),
-        Command::Cancel(a) => out(orders::cancel(ctx, a.key.as_deref(), &a.reason, a.yes)?),
-        Command::Cd(a) => out(json!({ "path": orders::cd(ctx, a.key.as_deref())? })),
+        Command::Cancel(a) => out(orders::cancel(
+            ctx,
+            a.order.as_deref().or(a.key.as_deref()),
+            &a.reason,
+            a.yes,
+        )?),
+        Command::Cd(a) => out(json!({ "path": orders::cd(ctx, a.get())? })),
         Command::Delete(a) => out(orders::delete(ctx, &a.slug, a.yes)?),
         Command::Package(p) => match p {
             PackageCmd::Build(a) => {
@@ -273,7 +278,7 @@ fn run_with_db(ctx: &Ctx, cmd: Command) -> Result<Output> {
                 let w = r.warnings.clone();
                 out_with(r, w)
             }
-            PackageCmd::Ls(a) => out(packages::list(ctx, a.key.as_deref())?),
+            PackageCmd::Ls(a) => out(packages::list(ctx, a.get())?),
         },
         Command::Artifact(ar) => match ar {
             ArtifactCmd::Upload(a) => {
@@ -296,7 +301,7 @@ fn run_with_db(ctx: &Ctx, cmd: Command) -> Result<Output> {
                     uploader.as_ref(),
                 )?)
             }
-            ArtifactCmd::Ls(a) => out(artifacts::list(ctx, a.key.as_deref())?),
+            ArtifactCmd::Ls(a) => out(artifacts::list(ctx, a.get())?),
         },
         Command::Doctor(a) => {
             let r = doctor::run(ctx, a.fix)?;

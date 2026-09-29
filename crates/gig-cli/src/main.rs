@@ -8,6 +8,12 @@ use serde_json::json;
 
 fn main() {
     let args = cli::Cli::parse();
+    if let cli::Command::Completion(c) = &args.command {
+        // The one raw-output command: `gig completion zsh > _gig`.
+        let mut cmd = <cli::Cli as clap::CommandFactory>::command();
+        clap_complete::generate(c.shell, &mut cmd, "gig", &mut std::io::stdout());
+        return;
+    }
     let command = args.command_name();
     match run::run(args) {
         Ok(output) => {

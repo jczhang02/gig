@@ -98,6 +98,15 @@ pub enum Command {
 pub struct KeyArg {
     /// Order slug or #id; resolved from the working directory when omitted
     pub key: Option<String>,
+    /// Same as the positional, for callers that prefer a flag
+    #[arg(long, conflicts_with = "key")]
+    pub order: Option<String>,
+}
+
+impl KeyArg {
+    pub fn get(&self) -> Option<&str> {
+        self.order.as_deref().or(self.key.as_deref())
+    }
 }
 
 #[derive(Subcommand, Debug)]
@@ -147,6 +156,7 @@ pub struct DraftDropArgs {
 }
 
 #[derive(ValueEnum, Debug, Clone, Copy)]
+#[clap(rename_all = "snake_case")]
 pub enum ProjectTypeArg {
     Tool,
     CvMl,
@@ -169,6 +179,7 @@ impl ProjectTypeArg {
 }
 
 #[derive(ValueEnum, Debug, Clone, Copy)]
+#[clap(rename_all = "snake_case")]
 pub enum StatusArg {
     Queued,
     InProgress,
@@ -236,6 +247,9 @@ pub struct LsArgs {
 #[derive(Args, Debug)]
 pub struct ChangeArgs {
     pub key: Option<String>,
+    /// Same as the positional, for callers that prefer a flag
+    #[arg(long, conflicts_with = "key")]
+    pub order: Option<String>,
     #[arg(long)]
     pub desc: String,
     /// Major units; may be negative
@@ -246,6 +260,9 @@ pub struct ChangeArgs {
 #[derive(Args, Debug)]
 pub struct PriceArgs {
     pub key: Option<String>,
+    /// Same as the positional, for callers that prefer a flag
+    #[arg(long, conflicts_with = "key")]
+    pub order: Option<String>,
     #[arg(long)]
     pub amount: String,
     #[arg(long)]
@@ -263,6 +280,9 @@ pub struct NoteArgs {
 #[derive(Args, Debug)]
 pub struct PaidArgs {
     pub key: Option<String>,
+    /// Same as the positional, for callers that prefer a flag
+    #[arg(long, conflicts_with = "key")]
+    pub order: Option<String>,
     /// YYYY-MM-DD, default today
     #[arg(long)]
     pub date: Option<String>,
@@ -274,6 +294,9 @@ pub struct PaidArgs {
 #[derive(Args, Debug)]
 pub struct ScorecardArgs {
     pub key: Option<String>,
+    /// Same as the positional, for callers that prefer a flag
+    #[arg(long, conflicts_with = "key")]
+    pub order: Option<String>,
     #[arg(long)]
     pub decisions: i64,
     #[arg(long)]
@@ -292,6 +315,9 @@ pub struct ScorecardArgs {
 #[derive(Args, Debug)]
 pub struct ArchiveArgs {
     pub key: Option<String>,
+    /// Same as the positional, for callers that prefer a flag
+    #[arg(long, conflicts_with = "key")]
+    pub order: Option<String>,
     #[arg(long)]
     pub yes: bool,
     #[arg(long)]
@@ -306,6 +332,9 @@ pub struct ArchiveArgs {
 #[derive(Args, Debug)]
 pub struct CancelArgs {
     pub key: Option<String>,
+    /// Same as the positional, for callers that prefer a flag
+    #[arg(long, conflicts_with = "key")]
+    pub order: Option<String>,
     #[arg(long)]
     pub reason: String,
     #[arg(long)]
@@ -346,12 +375,14 @@ impl PackageCmd {
 }
 
 #[derive(ValueEnum, Debug, Clone, Copy)]
+#[clap(rename_all = "snake_case")]
 pub enum KindArg {
     Full,
     Preview,
 }
 
 #[derive(ValueEnum, Debug, Clone, Copy)]
+#[clap(rename_all = "snake_case")]
 pub enum ChannelArg {
     Phone,
     Other,

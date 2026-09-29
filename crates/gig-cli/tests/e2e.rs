@@ -317,7 +317,7 @@ fn adopt_registers_without_touching_files() {
         "800",
         "--adopt",
         "--status",
-        "in-progress",
+        "in_progress",
     ]);
     assert!(ok, "{v}");
     assert_eq!(v["data"]["order"]["status"], "in_progress");

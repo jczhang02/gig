@@ -364,7 +364,7 @@ pub fn plan(opts: &Options) -> Result<Report> {
             &label,
         );
         if let Some(wr) =
-            workflow_root.and_then(|w| rewrite(Some(w), &opts.fix_paths, &mut warnings, &label))
+            workflow_root.and_then(|w| rewrite(Some(w), &opts.fix_paths, &mut Vec::new(), &label))
         {
             if status == OrderStatus::Archived && archive_path.is_none() {
                 warnings.push(format!(

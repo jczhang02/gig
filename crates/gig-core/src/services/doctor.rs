@@ -40,7 +40,8 @@ pub fn run(ctx: &Ctx, fix: bool) -> Result<Report> {
         };
         match root.map(Path::new) {
             Some(p) if p.is_dir() => {
-                if order.status.is_active() {
+                // Orders migrated from v1 predate the v2 file rules and are not retrofitted.
+                if order.status.is_active() && order.legacy_id.is_none() {
                     for f in [".gig/JOB.md", ".gig/QUOTE.md"] {
                         if !p.join(f).is_file() {
                             problem(&mut problems, &scope, format!("missing {f}"));
