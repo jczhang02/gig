@@ -286,7 +286,7 @@ pub fn render(frame: &mut Frame, area: Rect, cx: &RenderCx) {
     let (heading, keys) = view_keys(cx.state);
     let left = key_column(cx, "global", GLOBAL_KEYS);
     let right = key_column(cx, heading, keys);
-    let left_w = left.iter().map(Line::width).max().unwrap_or(0) + 4;
+    let left_w = left.iter().map(Line::width).max().unwrap_or(0) + 3;
     let footer = Line::from(vec![
         Span::styled(format!("theme {}", t.name), t.muted()),
         Span::raw("   "),

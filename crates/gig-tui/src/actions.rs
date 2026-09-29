@@ -404,8 +404,51 @@ pub fn popup_key(ui: &mut UiState, key: KeyEvent) -> Effect {
     }
 }
 
+/// Checks that need no database round trip: the slug of a new order or
+/// draft is valid and free. Each problem is set on its field; true when
+/// there is none.
+fn validate(ui: &UiState, form: &mut Form) -> bool {
+    let taken: Vec<&str> = match form.kind {
+        FormKind::NewOrder => ui
+            .data
+            .orders
+            .iter()
+            .map(|r| r.order.slug.as_str())
+            .collect(),
+        FormKind::NewDraft => ui.data.drafts.iter().map(|d| d.slug.as_str()).collect(),
+        _ => return true,
+    };
+    let Some(field) = form.field_mut("slug") else {
+        return true;
+    };
+    if field.locked {
+        return true;
+    }
+    let slug = field.value().trim().to_string();
+    field.error = if slug.is_empty() {
+        Some("slug is required".into())
+    } else if gig_core::services::validate_slug(&slug).is_err() {
+        Some("lowercase letters, digits, - _ . only".into())
+    } else if taken.contains(&slug.as_str()) {
+        Some("slug already exists".into())
+    } else {
+        None
+    };
+    field.error.is_none()
+}
+
 /// A submitted form: a call, or (for cancel) the typed-`y` confirmation.
-fn submit(ui: &mut UiState, form: Form) -> Effect {
+fn submit(ui: &mut UiState, mut form: Form) -> Effect {
+    if !validate(ui, &mut form) {
+        let which = form
+            .fields
+            .iter()
+            .find_map(|f| f.error.as_ref().map(|e| format!("{}: {e}", f.label)))
+            .unwrap_or_default();
+        ui.toast = Some(crate::app::Toast::error(which));
+        ui.popup = Some(Popup::Form(form));
+        return Effect::None;
+    }
     let f = |label: &str| form.get(label).to_string();
     let action = match &form.kind {
         FormKind::Paid { slug } => Action::Paid {

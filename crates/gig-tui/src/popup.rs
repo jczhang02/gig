@@ -6,7 +6,7 @@ use crate::actions::{Effect, FormKind};
 use crate::text;
 use crate::theme::Theme;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Clear, Paragraph};
@@ -20,6 +20,9 @@ pub struct Field {
     pub kind: FieldKind,
     /// Shown but not editable (the slug when promoting a draft).
     pub locked: bool,
+    /// Validation message drawn under the field; submit is refused
+    /// while any field has one.
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -63,6 +66,7 @@ impl Field {
             label: label.to_string(),
             kind,
             locked: false,
+            error: None,
         }
     }
 
@@ -179,6 +183,7 @@ impl Form {
                 if f.locked {
                     return PopupKey::None;
                 }
+                f.error = None;
                 match (&mut f.kind, code) {
                     (FieldKind::Text(s), KeyCode::Char(c))
                         if !key
@@ -391,7 +396,13 @@ impl Popup {
     /// A gig-core refusal, shown verbatim with its code (as the hint line
     /// shows refresh errors).
     pub fn error(e: &gig_core::Error) -> Self {
-        Self::error_text("refused", format!("{}: {e}", e.code()))
+        Popup::Message {
+            title: "refused".into(),
+            lines: vec![e.code().to_string(), e.to_string()],
+            error: true,
+            ok: false,
+            scroll: Scroll::default(),
+        }
     }
 
     /// A routine confirmation (upload, mark sent).
@@ -586,135 +597,114 @@ pub fn open(
     }
 }
 
-/// Width of the popup box, clamped to the frame.
-const WIDTH: u16 = 76;
+/// Outer widths of section 12.1, before clamping to the frame.
+const FORM_WIDTH: u16 = 64;
+const NOTE_WIDTH: u16 = 56;
+
+/// A key hint line: keys bold `key`, labels `muted`, pairs 2 apart.
+fn hint_line(t: &Theme, pairs: &[(&str, &str)]) -> Line<'static> {
+    let mut spans = Vec::new();
+    for (i, (k, label)) in pairs.iter().enumerate() {
+        if i > 0 {
+            spans.push(Span::raw("  "));
+        }
+        spans.push(Span::styled(k.to_string(), t.key()));
+        spans.push(Span::styled(format!(" {label}"), t.muted()));
+    }
+    Line::from(spans)
+}
 
 pub fn render(frame: &mut Frame, area: Rect, popup: &Popup, theme: &Theme) {
-    // Near the WIDTH the box takes the frame less a 1-cell margin, so no
-    // sliver of the list shows (cut glyphs, ellipses) beside it.
-    let box_width = if area.width <= WIDTH + 4 {
-        area.width.saturating_sub(2).max(area.width.min(10))
-    } else {
-        WIDTH
+    let t = theme;
+    let (width, tone) = match popup {
+        Popup::Form(_) => (FORM_WIDTH, Tone::Plain),
+        Popup::Pick(_) => (FORM_WIDTH, Tone::External),
+        Popup::Confirm { danger: true, .. } => (NOTE_WIDTH, Tone::Danger),
+        Popup::Confirm { .. } => (NOTE_WIDTH, Tone::External),
+        Popup::Progress { .. } => (NOTE_WIDTH, Tone::External),
+        Popup::Busy { .. } => (NOTE_WIDTH, Tone::Plain),
+        Popup::Message { error: true, .. } => (NOTE_WIDTH, Tone::Danger),
+        Popup::Message { ok: true, .. } => (NOTE_WIDTH, Tone::Done),
+        Popup::Message { .. } => (NOTE_WIDTH, Tone::Plain),
     };
-    let inner_width = usize::from(box_width.saturating_sub(4)).max(1);
-    // Body lines are pre-wrapped to `inner_width`, so their count is the
-    // exact height; the footer (key hints) is pinned under the body and
-    // stays visible however long the body is.
-    let (title, title_style, body, footer, scroll): (String, _, Vec<Line>, Vec<Line>, _) =
-        match popup {
-            Popup::Form(form) => (
-                form.title.clone(),
-                theme.title(),
-                form_lines(form, theme, inner_width),
-                vec![form_hint(theme)],
-                None,
+    let width = width.min(area.width.saturating_sub(4)).max(12);
+    // Content width inside the frame and the padding.
+    let inner_w = usize::from(width.saturating_sub(2 + 4)).max(1);
+    let (title, body, footer, scroll): (String, Vec<Line>, Line, Option<&Scroll>) = match popup {
+        Popup::Form(form) => (
+            form.title.clone(),
+            form_lines(form, t, inner_w),
+            hint_line(
+                t,
+                &[
+                    ("Tab", "next"),
+                    ("Space", "choose"),
+                    ("Enter", "submit"),
+                    ("Esc", "cancel"),
+                ],
             ),
-            Popup::Confirm {
-                title,
-                lines,
-                scroll,
-                danger,
-                ..
-            } => (
-                title.clone(),
-                if *danger {
-                    theme.error()
-                } else {
-                    theme.title()
-                },
-                wrapped(lines, theme.text(), inner_width),
-                vec![Line::from(vec![
-                    Span::styled(" y ", theme.key()),
-                    Span::styled("confirm   any other key cancels", theme.muted()),
-                ])],
-                Some(scroll),
+            None,
+        ),
+        Popup::Pick(pick) => (
+            pick.title.clone(),
+            pick_lines(pick, t, inner_w),
+            hint_line(
+                t,
+                &[
+                    ("\u{2191}\u{2193}", "choose"),
+                    ("Enter", "pick"),
+                    ("Esc", "cancel"),
+                ],
             ),
-            Popup::Pick(pick) => (
-                pick.title.clone(),
-                theme.title(),
-                pick_lines(pick, theme, inner_width),
-                vec![pick_hint(theme)],
-                None,
-            ),
-            Popup::Progress {
-                title,
-                sent,
-                total,
-                frame,
-            } => (
-                title.clone(),
-                theme.title(),
-                progress_lines(*sent, *total, *frame, theme, inner_width),
-                vec![Line::from(Span::styled(
-                    "One upload at a time; please wait.",
-                    theme.muted(),
-                ))],
-                None,
-            ),
-            Popup::Busy { title, text } => (
-                title.clone(),
-                theme.title(),
-                wrapped(std::slice::from_ref(text), theme.text(), inner_width),
-                vec![Line::from(Span::styled("please wait", theme.muted()))],
-                None,
-            ),
-            Popup::Message {
-                title,
-                lines,
-                error,
-                ok,
-                scroll,
-            } => {
-                let style = if *error { theme.error() } else { theme.text() };
-                let ts = if *error {
-                    theme.error()
-                } else if *ok {
-                    theme.title().fg(theme.accent)
-                } else {
-                    theme.title()
-                };
-                (
-                    title.clone(),
-                    ts,
-                    wrapped(lines, style, inner_width),
-                    vec![Line::from(vec![
-                        Span::styled(" Enter/Esc ", theme.key()),
-                        Span::styled("close", theme.muted()),
-                    ])],
-                    Some(scroll),
-                )
-            }
-        };
-    let footer_rows = footer.len() as u16 + 1; // a blank line above the hints
-    let want = (body.len() as u16)
-        .saturating_add(footer_rows)
-        .saturating_add(2);
-    let height = want.min(area.height);
-    let rect = area.centered(Constraint::Length(box_width), Constraint::Length(height));
-    frame.render_widget(Clear, rect);
-    let block = Block::bordered()
-        .border_type(BorderType::Rounded)
-        .border_style(theme.border())
-        .title(Span::styled(
-            format!(
-                " {} ",
-                text::truncate(&title, usize::from(box_width.saturating_sub(6)))
-            ),
-            title_style,
-        ))
-        .style(theme.base());
-    let inner = block.inner(rect);
-    frame.render_widget(block, rect);
-    let inner = Rect {
-        x: inner.x + 1,
-        width: inner.width.saturating_sub(2),
-        ..inner
+            None,
+        ),
+        Popup::Confirm {
+            title,
+            lines,
+            scroll,
+            ..
+        } => (
+            title.clone(),
+            confirm_lines(lines, t, inner_w),
+            hint_line(t, &[("y", "yes"), ("Esc", "no")]),
+            Some(scroll),
+        ),
+        Popup::Progress {
+            title,
+            sent,
+            total,
+            frame: n,
+        } => (
+            title.clone(),
+            progress_lines(*sent, *total, *n, t, inner_w),
+            Line::from(Span::styled("one upload at a time, keys wait", t.muted())),
+            None,
+        ),
+        Popup::Busy { title, text } => (
+            title.clone(),
+            message_lines(std::slice::from_ref(text), false, t, inner_w),
+            Line::from(Span::styled("please wait", t.muted())),
+            None,
+        ),
+        Popup::Message {
+            title,
+            lines,
+            error,
+            scroll,
+            ..
+        } => (
+            title.clone(),
+            message_lines(lines, *error, t, inner_w),
+            hint_line(t, &[("Enter", "close")]),
+            Some(scroll),
+        ),
     };
-    let footer_h = footer_rows.min(inner.height);
-    let [body_area, footer_area] =
-        Layout::vertical([Constraint::Min(0), Constraint::Length(footer_h)]).areas(inner);
-    let hidden = (body.len() as u16).saturating_sub(body_area.height);
+    // Body, a blank row, the footer.
+    let want = (body.len() as u16).saturating_add(2);
+    let inner = open(frame, area, width, want, &title, tone, t);
+    let footer_y = inner.bottom().saturating_sub(1);
+    let body_h = inner.height.saturating_sub(2);
+    let hidden = (body.len() as u16).saturating_sub(body_h);
     let offset = match scroll {
         Some(s) => {
             s.max.set(hidden);
@@ -726,139 +716,336 @@ pub fn render(frame: &mut Frame, area: Rect, popup: &Popup, theme: &Theme) {
     if hidden > 0 {
         let more = if scroll.is_some() {
             format!(
-                "  Up/Dn scroll ({}/{})",
-                offset + body_area.height.min(body.len() as u16),
+                "   \u{2191}\u{2193} scroll {}/{}",
+                offset + body_h.min(body.len() as u16),
                 body.len()
             )
         } else {
-            format!("  ({hidden} more lines)")
+            format!("   \u{2193} {hidden} more")
         };
-        if let Some(first) = footer.first_mut() {
-            first.push_span(Span::styled(more, theme.muted()));
+        footer.push_span(Span::styled(more, t.muted()));
+    }
+    // The form cursor: the real terminal cursor in the focused value.
+    if let Popup::Form(form) = popup {
+        if let Some((row, col)) = form_cursor(form, inner_w) {
+            let y = inner.y + row as u16;
+            if y < inner.y + body_h {
+                frame.set_cursor_position((inner.x + col as u16, y));
+            }
+        }
+        // The focus band spans the row inside the frame, marker included.
+        if let Some(row) = form_focus_row(form) {
+            let y = inner.y + row as u16;
+            if y < inner.y + body_h && !t.no_color() {
+                let buf = frame.buffer_mut();
+                let x0 = inner.x.saturating_sub(PAD_X);
+                for x in x0..inner.right() + PAD_X {
+                    buf[(x, y)].set_bg(t.sel);
+                }
+            }
         }
     }
-    frame.render_widget(Paragraph::new(body).scroll((offset, 0)), body_area);
-    let mut footer_lines = vec![Line::raw("")];
-    footer_lines.extend(footer);
-    // With only one row left, the hint wins over the blank line.
-    let skip = footer_lines
-        .len()
-        .saturating_sub(usize::from(footer_area.height));
     frame.render_widget(
-        Paragraph::new(footer_lines.split_off(skip.min(1))),
-        footer_area,
+        Paragraph::new(body).scroll((offset, 0)),
+        Rect {
+            x: inner.x.saturating_sub(PAD_X),
+            width: inner.width + PAD_X,
+            height: body_h,
+            ..inner
+        },
     );
+    if inner.height > 0 {
+        frame.render_widget(
+            Paragraph::new(footer),
+            Rect::new(inner.x, footer_y, inner.width, 1),
+        );
+    }
 }
 
-/// `lines` hard-wrapped at `width` display cells (Chinese text included);
-/// embedded newlines start new rows.
-fn wrapped<'a>(lines: &[String], style: Style, width: usize) -> Vec<Line<'a>> {
-    lines
-        .iter()
-        .flat_map(|l| l.split('\n'))
+/// `label: value` split, for lines that read as facts.
+fn fact(line: &str) -> Option<(&str, &str)> {
+    let (k, v) = line.split_once(": ")?;
+    let is_label = !k.is_empty()
+        && k.len() <= 16
+        && k.chars()
+            .all(|c| c.is_ascii_lowercase() || c == ' ' || c == '_');
+    is_label.then_some((k, v))
+}
+
+/// Rows of text wrapped at `width`, indented `lead` cells (the 2-cell
+/// padding that holds the form marker).
+fn rows(text: &str, style: Style, width: usize) -> Vec<Line<'static>> {
+    text.split('\n')
         .flat_map(|l| text::wrap(l, width))
-        .map(|row| Line::from(Span::styled(row, style)))
+        .map(|r| Line::from(vec![gap(PAD_X), Span::styled(r, style)]))
         .collect()
+}
+
+fn gap(n: u16) -> Span<'static> {
+    Span::raw(" ".repeat(usize::from(n)))
+}
+
+/// Result and information lines: facts as muted label and text value,
+/// links underlined, clipboard notes muted. A refusal's first line (its
+/// code) is bold.
+fn message_lines(lines: &[String], error: bool, t: &Theme, width: usize) -> Vec<Line<'static>> {
+    let mut out = Vec::new();
+    for (i, l) in lines.iter().enumerate() {
+        if error && i == 0 && lines.len() > 1 {
+            out.extend(rows(l, t.title().fg(t.unpaid), width));
+            continue;
+        }
+        if error {
+            out.extend(rows(l, t.text(), width));
+            continue;
+        }
+        let looks_like_link = !l.contains(' ') && (l.contains("://") || l.starts_with("go."));
+        if looks_like_link {
+            out.extend(rows(l, t.link(), width));
+        } else if l.starts_with("copied to")
+            || l.starts_with("clipboard unavailable")
+            || l.starts_with("  ")
+        {
+            out.extend(rows(l, t.muted(), width));
+        } else if let Some((k, v)) = fact(l) {
+            let lead = format!("{k}  ");
+            let mut spans = vec![gap(PAD_X), Span::styled(lead.clone(), t.muted())];
+            let first = text::wrap(v, width.saturating_sub(text::width(&lead)));
+            let hang = PAD_X as usize + text::width(&lead);
+            for (j, r) in first.into_iter().enumerate() {
+                if j == 0 {
+                    spans.push(Span::styled(r, t.text()));
+                    out.push(Line::from(std::mem::take(&mut spans)));
+                } else {
+                    out.push(Line::from(vec![
+                        Span::raw(" ".repeat(hang)),
+                        Span::styled(r, t.text()),
+                    ]));
+                }
+            }
+        } else {
+            out.extend(rows(l, t.text(), width));
+        }
+    }
+    out
+}
+
+/// A confirmation: the facts as a label/value block, a blank row, the
+/// question in bold, a blank row (section 12.4).
+fn confirm_lines(lines: &[String], t: &Theme, width: usize) -> Vec<Line<'static>> {
+    let question: Vec<&String> = lines
+        .iter()
+        .filter(|l| l.trim_end().ends_with('?'))
+        .collect();
+    let facts: Vec<&String> = lines
+        .iter()
+        .filter(|l| !l.trim_end().ends_with('?'))
+        .collect();
+    let label_w = facts
+        .iter()
+        .filter_map(|l| fact(l))
+        .map(|(k, _)| text::width(k))
+        .max()
+        .unwrap_or(0);
+    let mut out = Vec::new();
+    for l in &facts {
+        match fact(l) {
+            Some((k, v)) => {
+                let value_w = width.saturating_sub(label_w + 2);
+                let mut spans = vec![
+                    gap(PAD_X),
+                    Span::styled(format!("{k:>label_w$}  "), t.muted()),
+                ];
+                if k == "warning" {
+                    spans.push(Span::styled(
+                        text::truncate(v, value_w),
+                        t.text().fg(t.warranty),
+                    ));
+                    out.push(Line::from(spans));
+                    for more in text::wrap(v, value_w).into_iter().skip(1) {
+                        out.push(Line::from(vec![
+                            gap(PAD_X),
+                            Span::raw(" ".repeat(label_w + 2)),
+                            Span::styled(more, t.text().fg(t.warranty)),
+                        ]));
+                    }
+                    continue;
+                }
+                if k == "order" {
+                    // `delivered -> paid`: the resulting state as its chip.
+                    if let Some((from, to)) = v.split_once(" -> ") {
+                        use gig_core::models::OrderStatus;
+                        let word = |s: &str| {
+                            OrderStatus::parse(s)
+                                .map_or(s.to_string(), |s| crate::views::status_word(s).to_string())
+                        };
+                        spans.push(Span::styled(format!("{} -> ", word(from)), t.muted()));
+                        let style = OrderStatus::parse(to).map_or(t.text(), |s| t.status(s));
+                        spans.push(Span::styled(word(to), style));
+                        out.push(Line::from(spans));
+                        continue;
+                    }
+                }
+                let shown = if v.contains('/') && !v.contains(' ') {
+                    text::truncate_middle(v, value_w, value_w / 2)
+                } else {
+                    text::truncate(v, value_w)
+                };
+                spans.push(Span::styled(shown, t.text()));
+                out.push(Line::from(spans));
+            }
+            None => out.extend(rows(l, t.muted(), width)),
+        }
+    }
+    for q in question {
+        if !out.is_empty() {
+            out.push(Line::raw(""));
+        }
+        out.extend(rows(q, t.title(), width));
+    }
+    out
 }
 
 /// Label column width in forms.
 const LABEL: usize = 14;
 
-fn form_lines<'a>(form: &Form, t: &Theme, width: usize) -> Vec<Line<'a>> {
+/// ASCII hint text shown in an empty, unfocused field.
+fn placeholder(label: &str) -> Option<&'static str> {
+    Some(match label {
+        "slug" => "slug, lowercase-with-dashes",
+        "price" | "amount" => "e.g. 800",
+        "price delta" => "e.g. 200 or -100",
+        "date" => "YYYY-MM-DD",
+        "material" | "path" => "~/path/to/file",
+        "platform" => "xianyu, taobao, ...",
+        _ => return None,
+    })
+}
+
+/// Row of the focused field.
+fn form_focus_row(form: &Form) -> Option<usize> {
+    let mut row = 0;
+    for (i, f) in form.fields.iter().enumerate() {
+        if i == form.focus && !f.locked {
+            return Some(row);
+        }
+        row += 1 + usize::from(f.error.is_some());
+    }
+    None
+}
+
+/// Row and column (from the content edge) of the cursor in the focused
+/// text field.
+fn form_cursor(form: &Form, width: usize) -> Option<(usize, usize)> {
+    let row = form_focus_row(form)?;
+    let f = form.fields.get(form.focus)?;
+    let FieldKind::Text(s) = &f.kind else {
+        return None;
+    };
+    let value_w = width.saturating_sub(LABEL + 2);
+    let shown = text::width(&text::tail(s, value_w.saturating_sub(1)));
+    Some((row, LABEL + 2 + shown))
+}
+
+fn form_lines(form: &Form, t: &Theme, width: usize) -> Vec<Line<'static>> {
     let mut out = Vec::new();
-    let value_width = width.saturating_sub(LABEL + 2);
+    let value_w = width.saturating_sub(LABEL + 2);
+    let italic_dim = t.dim().add_modifier(Modifier::ITALIC);
     for (i, f) in form.fields.iter().enumerate() {
         let focused = i == form.focus && !f.locked;
-        let label_style = if focused { t.key() } else { t.muted() };
+        let label_style = if focused { t.text() } else { t.muted() };
         let value_style = if f.locked { t.muted() } else { t.text() };
-        let value = match &f.kind {
-            FieldKind::Text(s) => {
-                if focused {
-                    // Keep the end of long input visible.
-                    let shown = text::tail(s, value_width.saturating_sub(1));
-                    format!("{shown}_")
-                } else {
-                    text::truncate(s, value_width)
+        let mut spans = vec![
+            if focused {
+                Span::styled(crate::views::SELECTED_MARK, t.accent())
+            } else {
+                Span::raw(" ")
+            },
+            Span::raw(" "),
+            Span::styled(
+                format!("{:>LABEL$}", text::truncate(&f.label, LABEL)),
+                label_style,
+            ),
+            Span::raw("  "),
+        ];
+        match &f.kind {
+            FieldKind::Text(s) if s.is_empty() && !focused => {
+                if let Some(p) = placeholder(&f.label) {
+                    spans.push(Span::styled(p, italic_dim));
                 }
+            }
+            FieldKind::Text(s) => {
+                // Long input keeps its end (and the cursor) in view.
+                let shown = if focused {
+                    text::tail(s, value_w.saturating_sub(1))
+                } else {
+                    text::truncate(s, value_w)
+                };
+                spans.push(Span::styled(shown, value_style));
             }
             FieldKind::Select { options, idx } => {
                 let v = options.get(*idx).map_or("", String::as_str);
-                text::truncate(&format!("< {v} >"), value_width)
+                spans.push(Span::styled("\u{2039} ", t.muted()));
+                spans.push(Span::styled(
+                    text::truncate(v, value_w.saturating_sub(4)),
+                    value_style,
+                ));
+                spans.push(Span::styled(" \u{203a}", t.muted()));
             }
-            FieldKind::Toggle(on) => (if *on { "[x]" } else { "[ ]" }).to_string(),
+            FieldKind::Toggle(on) => {
+                let (box_, word) = if *on { ("[x]", "yes") } else { ("[ ]", "no") };
+                spans.push(Span::styled(box_, t.muted()));
+                spans.push(Span::styled(format!(" {word}"), value_style));
+            }
+            FieldKind::Editor(s) if s.trim().is_empty() => {
+                spans.push(Span::styled("Enter opens $EDITOR", italic_dim));
+            }
             FieldKind::Editor(s) => {
                 let first = s.lines().next().unwrap_or("");
-                let more = s.lines().count() > 1;
-                let shown = if s.trim().is_empty() {
-                    "(empty; Enter opens $EDITOR)".to_string()
-                } else if more {
-                    format!("{first} ...")
+                let more = s.lines().count().saturating_sub(1);
+                let tail = if more > 0 {
+                    format!("  (+{more} {})", if more == 1 { "line" } else { "lines" })
                 } else {
-                    first.to_string()
+                    String::new()
                 };
-                text::truncate(&shown, value_width)
+                spans.push(Span::styled(
+                    text::truncate(first, value_w.saturating_sub(text::width(&tail))),
+                    value_style,
+                ));
+                spans.push(Span::styled(tail, t.muted()));
             }
-        };
-        let mut spans = vec![Span::styled(text::fit(&f.label, LABEL), label_style)];
-        spans.push(Span::raw("  "));
-        let (value, style) = if focused {
-            // The band spans the whole value column, so an empty field is
-            // as visible as a filled one.
-            (
-                text::fit(&value, value_width),
-                value_style.patch(t.selected()),
-            )
-        } else {
-            (value, value_style)
-        };
-        spans.push(Span::styled(value, style));
+        }
         out.push(Line::from(spans));
+        if let Some(e) = &f.error {
+            out.push(Line::from(vec![
+                Span::raw(" ".repeat(2 + LABEL + 2)),
+                Span::styled(text::truncate(&format!("! {e}"), value_w), t.error()),
+            ]));
+        }
     }
     out
 }
 
-fn form_hint<'a>(t: &Theme) -> Line<'a> {
-    Line::from(vec![
-        Span::styled(" Tab ", t.key()),
-        Span::styled("next  ", t.muted()),
-        Span::styled("Space ", t.key()),
-        Span::styled("choose  ", t.muted()),
-        Span::styled("Enter ", t.key()),
-        Span::styled("submit / edit  ", t.muted()),
-        Span::styled("Esc ", t.key()),
-        Span::styled("cancel", t.muted()),
-    ])
-}
-
-fn pick_lines<'a>(pick: &Pick, t: &Theme, width: usize) -> Vec<Line<'a>> {
-    let out: Vec<Line> = pick
-        .items
+fn pick_lines(pick: &Pick, t: &Theme, width: usize) -> Vec<Line<'static>> {
+    pick.items
         .iter()
         .enumerate()
         .map(|(i, (_, label))| {
-            let shown = text::truncate(label, width.saturating_sub(2));
+            let shown = text::truncate(label, width);
             if i == pick.selected {
+                let pad = width.saturating_sub(text::width(&shown));
                 Line::from(vec![
-                    Span::styled("> ", t.key()),
-                    Span::styled(shown, t.text().patch(t.selected())),
+                    Span::styled(crate::views::SELECTED_MARK, t.accent()),
+                    Span::raw(" "),
+                    Span::styled(shown, t.title()),
+                    Span::raw(" ".repeat(pad)),
                 ])
+                .style(t.selected())
             } else {
-                Line::from(vec![Span::raw("  "), Span::styled(shown, t.text())])
+                Line::from(vec![gap(PAD_X), Span::styled(shown, t.text())])
             }
         })
-        .collect();
-    out
-}
-
-fn pick_hint<'a>(t: &Theme) -> Line<'a> {
-    Line::from(vec![
-        Span::styled(" Up/Dn ", t.key()),
-        Span::styled("choose  ", t.muted()),
-        Span::styled("Enter ", t.key()),
-        Span::styled("pick  ", t.muted()),
-        Span::styled("Esc ", t.key()),
-        Span::styled("cancel", t.muted()),
-    ])
+        .collect()
 }
 
 const SPINNER: [&str; 10] = [
@@ -866,37 +1053,54 @@ const SPINNER: [&str; 10] = [
     "\u{2807}", "\u{280f}",
 ];
 
-/// A text bar (so it wraps and clips like the other popup lines), or a
-/// spinner while the uploader has not reported.
-fn progress_lines<'a>(
+/// Partial cells of the progress fill: `▏▎▍▌▋▊▉`.
+const PARTS: [&str; 7] = [
+    "\u{258f}", "\u{258e}", "\u{258d}", "\u{258c}", "\u{258b}", "\u{258a}", "\u{2589}",
+];
+
+/// The fill on its track, the percentage and the sizes; or the spinner
+/// while the uploader has not reported (single PUT).
+fn progress_lines(
     sent: u64,
     total: u64,
     frame: usize,
     t: &Theme,
     width: usize,
-) -> Vec<Line<'a>> {
-    let status = if total == 0 {
+) -> Vec<Line<'static>> {
+    let line = if total == 0 {
         Line::from(vec![
-            Span::styled(SPINNER[frame % SPINNER.len()], t.key()),
-            Span::styled(" sending", t.text()),
+            gap(PAD_X),
+            Span::styled(SPINNER[frame % SPINNER.len()], t.accent()),
+            Span::styled(" uploading", t.muted()),
         ])
     } else {
         let ratio = (sent as f64 / total as f64).clamp(0.0, 1.0);
-        let label = format!(
-            " {:>3}%  {} / {}",
-            (ratio * 100.0).round() as u64,
+        let pct = format!("  {:>3}%", (ratio * 100.0).round() as u64);
+        let sizes = format!(
+            "  {} / {}",
             crate::upload::human_size(sent.min(total)),
             crate::upload::human_size(total)
         );
-        let bar = width.saturating_sub(text::width(&label)).clamp(1, 40);
-        let filled = ((bar as f64) * ratio).round() as usize;
+        let bar = width
+            .saturating_sub(text::width(&pct) + text::width(&sizes))
+            .clamp(1, 40);
+        let eighths = (bar as f64 * 8.0 * ratio).round() as usize;
+        let (full, part) = (eighths / 8, eighths % 8);
+        let mut fill = "\u{2588}".repeat(full);
+        let mut used = full;
+        if part > 0 && used < bar {
+            fill.push_str(PARTS[part - 1]);
+            used += 1;
+        }
         Line::from(vec![
-            Span::styled("\u{2588}".repeat(filled), t.key()),
-            Span::styled("\u{2591}".repeat(bar - filled), t.muted()),
-            Span::styled(label, t.text()),
+            gap(PAD_X),
+            Span::styled(fill, t.accent()),
+            Span::styled("\u{2500}".repeat(bar - used), t.border()),
+            Span::styled(pct, t.text()),
+            Span::styled(sizes, t.muted()),
         ])
     };
-    vec![status]
+    vec![line]
 }
 
 #[cfg(test)]
@@ -1012,7 +1216,14 @@ mod tests {
             .iter()
             .map(|c| c.symbol())
             .collect();
-        for label in ["slug", "title", "< custom >", "[ ]", "$EDITOR", "Esc"] {
+        for label in [
+            "slug",
+            "title",
+            "\u{2039} custom \u{203a}",
+            "[ ] no",
+            "Enter opens $EDITOR",
+            "Esc cancel",
+        ] {
             assert!(text.contains(label), "{label}");
         }
     }
@@ -1060,7 +1271,7 @@ mod tests {
         assert!(text.contains("dirty file 01"));
         assert!(!text.contains("dirty file 40"));
         assert!(text.contains("close"), "hint pinned");
-        assert!(text.contains("Up/Dn scroll"), "{text}");
+        assert!(text.contains("scroll 16/40"), "{text}");
         // End scrolls to the bottom (max set by the last render).
         assert_eq!(p.handle_key(key(KeyCode::End)), PopupKey::None);
         let text = screen(&p, 80, 24);
@@ -1079,7 +1290,7 @@ mod tests {
         let lines: Vec<String> = (1..=40).map(|i| format!("warning {i}")).collect();
         let mut p = Popup::confirm("upload", lines, Effect::None);
         let text = screen(&p, 80, 24);
-        assert!(text.contains("confirm"), "{text}");
+        assert!(text.contains("y yes  Esc no"), "{text}");
         assert_eq!(p.handle_key(key(KeyCode::Down)), PopupKey::None);
         let chord = KeyEvent::new(KeyCode::Char('y'), KeyModifiers::CONTROL);
         assert_eq!(p.handle_key(chord), PopupKey::Close);
@@ -1137,15 +1348,15 @@ mod tests {
                 .collect::<String>()
         };
         let text = draw(&p);
-        assert!(text.contains(" 25%  3.0 MB / 12.0 MB"), "{text}");
-        assert!(text.contains('\u{2588}') && text.contains('\u{2591}'));
+        assert!(text.contains("  25%  3.0 MB / 12.0 MB"), "{text}");
+        assert!(text.contains('\u{2588}') && text.contains('\u{2500}'));
         let spin = draw(&Popup::Progress {
             title: "uploading a-v1".into(),
             sent: 0,
             total: 0,
             frame: 1,
         });
-        assert!(spin.contains("\u{2819} sending"), "{spin}");
+        assert!(spin.contains("\u{2819} uploading"), "{spin}");
         assert!(!spin.contains('%'));
     }
 
@@ -1163,19 +1374,20 @@ mod tests {
                 .find(|&(x, y)| buf[(x, y)].symbol() == "T")
                 .unwrap();
             assert_eq!(
-                buf[(1, y)].symbol(),
+                buf[(12, y)].symbol(),
                 "\u{256d}",
-                "78-wide box at 80 columns"
+                "56-wide box at 80 columns"
             );
+            assert_eq!(buf[(67, y)].symbol(), "\u{256e}");
             buf[(x, y)].fg
         };
         let routine = Popup::confirm("Title", vec!["x".into()], Effect::None);
         let danger = Popup::confirm_danger("Title", vec!["x".into()], Effect::None);
-        assert_eq!(title_fg(&routine), Theme::DARK.text);
+        assert_eq!(title_fg(&routine), Theme::DARK.warranty);
         assert_eq!(title_fg(&danger), Theme::DARK.unpaid);
         assert_eq!(title_fg(&Popup::done("Title", vec![])), Theme::DARK.accent);
         let screen_text = screen(&routine, 80, 24);
-        assert!(screen_text.contains("any other key cancels"));
+        assert!(screen_text.contains("y yes"));
         let mut p = Popup::confirm(
             "c",
             (1..=40).map(|i| format!("w{i}")).collect(),

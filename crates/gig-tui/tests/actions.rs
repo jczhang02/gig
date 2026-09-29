@@ -215,7 +215,7 @@ fn refusals_are_shown_verbatim_and_change_nothing() {
     h.key(KeyCode::Enter);
     let text = h.popup_text();
     assert!(
-        text.contains("invalid_state: invalid state: paid needs delivered, order is queued"),
+        text.contains("invalid_state\ninvalid state: paid needs delivered, order is queued"),
         "{text}"
     );
     assert_eq!(h.order("tk-queued").status, OrderStatus::Queued);
@@ -264,6 +264,37 @@ fn cancel_needs_a_typed_y() {
     let o = h.order("tk-cancel");
     assert_eq!(o.status, OrderStatus::Cancelled);
     assert_eq!(o.cancel_reason.as_deref(), Some("client left"));
+}
+
+#[test]
+fn a_taken_slug_is_refused_in_the_form() {
+    let mut h = Harness::new();
+    h.register("tk-taken", Some(1000));
+    h.key(KeyCode::Char('N'));
+    h.chars("tk-taken");
+    h.key(KeyCode::Enter);
+    // No call: the form stays, the field says why, the message row too.
+    let Some(Popup::Form(form)) = &h.ui.popup else {
+        panic!("form kept, got {:?}", h.ui.popup)
+    };
+    assert_eq!(
+        form.field("slug").unwrap().error.as_deref(),
+        Some("slug already exists")
+    );
+    let toast = h.ui.toast.clone().expect("message row");
+    assert!(toast.text.contains("slug already exists"), "{toast:?}");
+    // Typing clears the error; a bad slug is caught too.
+    h.key(KeyCode::Backspace);
+    let Some(Popup::Form(form)) = &h.ui.popup else {
+        panic!()
+    };
+    assert_eq!(form.field("slug").unwrap().error, None);
+    h.chars("X Y");
+    h.key(KeyCode::Enter);
+    let Some(Popup::Form(form)) = &h.ui.popup else {
+        panic!()
+    };
+    assert!(form.field("slug").unwrap().error.is_some());
 }
 
 #[test]
@@ -668,7 +699,7 @@ fn upload_refusals_are_shown_before_confirming() {
     let text = h.popup_text();
     assert!(text.starts_with("refused\n"), "{text}");
     assert!(
-        text.contains("needs_check: ") && text.contains("changed since it was checked"),
+        text.contains("needs_check\n") && text.contains("changed since it was checked"),
         "{text}"
     );
     assert_eq!(h.order("tk-stale").status, OrderStatus::InProgress);
@@ -686,7 +717,8 @@ fn no_uploader_configured_is_an_error_not_a_panic() {
         panic!()
     };
     assert!(error);
-    assert_eq!(lines, vec![format!("{}: {e}", e.code())]);
+    // The code on its own line (drawn bold), then the message verbatim.
+    assert_eq!(lines, vec![e.code().to_string(), e.to_string()]);
 }
 
 #[test]

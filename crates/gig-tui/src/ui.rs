@@ -1271,6 +1271,131 @@ mod tests {
         assert!(!state.filter().editing);
     }
 
+    fn new_order_popup(error: bool) -> popup::Popup {
+        use crate::popup::{Field, Form};
+        let mut slug = Field::text("slug", "sers-colitis-v2");
+        if error {
+            slug.error = Some("slug already exists".into());
+        }
+        popup::Popup::Form(Form::new(
+            "new order",
+            crate::actions::FormKind::NewOrder,
+            vec![
+                slug,
+                Field::text("title", "小鼠结肠炎 SERS 二期"),
+                Field::text("price", ""),
+                Field::select("type", &["tool", "cv_ml"], "cv_ml"),
+                Field::toggle("from draft", false),
+                Field::editor("client words", ""),
+            ],
+        ))
+    }
+
+    #[test]
+    fn popups_scrim_the_screen_and_fix_cut_glyphs() {
+        for (w, h) in [(80, 24), (120, 36), (200, 50)] {
+            let state = UiState {
+                popup: Some(new_order_popup(false)),
+                ..sample()
+            };
+            let buf = render(w, h, &state, true);
+            // The box: 64 wide (or W - 4), top on the upper third.
+            let top = (0..h).find(|&y| row(&buf, y).contains("\u{256d}")).unwrap();
+            let r = row(&buf, top);
+            let left = crate::text::width(&r[..r.find('\u{256d}').unwrap()]) as u16;
+            let width = 64.min(w - 4);
+            assert_eq!(left, (w - width) / 2, "{w}x{h}");
+            let height = (top..h)
+                .find(|&y| row(&buf, y).contains('\u{256f}'))
+                .unwrap()
+                + 1
+                - top;
+            assert_eq!(top, ((h - height) / 3).max(1), "{w}x{h}");
+            let rect = Rect::new(left, top, width, height);
+            for y in 0..h {
+                for x in 0..w {
+                    let c = &buf[(x, y)];
+                    // The backend never styles the trailing half of a
+                    // wide glyph.
+                    let trailing = x > 0 && crate::text::width(buf[(x - 1, y)].symbol()) > 1;
+                    if rect.contains((x, y).into()) || trailing {
+                        continue;
+                    }
+                    assert_eq!(c.fg, Theme::DARK.dim, "{w}x{h} scrim at {x},{y}");
+                    assert!(!c.modifier.contains(Modifier::BOLD | Modifier::UNDERLINED));
+                }
+            }
+            // No half glyph on either side of the box.
+            for y in rect.top()..rect.bottom() {
+                assert_ne!(buf[(rect.right(), y)].symbol(), "", "{w}x{h} at row {y}");
+                let l = buf[(rect.left() - 1, y)].symbol();
+                assert!(
+                    crate::text::width(l) <= 1,
+                    "{w}x{h} wide glyph cut at row {y}"
+                );
+            }
+            // The fill is `surface`.
+            assert_eq!(buf[(left + 3, top + 1)].bg, Theme::DARK.surface);
+        }
+    }
+
+    #[test]
+    fn form_anatomy() {
+        let state = UiState {
+            popup: Some(new_order_popup(true)),
+            ..UiState::default()
+        };
+        let mut term = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        let icons = Icons::new(true);
+        let theme = Theme::DARK;
+        term.draw(|f| {
+            draw(
+                f,
+                &RenderCx {
+                    state: &state,
+                    theme: &theme,
+                    icons: &icons,
+                },
+            )
+        })
+        .unwrap();
+        let buf = term.backend().buffer().clone();
+        let text = all(&buf);
+        let (y, slug) = line_of(&text, "sers-colitis-v2").unwrap();
+        let y = y as u16;
+        // Marker in the padding, label right-aligned in 14 cells, the band.
+        assert!(
+            slug.contains("\u{2502}\u{258e}           slug  sers-colitis-v2"),
+            "{slug}"
+        );
+        let mx = crate::text::width(&slug[..slug.find('\u{258e}').unwrap()]) as u16;
+        assert_eq!(buf[(mx, y)].fg, Theme::DARK.accent);
+        assert_eq!(buf[(mx + 30, y)].bg, Theme::DARK.sel);
+        // The validation line under the value.
+        let below = text.lines().nth(usize::from(y) + 1).unwrap();
+        assert!(
+            below.contains("                  ! slug already exists"),
+            "{below}"
+        );
+        // Placeholder, select arrows, toggle, editor hint, footer.
+        for s in [
+            "price  e.g. 800",
+            "type  \u{2039} cv_ml \u{203a}",
+            "from draft  [ ] no",
+            "client words  Enter opens $EDITOR",
+            "Tab next  Space choose  Enter submit  Esc cancel",
+        ] {
+            assert!(text.contains(s), "{s}\n{text}");
+        }
+        let (py, p) = line_of(&text, "e.g. 800").unwrap();
+        let px = crate::text::width(&p[..p.find("e.g.").unwrap()]) as u16;
+        assert!(buf[(px, py as u16)].modifier.contains(Modifier::ITALIC));
+        // The terminal cursor sits after the typed slug.
+        let cur = term.get_cursor_position().unwrap();
+        let sx = crate::text::width(&slug[..slug.find("sers").unwrap()]) as u16;
+        assert_eq!((cur.x, cur.y), (sx + 15, y));
+    }
+
     #[test]
     fn toggle_and_filter_change_the_rows() {
         let mut state = sample();
