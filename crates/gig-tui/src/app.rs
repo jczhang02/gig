@@ -375,9 +375,12 @@ impl App {
             Effect::Call(action) => self.call(&action),
             Effect::EditField(index) => {
                 let initial = actions::field_text(&self.ui, index);
-                match terminal::suspend_while(term, || crate::editor::edit_text(&initial))? {
-                    Ok(text) => actions::set_edited_field(&mut self.ui, index, text),
-                    Err(e) => self.editor_failed(e),
+                // A failed editor (`:cq`) leaves the field as it was and
+                // keeps the half-filled form.
+                if let Ok(text) =
+                    terminal::suspend_while(term, || crate::editor::edit_text(&initial))?
+                {
+                    actions::set_edited_field(&mut self.ui, index, text);
                 }
             }
             Effect::EditNote { slug } => {

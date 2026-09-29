@@ -119,7 +119,13 @@ fn draw_banner(frame: &mut Frame, area: Rect, cx: &RenderCx) {
 fn draw_hint(frame: &mut Frame, area: Rect, cx: &RenderCx) {
     let t = cx.theme;
     let filter = cx.state.filter();
-    let line = if filter.editing {
+    let line = if cx.state.popup.is_some() {
+        // The popup box carries its own key hints; global keys are off.
+        Line::from(vec![
+            Span::styled(" Esc ", t.key()),
+            Span::styled("close popup", t.dim()),
+        ])
+    } else if filter.editing {
         Line::from(vec![
             Span::styled(" / ", t.key()),
             Span::styled(filter.text.clone(), t.text()),

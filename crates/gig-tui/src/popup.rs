@@ -311,10 +311,19 @@ pub fn render(frame: &mut Frame, area: Rect, popup: &Popup, theme: &Theme) {
             (title.clone(), out, ts)
         }
     };
-    // Wrapped lines may need more rows than `lines.len()`; estimate by width.
+    // Wrapped lines need more rows than `lines.len()`; estimate by width.
     let rows: usize = lines
         .iter()
-        .map(|l| l.width().max(1).div_ceil(inner_width.max(1)))
+        .map(|l| {
+            // Word wrapping can take a row more than the plain division.
+            let w = l.width().max(1);
+            let inner = inner_width.max(1);
+            if w > inner {
+                w.div_ceil(inner) + 1
+            } else {
+                1
+            }
+        })
         .sum();
     let height = (rows as u16).saturating_add(2).min(area.height);
     let rect = area.centered(
@@ -520,6 +529,28 @@ mod tests {
         for label in ["slug", "title", "< custom >", "[ ]", "$EDITOR", "Esc"] {
             assert!(text.contains(label), "{label}");
         }
+    }
+
+    #[test]
+    fn long_paths_keep_the_close_hint_visible() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+        let long = format!("  /home/jc/dev/{}/.gig/JOB.md", "very-long-slug-".repeat(8));
+        let p = Popup::message(
+            "new order",
+            vec!["created files:".into(), long.clone(), long],
+        );
+        let mut term = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        term.draw(|f| render(f, f.area(), &p, &Theme::DARK))
+            .unwrap();
+        let text: String = term
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|c| c.symbol())
+            .collect();
+        assert!(text.contains("close"), "{text}");
     }
 
     #[test]
