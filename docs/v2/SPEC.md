@@ -246,7 +246,7 @@ Error codes: `not_found`, `invalid_state`, `invalid_input`, `unsafe_package`, `n
 
 Layout is fixed: `<dev_path>/delivery/<package-id>/`, `<dev_path>/delivery/<package-id>.manifest.toml`, `<dev_path>/delivery/<package-id>.zip`.
 
-- `gig package build [<slug>] <package-id> [--kind full|preview] [--write-manifest]`
+- `gig package build [<slug>] <package-id> [--kind full|preview] [--write-manifest] [--client-named PREFIX/]...`
   With `--write-manifest`: walks `delivery/<package-id>/`, refuses on the first unsafe entry, writes the manifest listing every regular file. Then writes the zip from the manifest (deterministic order, stored mtimes zeroed), then runs the same validation as `check`. Data: as `check`.
 - `gig package check [<slug>] <package-id>`
   Validates and records a package row (status checked, zip sha256). Data: `{ package, files: [...], zip_sha256, warnings }`. Warnings include: `.gitignore` does not ignore `delivery/`.

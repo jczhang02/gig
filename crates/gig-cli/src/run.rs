@@ -228,6 +228,7 @@ fn run_with_db(ctx: &Ctx, cmd: Command) -> Result<Output> {
                     &a.package_id,
                     kind,
                     a.write_manifest,
+                    &a.client_named,
                 )?;
                 let w = r.warnings.clone();
                 out_with(r, w)

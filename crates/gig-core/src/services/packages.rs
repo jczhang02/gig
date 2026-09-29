@@ -121,10 +121,11 @@ pub fn build_package(
     package_id: &str,
     kind: PackageKind,
     write_manifest: bool,
+    client_named: &[String],
 ) -> Result<CheckResult> {
     let order = context::resolve_key_or_cwd(&ctx.conn, key)?;
     let dev = dev_path(&order)?;
-    let checked = build::build(&dev, package_id, kind, write_manifest)
+    let checked = build::build(&dev, package_id, kind, write_manifest, client_named)
         .map_err(|e| rejected(ctx, &order, package_id, e))?;
     record_checked(ctx, &order, checked)
 }
@@ -416,7 +417,15 @@ mod tests {
                 .code(),
             "needs_check"
         );
-        let c = build_package(&ctx, Some("flow"), "flow-v1.0.0", PackageKind::Full, true).unwrap();
+        let c = build_package(
+            &ctx,
+            Some("flow"),
+            "flow-v1.0.0",
+            PackageKind::Full,
+            true,
+            &[],
+        )
+        .unwrap();
         assert_eq!(c.package.status, PackageStatus::Checked);
         assert_eq!(c.files, vec!["manual.pdf"]);
         let dry = upload(&ctx, Some("flow"), "flow-v1.0.0", false, &FakeUploader).unwrap();
@@ -437,7 +446,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let ctx = Ctx::for_test(root.path());
         let o = with_package(&ctx, "chg", "chg-v1");
-        build_package(&ctx, Some("chg"), "chg-v1", PackageKind::Full, true).unwrap();
+        build_package(&ctx, Some("chg"), "chg-v1", PackageKind::Full, true, &[]).unwrap();
         let dir = Path::new(o.dev_path.as_ref().unwrap()).join("delivery/chg-v1");
         std::fs::write(dir.join("manual.pdf"), "changed").unwrap();
         // rebuild zip without recording a check: emulate by building then restoring old sha in db
@@ -446,6 +455,7 @@ mod tests {
             "chg-v1",
             PackageKind::Full,
             false,
+            &[],
         )
         .unwrap();
         let e = upload(&ctx, Some("chg"), "chg-v1", true, &FakeUploader).unwrap_err();
@@ -457,7 +467,15 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let ctx = Ctx::for_test(root.path());
         with_package(&ctx, "pv", "pv-preview-1");
-        build_package(&ctx, Some("pv"), "pv-preview-1", PackageKind::Preview, true).unwrap();
+        build_package(
+            &ctx,
+            Some("pv"),
+            "pv-preview-1",
+            PackageKind::Preview,
+            true,
+            &[],
+        )
+        .unwrap();
         let s = sent(
             &ctx,
             Some("pv"),
@@ -483,7 +501,8 @@ mod tests {
         let o = with_package(&ctx, "bad", "bad-v1");
         let dir = Path::new(o.dev_path.as_ref().unwrap()).join("delivery/bad-v1");
         std::fs::write(dir.join("id_rsa"), "k").unwrap();
-        let e = build_package(&ctx, Some("bad"), "bad-v1", PackageKind::Full, true).unwrap_err();
+        let e =
+            build_package(&ctx, Some("bad"), "bad-v1", PackageKind::Full, true, &[]).unwrap_err();
         assert_eq!(e.code(), "unsafe_package");
         assert_eq!(
             events::count(&ctx.conn, o.id, events::CHECK_REJECTED).unwrap(),
@@ -497,13 +516,13 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let ctx = Ctx::for_test(root.path());
         let o = with_package(&ctx, "wr", "wr-v1");
-        build_package(&ctx, Some("wr"), "wr-v1", PackageKind::Full, true).unwrap();
+        build_package(&ctx, Some("wr"), "wr-v1", PackageKind::Full, true, &[]).unwrap();
         sent(&ctx, Some("wr"), "wr-v1", Channel::Phone, None, true).unwrap();
         orders::paid(&ctx, Some("wr"), None, None).unwrap();
         let dir = Path::new(o.dev_path.as_ref().unwrap()).join("delivery/wr-v1.1");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("manual.pdf"), "fixed").unwrap();
-        build_package(&ctx, Some("wr"), "wr-v1.1", PackageKind::Full, true).unwrap();
+        build_package(&ctx, Some("wr"), "wr-v1.1", PackageKind::Full, true, &[]).unwrap();
         let s = sent(&ctx, Some("wr"), "wr-v1.1", Channel::Phone, None, true).unwrap();
         assert_eq!(s.order_status, OrderStatus::Paid);
         let shown = orders::show(&ctx, Some("wr")).unwrap();

@@ -399,6 +399,9 @@ pub struct PackageBuildArgs {
     /// Derive the manifest from the package directory
     #[arg(long)]
     pub write_manifest: bool,
+    /// Directory prefix (ending in /) whose files keep client-derived names; repeatable, with --write-manifest
+    #[arg(long = "client-named", requires = "write_manifest")]
+    pub client_named: Vec<String>,
 }
 
 #[derive(Args, Debug)]

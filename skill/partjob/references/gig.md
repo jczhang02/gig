@@ -32,7 +32,7 @@ gig archive [--order <slug>] [--yes] [--before-warranty-end] [--no-scorecard] [-
 gig cancel [--order <slug>] --reason TEXT [--yes]
 gig cd [--order <slug>]
 
-gig package build <package-id> [--order <slug>] [--kind full|preview] [--write-manifest]
+gig package build <package-id> [--order <slug>] [--kind full|preview] [--write-manifest [--client-named results/]...]
 gig package check <package-id> [--order <slug>]
 gig package upload <package-id> [--order <slug>] [--yes]
 gig package sent <package-id> [--order <slug>] --channel phone|other [--note TEXT] [--yes]
@@ -64,4 +64,4 @@ gig version
 
 `package-id` 默认 `<slug>-vX.Y.Z`, 预览用 `<slug>-vX.Y.Z-preview`. 文件名规则: ASCII 字母数字 `. _ - /`, 不能有隐藏文件, `..`, 软链接, 密钥类文件, `.gig/ .git/ .scratch/ internal/ prompts/`. 客户自己命名的文件 (批处理结果) 可在 manifest 里用 `client_named = ["results/"]` 豁免命名规则, check 会把每个豁免列成 warning.
 
-`build --write-manifest` 从目录生成 manifest 并打 zip; 之后改了包内容要重新 `build` 或 `check`, 否则 `upload` / `sent` 报 `needs_check`.
+`build --write-manifest` 从目录生成 manifest 并打 zip; 客户命名的文件所在目录用 `--client-named results/` 一起给, 会写进 manifest. 之后改了包内容要重新 `build` 或 `check`, 否则 `upload` / `sent` 报 `needs_check`.

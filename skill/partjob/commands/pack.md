@@ -20,7 +20,7 @@
 3. 报告: 源在 `.scratch/reports/<name>/`, 用 Kami 或 LaTeX 生成, 成文经 sepia 润色, 只把 PDF 放进包. 报告不宣称流程状态或批准.
 4. 源码: `git archive --format=zip -o delivery/<package-id>/source.zip HEAD`, 确认 `.gitignore` 已排除客户样本; 用 `unzip -l` 抽查没有 `.gig/`.
 5. 文件名全英文: `manual.pdf`, `report.pdf`, `source.zip`, `program/<name>.exe`, `program/<name>` (Linux), `results/`.
-6. `gig package build <package-id> --write-manifest`. 客户命名的结果文件在子目录里, 需要时在 manifest 加 `client_named` 再 `gig package check`.
+6. `gig package build <package-id> --write-manifest [--client-named results/]`. 客户命名的结果文件 (中文, 空格) 放在 `results/` 这类子目录里, 用 `--client-named` 声明; check 会把每个豁免文件列成 warning, 过目时确认它们确实是客户自己的文件名.
 7. 把 `data.files` 和 `warnings` 列给 JC 过目. 包里每个文件都要能说出为什么给客户.
 8. JOB.md "状态": 包 id, 文件数, sha256 前 12 位, 复现验证结果, "尚未对外发送".
 

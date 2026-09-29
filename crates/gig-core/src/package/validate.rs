@@ -288,7 +288,7 @@ mod tests {
     }
 
     fn built(dev: &Path) -> Checked {
-        build::build(dev, "p-v1", PackageKind::Full, true).unwrap()
+        build::build(dev, "p-v1", PackageKind::Full, true, &[]).unwrap()
     }
 
     #[test]
@@ -315,10 +315,10 @@ mod tests {
     #[test]
     fn hidden_and_internal_files_are_rejected_at_build() {
         let (_d, dev) = project(&[("manual.pdf", "x"), (".gig/JOB.md", "j")]);
-        let e = build::build(&dev, "p-v1", PackageKind::Full, true).unwrap_err();
+        let e = build::build(&dev, "p-v1", PackageKind::Full, true, &[]).unwrap_err();
         assert_eq!(e.code(), "unsafe_package");
         let (_d, dev) = project(&[("manual.pdf", "x"), ("keys/server.pem", "k")]);
-        assert!(build::build(&dev, "p-v1", PackageKind::Full, true).is_err());
+        assert!(build::build(&dev, "p-v1", PackageKind::Full, true, &[]).is_err());
     }
 
     #[cfg(unix)]
@@ -360,7 +360,7 @@ mod tests {
     #[test]
     fn non_ascii_names_need_a_waiver() {
         let (_d, dev) = project(&[("manual.pdf", "x"), ("results/图 1.png", "y")]);
-        assert!(build::build(&dev, "p-v1", PackageKind::Full, true).is_err());
+        assert!(build::build(&dev, "p-v1", PackageKind::Full, true, &[]).is_err());
         let mp = dev.join("delivery/p-v1.manifest.toml");
         Manifest {
             version: 1,
@@ -371,9 +371,26 @@ mod tests {
         }
         .write(&mp)
         .unwrap();
-        let c = build::build(&dev, "p-v1", PackageKind::Preview, false).unwrap();
+        let c = build::build(&dev, "p-v1", PackageKind::Preview, false, &[]).unwrap();
         assert_eq!(c.kind, PackageKind::Preview);
         assert!(c.warnings.iter().any(|w| w.contains("client-named")));
+    }
+
+    #[test]
+    fn client_named_prefix_can_be_given_at_build_time() {
+        let (_d, dev) = project(&[("manual.pdf", "x"), ("results/图 1.png", "y")]);
+        let c = build::build(
+            &dev,
+            "p-v1",
+            PackageKind::Full,
+            true,
+            &["results/".to_string()],
+        )
+        .unwrap();
+        assert_eq!(c.files.len(), 2);
+        assert!(c.warnings.iter().any(|w| w.contains("client-named")));
+        let m = Manifest::read(&dev.join("delivery/p-v1.manifest.toml")).unwrap();
+        assert_eq!(m.client_named, vec!["results/"]);
     }
 
     #[test]

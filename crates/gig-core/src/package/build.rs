@@ -18,6 +18,7 @@ pub fn build(
     package_id: &str,
     kind: PackageKind,
     write_manifest: bool,
+    client_named: &[String],
 ) -> Result<Checked> {
     rules::validate_package_id(package_id)?;
     let layout = Layout::new(dev_path, package_id);
@@ -38,7 +39,7 @@ pub fn build(
             package_id: package_id.to_string(),
             kind,
             files: files.into_iter().collect(),
-            client_named: vec![],
+            client_named: client_named.to_vec(),
         };
         manifest.validate(package_id)?;
         manifest.write(&layout.manifest_path)?;
@@ -89,10 +90,10 @@ mod tests {
         fs::create_dir_all(dev.join("delivery/x-v1/sub")).unwrap();
         fs::write(dev.join("delivery/x-v1/a.txt"), "a").unwrap();
         fs::write(dev.join("delivery/x-v1/sub/b.txt"), "b").unwrap();
-        let first = build(&dev, "x-v1", PackageKind::Full, true).unwrap();
+        let first = build(&dev, "x-v1", PackageKind::Full, true, &[]).unwrap();
         std::thread::sleep(std::time::Duration::from_millis(1100));
         fs::write(dev.join("delivery/x-v1/a.txt"), "a").unwrap();
-        let second = build(&dev, "x-v1", PackageKind::Full, true).unwrap();
+        let second = build(&dev, "x-v1", PackageKind::Full, true, &[]).unwrap();
         assert_eq!(first.zip_sha256, second.zip_sha256);
         assert_eq!(first.files, vec!["a.txt", "sub/b.txt"]);
     }

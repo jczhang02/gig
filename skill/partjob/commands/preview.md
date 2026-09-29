@@ -15,8 +15,8 @@ JC 自己检查满意后, 先给客户看证据, 不给成品. 预览让客户�
 
 1. 版本默认取 JOB.md 状态里最新的 vX.Y.Z, 没有就 v1.0.0. package-id 是 `<slug>-vX.Y.Z-preview`.
 2. 把预览文件放到 `delivery/<package-id>/`, 文件名全英文 (客户原样本名可保留在 `results/` 下, 见第 4 步).
-3. `gig package build <package-id> --kind preview --write-manifest`.
-4. 失败 (`unsafe_package`) 就按 message 修: 一般是隐藏文件, 非 ASCII 文件名, 密钥类文件. 客户自己命名的文件放在一个子目录, 在 manifest 加 `client_named = ["results/"]` 后再 `gig package check`.
+3. `gig package build <package-id> --kind preview --write-manifest`. 客户自己命名的文件 (中文, 空格) 放在一个子目录, 加 `--client-named results/`.
+4. 失败 (`unsafe_package`) 就按 message 修: 一般是隐藏文件, 非 ASCII 文件名 (不在 `--client-named` 目录里), 密钥类文件.
 5. 把 `data.files` 列给 JC 过目, 连同 `warnings`.
 6. 在 JOB.md "状态" 记: 预览包 id, 文件数, sha256 前 12 位, "尚未对外发送".
 
