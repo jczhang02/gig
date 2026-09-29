@@ -358,6 +358,43 @@ fn config_and_doctor() {
 }
 
 #[test]
+fn split_secrets_works_on_a_v1_config() {
+    let env = Env::new();
+    let cfg = env.root.path().join("config/config.toml");
+    let v1 = format!(
+        "[general]\ndev_root = {:?}\n[delivery]\ndefault_uploader = \"s3:bj\"\n[delivery.s3.bj]\nbucket = \"b\"\nregion = \"r\"\nendpoint = \"https://x\"\naccess_key = \"AKDUMMY\"\nsecret_key = \"SKDUMMY\"\n[delivery.short_link]\nenabled = true\nendpoint = \"https://go.example/api\"\ntoken = \"TOKDUMMY\"\n",
+        env.dev()
+    );
+    fs::write(&cfg, v1).unwrap();
+    assert_eq!(env.err(&["config", "get", "general.dev_root"]), "secrets");
+    assert_eq!(env.err(&["migrate", "--dry-run"]), "secrets");
+    let dry = env.ok(&["config", "split-secrets"]);
+    assert_eq!(dry["dry_run"], true);
+    assert_eq!(dry["moved"].as_array().unwrap().len(), 3);
+    let done = env.ok(&["config", "split-secrets", "--yes"]);
+    assert_eq!(done["dry_run"], false);
+    let text = fs::read_to_string(&cfg).unwrap();
+    assert!(!text.contains("AKDUMMY") && !text.contains("TOKDUMMY"));
+    assert!(env.root.path().join("config/config.toml.v1").is_file());
+    let secrets = env.root.path().join("config/secrets.toml");
+    assert!(fs::read_to_string(&secrets).unwrap().contains("SKDUMMY"));
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            fs::metadata(&secrets).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+    }
+    assert_eq!(
+        env.ok(&["config", "get", "delivery.uploader"])["value"],
+        "s3:bj"
+    );
+    let (ok, v) = env.run(&["doctor"]);
+    assert!(ok, "{v}");
+}
+
+#[test]
 fn migrate_dry_run_reports_without_writing() {
     let env = Env::new();
     let old = env.root.path().join("data/gig.db");

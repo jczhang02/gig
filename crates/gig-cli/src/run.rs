@@ -66,6 +66,26 @@ pub fn run(cli: Cli) -> Result<Output> {
 }
 
 fn run_config(c: ConfigCmd) -> Result<Output> {
+    // split-secrets and path must work on a v1 config that Config::load refuses.
+    let paths = gig_core::config::Paths::from_env()?;
+    paths.ensure_dirs()?;
+    match c {
+        ConfigCmd::SplitSecrets { yes } => return out(split_secrets::split(&paths, yes)?),
+        ConfigCmd::Path => {
+            let drafts_dir = gig_core::config::Config::load(&paths.config_file)
+                .ok()
+                .map(|c| c.general.drafts_dir());
+            return out(json!({
+                "db_file": paths.db_file,
+                "legacy_db_file": paths.legacy_db_file,
+                "config_file": paths.config_file,
+                "secrets_file": paths.secrets_file,
+                "backups_dir": paths.backups_dir,
+                "drafts_dir": drafts_dir,
+            }));
+        }
+        _ => {}
+    }
     let (paths, mut config) = Ctx::without_db()?;
     match c {
         ConfigCmd::Get { key } => out(json!({ "key": key, "value": config.get(&key)? })),
@@ -74,18 +94,7 @@ fn run_config(c: ConfigCmd) -> Result<Output> {
             config.save(&paths.config_file)?;
             out(json!({ "key": key, "value": config.get(&key)? }))
         }
-        ConfigCmd::Path => out(json!({
-            "db_file": paths.db_file,
-            "legacy_db_file": paths.legacy_db_file,
-            "config_file": paths.config_file,
-            "secrets_file": paths.secrets_file,
-            "backups_dir": paths.backups_dir,
-            "dev_root": config.general.dev_root,
-            "archive_root": config.general.archive_root,
-            "drafts_dir": config.general.drafts_dir(),
-            "templates_dir": config.general.templates_dir,
-        })),
-        ConfigCmd::SplitSecrets { yes } => out(split_secrets::split(&paths, yes)?),
+        ConfigCmd::Path | ConfigCmd::SplitSecrets { .. } => unreachable!(),
     }
 }
 

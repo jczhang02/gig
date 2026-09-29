@@ -103,7 +103,10 @@ fn record_checked(ctx: &Ctx, order: &Order, checked: validate::Checked) -> Resul
 }
 
 fn rejected(ctx: &Ctx, order: &Order, package_id: &str, err: Error) -> Error {
-    if matches!(err, Error::UnsafePackage(_)) {
+    // An empty package directory is a setup slip, not a safety rejection.
+    let counts =
+        matches!(&err, Error::UnsafePackage(m) if !m.contains("package directory is empty"));
+    if counts {
         let _ = events::insert(
             &ctx.conn,
             order.id,
