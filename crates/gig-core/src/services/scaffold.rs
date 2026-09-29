@@ -144,20 +144,6 @@ pub fn adoption_warnings(dev_path: &Path) -> Vec<String> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn demotes_headings_and_drops_title() {
-        let notes = "# slug: T\n\n- a\n\n## 客户原话\n\nx\n\n### deeper\n";
-        assert_eq!(
-            demote_notes(notes),
-            "- a\n\n### 客户原话\n\nx\n\n#### deeper"
-        );
-    }
-}
-
-#[cfg(test)]
 pub(crate) fn write_test_templates(dir: &Path) {
     std::fs::write(
         dir.join("NOTES.md.j2"),
@@ -181,4 +167,18 @@ pub(crate) fn write_test_templates(dir: &Path) {
     .unwrap();
     std::fs::write(dir.join("README.md.j2"), "# {{ title }}\n").unwrap();
     std::fs::write(dir.join("gitignore"), ".venv/\ndelivery/\n.scratch/\n").unwrap();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn demotes_headings_and_drops_title() {
+        let notes = "# slug: T\n\n- a\n\n## 客户原话\n\nx\n\n### deeper\n";
+        assert_eq!(
+            demote_notes(notes),
+            "- a\n\n### 客户原话\n\nx\n\n#### deeper"
+        );
+    }
 }
