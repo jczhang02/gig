@@ -9,7 +9,7 @@
 
 ## 步骤
 
-1. 预演: `gig package upload <包id>` (不带 `--yes`). 返回 `dry_run: true`, `size`, `warnings`. 把包 id, 大小, kind (preview / full), 会导致的状态变化 (full 会把订单变成 delivered) 告诉 JC, 问是否发送.
+1. 预演: `gig package upload <包id>` (不带 `--yes`). 返回 `dry_run: true`, `size`, `warnings`. 把包 id, 大小, kind (preview / full), 会导致的状态变化 (full 会把订单变成 delivered), 以及准备走的渠道告诉 JC, 一句话问: "走 OSS 出短链, 还是发到手机? 发不发?". JC 没指定渠道就默认 OSS, 但问句里要带上另一个选项, JC 回一个词就能换.
 2. JC 明确同意后:
    - oss: `gig package upload <包id> --yes`. 返回 `short_url` (没开短链就是 `url`), `expires_at`. 报 `secrets` 或 `config` 错误说明环境没配好, 停下来说明, 不要绕过.
    - phone: 先调 `gsconnect-send` skill 发送 `delivery/<包id>.zip`; 送达后 `gig package sent <包id> --channel phone --yes --note "gsconnect"`.
