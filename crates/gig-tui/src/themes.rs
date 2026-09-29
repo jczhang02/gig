@@ -35,6 +35,8 @@ impl Broken {
 pub struct Catalog {
     pub themes: Vec<Theme>,
     pub broken: Vec<Broken>,
+    /// Names that come from a file (shadowing a built-in or not).
+    pub user: std::collections::BTreeSet<String>,
 }
 
 impl Catalog {
@@ -76,13 +78,18 @@ impl Catalog {
                 detail: e.to_string(),
             }),
         }
+        let user_names = user.iter().map(|t: &Theme| t.name.to_string()).collect();
         for t in user {
             match themes.iter_mut().find(|b| b.name == t.name) {
                 Some(slot) => *slot = t,
                 None => themes.push(t),
             }
         }
-        Self { themes, broken }
+        Self {
+            themes,
+            broken,
+            user: user_names,
+        }
     }
 
     /// Names in listing and cycling order.
@@ -180,6 +187,79 @@ pub fn parse(name: &str, text: &str) -> Result<Theme, String> {
         *theme.slot_mut(key).expect("slot") = colour;
     }
     Ok(theme)
+}
+
+/// A theme as a theme file (section 15): the 15 slot keys in file order,
+/// aligned, each `"#rrggbb"`, after a comment naming where it came from.
+pub fn to_toml(theme: &Theme, comment: &str) -> String {
+    let mut out = String::new();
+    for line in comment.lines() {
+        out.push_str(&format!("# {line}\n"));
+    }
+    let w = SLOTS.iter().map(|k| k.len()).max().unwrap_or(0);
+    for key in SLOTS {
+        let hex = match theme.slot(key) {
+            Some(Color::Rgb(r, g, b)) => format!("#{r:02x}{g:02x}{b:02x}"),
+            _ => "#000000".to_string(),
+        };
+        out.push_str(&format!("{key:<w$} = \"{hex}\"\n"));
+    }
+    out
+}
+
+/// Where `c` in the theme picker copies built-in `name`.
+pub fn copy_path(dir: &Path, name: &str) -> PathBuf {
+    dir.join(format!("{name}-copy.toml"))
+}
+
+/// `c` in the theme picker: write built-in `name` to
+/// `<dir>/<name>-copy.toml`, creating the directory. An existing copy is
+/// never overwritten (it holds the user's edits); the flag says whether the
+/// file was written now.
+pub fn copy_builtin(dir: &Path, name: &str) -> std::io::Result<(PathBuf, bool)> {
+    let theme = Theme::builtin(name).ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("{name} is not a built-in theme"),
+        )
+    })?;
+    let path = copy_path(dir, name);
+    if path.exists() {
+        return Ok((path, false));
+    }
+    std::fs::create_dir_all(dir)?;
+    let comment = format!(
+        "gig theme, copied from the built-in {name}.\n\
+         The file name is the theme name; every key is a colour \"#rrggbb\".\n\
+         Slots and rules: docs/v2/TUI-DESIGN.md sections 2 and 15."
+    );
+    std::fs::write(&path, to_toml(&theme, &comment))?;
+    Ok((path, true))
+}
+
+/// Modification times of the `.toml` files in the themes directory, for hot
+/// reload on the refresh tick (TUI-SPEC 8.1). Equal stamps mean nothing was
+/// added, removed or rewritten.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Stamps(Vec<(PathBuf, Option<std::time::SystemTime>)>);
+
+impl Stamps {
+    pub fn scan(dir: &Path) -> Self {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return Self::default();
+        };
+        let mut v: Vec<_> = entries
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|x| x == "toml"))
+            .map(|p| {
+                let m = std::fs::metadata(&p).and_then(|m| m.modified()).ok();
+                (p, m)
+            })
+            .collect();
+        v.sort();
+        Self(v)
+    }
 }
 
 /// `#rrggbb`, hex digits in either case.
@@ -335,5 +415,44 @@ bar_now  = "#B4BEFE"
         let cat = Catalog::load(Path::new("/nonexistent/gig/themes"));
         assert_eq!(cat.names().len(), 8);
         assert!(cat.broken.is_empty());
+    }
+
+    #[test]
+    fn builtins_round_trip_through_the_file_format() {
+        for t in Theme::BUILTIN {
+            let text = to_toml(&t, "a comment\nover two lines");
+            assert!(text.starts_with("# a comment\n# over two lines\nbg       = \"#"));
+            assert_eq!(parse(&t.name, &text).unwrap(), t);
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let sub = dir.path().join("themes");
+        let (path, fresh) = copy_builtin(&sub, "dracula").unwrap();
+        assert!(fresh && path.ends_with("themes/dracula-copy.toml"));
+        let (_, again) = copy_builtin(&sub, "dracula").unwrap();
+        assert!(!again, "an existing copy is kept");
+        assert!(copy_builtin(&sub, "nope").is_err());
+        let cat = Catalog::load(&sub);
+        assert!(cat.user.contains("dracula-copy"));
+        assert_eq!(cat.names().last(), Some(&"dracula-copy"));
+    }
+
+    #[test]
+    fn stamps_change_with_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = Stamps::scan(dir.path());
+        assert_eq!(a, Stamps::scan(dir.path()));
+        write(dir.path(), "notes.txt", "ignored");
+        assert_eq!(a, Stamps::scan(dir.path()));
+        write(dir.path(), "x.toml", MOCHA_SOFT);
+        let b = Stamps::scan(dir.path());
+        assert_ne!(a, b);
+        let f = std::fs::File::options()
+            .write(true)
+            .open(dir.path().join("x.toml"))
+            .unwrap();
+        f.set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(9))
+            .unwrap();
+        assert_ne!(b, Stamps::scan(dir.path()));
+        assert_eq!(Stamps::scan(Path::new("/nonexistent")), Stamps::default());
     }
 }
