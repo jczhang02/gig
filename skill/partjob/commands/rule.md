@@ -13,7 +13,7 @@
    - 写入文件.
    - `CHANGELOG.md` 追加一行: `- YYYY-MM-DD (<来源 slug 或 "对话">): <一句话>`.
    - 运行 `python3 -m unittest discover -s tests` (在 skill 目录下). 不过就回滚并报告.
-   - 提示 JC 这个 skill 在 `~/dev/gig` 仓库里, 需要 commit (agent 可以本地 commit, 不推送).
+   - 提示 JC 这个 skill 在 `~/Documents/dev-tools/gig` 仓库里, 需要 commit (agent 可以本地 commit, 不推送).
 4. 需要改 gig 代码才能实现的: 不改代码, 在 `TODO-gig.md` 追加一条 (日期, 需求, 来源), 告诉 JC.
 5. 改动下次调用 skill 时生效. 当前会话里也按新规则做.
 

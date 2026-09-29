@@ -13,14 +13,14 @@ JC 兼职订单的 agent 工作流 skill. 手动调用: Claude Code 里 `/partjo
 源目录在 gig 仓库 `skill/partjob/`. 链接到 agent 的 skill 目录:
 
 ```bash
-ln -s ~/dev/gig/skill/partjob ~/.agents/skills/partjob
+ln -s ~/Documents/dev-tools/gig/skill/partjob ~/.agents/skills/partjob
 ln -s ~/.agents/skills/partjob ~/.claude/skills/partjob
 ```
 
 ## 测试
 
 ```bash
-cd ~/dev/gig/skill/partjob && python3 -m unittest discover -s tests -v
+cd ~/Documents/dev-tools/gig/skill/partjob && python3 -m unittest discover -s tests -v
 ```
 
-集成测试需要 gig v2 可执行文件: `GIG_BIN=/path/to/gig`, 默认 `~/dev/gig/target/debug/gig`.
+集成测试需要 gig v2 可执行文件: `GIG_BIN=/path/to/gig`, 默认 `~/Documents/dev-tools/gig/target/debug/gig`.
