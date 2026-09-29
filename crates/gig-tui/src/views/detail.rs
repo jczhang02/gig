@@ -27,13 +27,7 @@ const ITEM: usize = 2;
 /// Indent of the text of a `- ` entry.
 const ENTRY: usize = 4;
 
-pub fn render(frame: &mut Frame, area: Rect, cx: &RenderCx) {
-    // One cell of margin on both sides, as the lists and the banner have.
-    let area = Rect {
-        x: area.x + 1,
-        width: area.width.saturating_sub(2),
-        ..area
-    };
+pub fn render(frame: &mut Frame, area: Rect, cx: &RenderCx, _full: bool) {
     let Some(row) = cx.state.selected_order() else {
         empty(frame, area, cx.theme, &["no order selected"]);
         return;

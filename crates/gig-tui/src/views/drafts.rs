@@ -92,3 +92,26 @@ pub fn render(frame: &mut Frame, area: Rect, cx: &RenderCx) {
     }
     frame.render_widget(Paragraph::new(lines), area);
 }
+
+/// The NOTES.md tail pane (Medium and Wide `Enter`).
+pub fn render_notes(frame: &mut Frame, area: Rect, cx: &RenderCx) {
+    let t = cx.theme;
+    let Some(pane) = &cx.state.notes_pane else {
+        return;
+    };
+    let mut lines = vec![Line::from(Span::styled("Notes", t.title())), Line::raw("")];
+    let width = usize::from(area.width.min(76));
+    let mut body: Vec<Line> = pane
+        .lines
+        .iter()
+        .flat_map(|l| text::wrap(l, width))
+        .map(|l| Line::from(Span::styled(l, t.text())))
+        .collect();
+    // The newest lines matter most: keep the end in view.
+    let room = usize::from(area.height).saturating_sub(lines.len());
+    if body.len() > room {
+        body.drain(..body.len() - room);
+    }
+    lines.extend(body);
+    frame.render_widget(Paragraph::new(lines), area);
+}

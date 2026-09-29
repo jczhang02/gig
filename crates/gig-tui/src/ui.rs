@@ -1,12 +1,12 @@
-//! The layout shell: money banner on top, the view body, a key hint line at
-//! the bottom. Whitespace and colour instead of borders (spec section 3).
+//! The frame (TUI-DESIGN.md sections 6 and 7): banner on row 0, the
+//! message row, the view body, and the key hints on the last row.
+//! Whitespace and colour instead of borders.
 
-use crate::app::{UiState, View, WIDE_COLUMNS};
-use crate::data::money::major;
+use crate::app::{Tone, UiState, View};
 use crate::icons::Icons;
 use crate::theme::Theme;
 use crate::{help, popup, text, views};
-use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::layout::Rect;
 use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Paragraph};
@@ -19,63 +19,148 @@ pub struct RenderCx<'a> {
     pub icons: &'a Icons,
 }
 
-/// Areas of the shell for one frame.
+/// Width classes of section 6.2; every view and the key handling use them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum WidthClass {
+    /// Under 110 columns: lists full width, `Enter` opens the detail.
+    Narrow,
+    /// 110 to 159: list and detail pane.
+    Medium,
+    /// 160 and wider: the `next` column comes in.
+    Wide,
+}
+
+impl WidthClass {
+    pub fn of(width: u16) -> Self {
+        match width {
+            0..110 => WidthClass::Narrow,
+            110..160 => WidthClass::Medium,
+            _ => WidthClass::Wide,
+        }
+    }
+}
+
+/// Smallest frame the dashboard draws into.
+pub const MIN_WIDTH: u16 = 60;
+pub const MIN_HEIGHT: u16 = 16;
+
+/// Orders cells before the title column, gap included (section 6.3).
+const FIXED: i32 = 57;
+/// The same with the Wide `next` column.
+const FIXED_WIDE: i32 = 72;
+/// Narrowest title column worth drawing.
+pub const MIN_TITLE: usize = 10;
+
+/// List and pane widths at terminal width `width` (section 6.3 arithmetic;
+/// margins 1 + 1, gutter 2). The pane is 0 at Narrow.
+pub fn split(width: u16) -> (u16, u16) {
+    let w = i32::from(width);
+    let (l, p) = match WidthClass::of(width) {
+        WidthClass::Narrow => (w - 2, 0),
+        WidthClass::Medium => {
+            let p = (w - 4 - FIXED - 20).clamp(40, 64);
+            let l = w - 4 - p;
+            if l - FIXED < MIN_TITLE as i32 {
+                // No room for a title: the list keeps its columns and the
+                // pane takes the rest.
+                (FIXED - 2, w - 4 - (FIXED - 2))
+            } else {
+                (l, p)
+            }
+        }
+        WidthClass::Wide => {
+            let title = (w - 4 - FIXED_WIDE - 2 - 60).clamp(24, 40);
+            let l = FIXED_WIDE + 2 + title;
+            (l, w - 4 - l)
+        }
+    };
+    (l.max(0) as u16, p.max(0) as u16)
+}
+
+/// Areas of the frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Shell {
     pub banner: Rect,
+    /// Row 1: filter on the left, toast on the right.
+    pub message: Rect,
+    /// The view body (the list when a pane is open), inside the margins.
     pub body: Rect,
-    /// Right pane for the Orders detail; `None` under 110 columns or in
-    /// other views.
-    pub detail: Option<Rect>,
-    pub hint: Rect,
+    /// The right pane: Orders detail, or the Drafts notes tail.
+    pub pane: Option<Rect>,
+    pub footer: Rect,
 }
 
 pub fn shell(area: Rect, state: &UiState) -> Shell {
-    let [banner, _gap, main, hint] = Layout::vertical([
-        Constraint::Length(1),
-        Constraint::Length(1),
-        Constraint::Min(0),
-        Constraint::Length(1),
-    ])
-    .areas(area);
-    let wide = area.width >= WIDE_COLUMNS && state.view == View::Orders && !state.detail_open;
-    if wide {
-        let [body, _gutter, detail] = Layout::horizontal([
-            Constraint::Percentage(55),
-            Constraint::Length(2),
-            Constraint::Min(0),
-        ])
-        .areas(main);
-        Shell {
-            banner,
-            body,
-            detail: Some(detail),
-            hint,
-        }
+    let row = |y: u16| Rect::new(area.x, area.y + y, area.width, 1);
+    let inner_w = area.width.saturating_sub(2);
+    let body_h = area.height.saturating_sub(3);
+    let class = WidthClass::of(area.width);
+    let has_pane = class != WidthClass::Narrow
+        && !state.detail_open
+        && match state.view {
+            View::Orders => true,
+            View::Drafts => state.notes_pane.is_some(),
+            _ => false,
+        };
+    let (body, pane) = if state.detail_open {
+        // Full-screen detail: left margin 2, prose measure 76.
+        let w = area.width.saturating_sub(4).min(76);
+        (Rect::new(area.x + 2, area.y + 2, w, body_h), None)
+    } else if has_pane {
+        let (l, p) = split(area.width);
+        (
+            Rect::new(area.x + 1, area.y + 2, l, body_h),
+            Some(Rect::new(area.x + 1 + l + 2, area.y + 2, p, body_h)),
+        )
     } else {
-        Shell {
-            banner,
-            body: main,
-            detail: None,
-            hint,
-        }
+        (Rect::new(area.x + 1, area.y + 2, inner_w, body_h), None)
+    };
+    Shell {
+        banner: row(0),
+        message: row(1),
+        body,
+        pane,
+        footer: row(area.height.saturating_sub(1)),
     }
 }
 
 pub fn draw(frame: &mut Frame, cx: &RenderCx) {
     let area = frame.area();
-    frame.render_widget(Block::new().style(cx.theme.base()), area);
+    let t = cx.theme;
+    if !t.no_color() {
+        frame.render_widget(Block::new().style(t.base()), area);
+    }
+    if area.width < MIN_WIDTH || area.height < MIN_HEIGHT {
+        let msg = format!(
+            "gig needs {MIN_WIDTH}x{MIN_HEIGHT}, this is {}x{}",
+            area.width, area.height
+        );
+        let y = area.y + area.height / 2;
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                text::truncate(&msg, usize::from(area.width)),
+                t.muted(),
+            )))
+            .centered(),
+            Rect::new(area.x, y, area.width, 1),
+        );
+        return;
+    }
     let s = shell(area, cx.state);
     draw_banner(frame, s.banner, cx);
+    draw_message(frame, s.message, cx);
     if cx.state.detail_open {
-        views::detail::render(frame, s.body, cx);
+        views::detail::render(frame, s.body, cx, true);
     } else {
         views::render(frame, s.body, cx.state.view, cx);
     }
-    if let Some(detail) = s.detail {
-        views::detail::render(frame, detail, cx);
+    if let Some(pane) = s.pane {
+        match cx.state.view {
+            View::Drafts => views::drafts::render_notes(frame, pane, cx),
+            _ => views::detail::render(frame, pane, cx, false),
+        }
     }
-    draw_hint(frame, s.hint, cx);
+    draw_footer(frame, s.footer, cx);
     if cx.state.help_open {
         help::render(frame, area, cx);
     }
@@ -84,135 +169,164 @@ pub fn draw(frame: &mut Frame, cx: &RenderCx) {
     }
 }
 
-/// View tabs on the left, money summary on the right.
+/// Lower-case three-letter English month of `YYYY-MM-DD`.
+pub fn month_abbr(date: &str) -> &'static str {
+    const M: [&str; 12] = [
+        "jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec",
+    ];
+    date.get(5..7)
+        .and_then(|m| m.parse::<usize>().ok())
+        .and_then(|m| M.get(m.wrapping_sub(1)))
+        .copied()
+        .unwrap_or("month")
+}
+
+/// `gig`, the tabs, and the money cluster on the right (section 7.1).
 fn draw_banner(frame: &mut Frame, area: Rect, cx: &RenderCx) {
     let t = cx.theme;
-    let mut tabs = vec![Span::styled(" gig ", t.title())];
-    for v in View::ALL {
-        let label = cx.icons.label(cx.icons.view(v), v.title());
-        let text = format!(" {} {label} ", v.index() + 1);
-        let style = if v == cx.state.view {
-            t.text().bg(t.sel).add_modifier(Modifier::BOLD)
-        } else {
-            t.muted()
-        };
-        tabs.push(Span::styled(text, style));
-    }
-    let tabs = Line::from(tabs);
-    let tabs_width = tabs.width();
-    frame.render_widget(Paragraph::new(tabs), area);
-    // Owed is the number the dashboard is for: when space is short the
-    // year goes first, then the month.
+    let width = usize::from(area.width);
+    let gap = if area.width < 100 { "  " } else { "   " };
+    let tabs = |compact: bool| -> Line<'static> {
+        let mut spans = vec![Span::raw(" "), Span::styled("gig", t.title())];
+        for v in View::ALL {
+            spans.push(Span::raw(gap));
+            let active = v == cx.state.view;
+            spans.push(Span::styled(format!("{}", v.index() + 1), t.muted()));
+            if active {
+                let mut style = t.title().add_modifier(Modifier::UNDERLINED);
+                if !t.no_color() {
+                    style = style.underline_color(t.accent);
+                }
+                spans.push(Span::raw(" "));
+                spans.push(Span::styled(v.title(), style));
+            } else if !compact {
+                spans.push(Span::styled(format!(" {}", v.title()), t.muted()));
+            }
+        }
+        Line::from(spans)
+    };
     let m = &cx.state.data.money;
-    let parts = [
-        ("owed ", m.outstanding.gross, t.text().fg(t.unpaid)),
-        ("month ", m.month.gross, t.text()),
-        ("year ", m.year.gross, t.text()),
+    let today = &cx.state.data.today;
+    let owed_style = if m.outstanding.gross > 0 {
+        t.title().fg(t.unpaid)
+    } else {
+        t.text()
+    };
+    let items: [(String, String, ratatui::style::Style); 3] = [
+        ("owed".into(), text::money(m.outstanding.gross), owed_style),
+        (
+            month_abbr(today).into(),
+            text::money(m.month.gross),
+            t.text(),
+        ),
+        (
+            today.get(..4).unwrap_or("year").into(),
+            text::money(m.year.gross),
+            t.text(),
+        ),
     ];
-    for n in (1..=parts.len()).rev() {
+    let cluster = |n: usize, currency: bool| -> Line<'static> {
         let mut spans = Vec::new();
-        for (i, (label, amount, style)) in parts.iter().take(n).enumerate() {
-            let lead = if i == 0 { "" } else { "  " };
-            spans.push(Span::styled(format!("{lead}{label}"), t.muted()));
-            spans.push(Span::styled(major(*amount), *style));
+        for (i, (label, value, style)) in items.iter().take(n).enumerate() {
+            if i > 0 {
+                spans.push(Span::raw("  "));
+                spans.push(Span::styled("\u{b7}", t.dim()));
+                spans.push(Span::raw("  "));
+            }
+            spans.push(Span::styled(format!("{label} "), t.muted()));
+            spans.push(Span::styled(value.clone(), *style));
+        }
+        if currency {
+            spans.push(Span::styled(
+                format!(" {}", cx.state.data.currency()),
+                t.muted(),
+            ));
         }
         spans.push(Span::raw(" "));
-        let money = Line::from(spans).right_aligned();
-        if usize::from(area.width) > tabs_width + money.width() {
-            frame.render_widget(Paragraph::new(money), area);
-            break;
+        Line::from(spans)
+    };
+    // Degradation: CNY, then the year, then the month; owed goes last,
+    // and then the tabs lose their inactive words.
+    let tries = [(3, true), (3, false), (2, false), (1, false)];
+    for compact in [false, true] {
+        let left = tabs(compact);
+        for (n, currency) in tries {
+            let right = cluster(n, currency);
+            if left.width() + 3 + right.width() <= width {
+                frame.render_widget(Paragraph::new(left), area);
+                frame.render_widget(Paragraph::new(right.right_aligned()), area);
+                return;
+            }
         }
+    }
+    frame.render_widget(Paragraph::new(tabs(true)), area);
+}
+
+/// Row 1: the filter on the left, one toast (or the refresh error) on the
+/// right.
+fn draw_message(frame: &mut Frame, area: Rect, cx: &RenderCx) {
+    let t = cx.theme;
+    let width = usize::from(area.width);
+    let toast = cx
+        .state
+        .toast
+        .as_ref()
+        .map(|toast| {
+            let style = match toast.tone {
+                Tone::Info => t.text(),
+                Tone::Warn => t.text().fg(t.warranty),
+                Tone::Error => t.error(),
+            };
+            (toast.text.clone(), style)
+        })
+        .or_else(|| cx.state.error.clone().map(|e| (e, t.error())));
+    let mut right_w = 0;
+    if let Some((msg, style)) = toast {
+        let msg = text::truncate(&msg, width.saturating_sub(2) * 2 / 3);
+        right_w = text::width(&msg) + 1;
+        frame.render_widget(
+            Paragraph::new(
+                Line::from(vec![Span::styled(msg, style), Span::raw(" ")]).right_aligned(),
+            ),
+            area,
+        );
+    }
+    let filter = cx.state.filter();
+    if filter.editing || !filter.text.is_empty() {
+        let count = views::filter_count(cx.state);
+        let room = width.saturating_sub(right_w + 2 + 3 + text::width(&count) + 2);
+        let mut spans = vec![
+            Span::raw(" "),
+            Span::styled(format!("/ {}", text::tail(&filter.text, room)), t.accent()),
+        ];
+        if filter.editing {
+            spans.push(Span::styled("\u{258f}", t.accent()));
+        }
+        spans.push(Span::styled(format!("  {count}"), t.muted()));
+        frame.render_widget(Paragraph::new(Line::from(spans)), area);
     }
 }
 
-fn draw_hint(frame: &mut Frame, area: Rect, cx: &RenderCx) {
+/// The contextual key hints (section 7.3).
+fn draw_footer(frame: &mut Frame, area: Rect, cx: &RenderCx) {
     let t = cx.theme;
-    let width = usize::from(area.width);
-    let filter = cx.state.filter();
-    let line = if matches!(cx.state.popup, Some(popup::Popup::Progress { .. })) {
-        Line::from(Span::styled(
+    let line = match cx.state.popup {
+        Some(popup::Popup::Progress { .. }) => Line::from(Span::styled(
             " uploading; keys are ignored until it ends",
             t.muted(),
-        ))
-    } else if matches!(cx.state.popup, Some(popup::Popup::Busy { .. })) {
-        Line::from(Span::styled(
+        )),
+        Some(popup::Popup::Busy { .. }) => Line::from(Span::styled(
             " working; keys are ignored until it ends",
             t.muted(),
-        ))
-    } else if cx.state.popup.is_some() {
-        // The popup box carries its own key hints; global keys are off.
-        Line::from(vec![
-            Span::styled(" Esc ", t.key()),
-            Span::styled("close popup", t.muted()),
-        ])
-    } else if filter.editing {
-        let hint = "   Enter keep  Esc clear";
-        // Long input keeps its end (and the cursor) in view.
-        let room = width.saturating_sub(3 + 1 + text::width(hint));
-        Line::from(vec![
-            Span::styled(" / ", t.key()),
-            Span::styled(text::tail(&filter.text, room), t.text()),
-            Span::styled("_", t.muted()),
-            Span::styled(hint, t.muted()),
-        ])
-    } else {
-        let mut spans = Vec::new();
-        if let Some(err) = &cx.state.error {
-            let err = text::truncate(err, (width * 2 / 3).max(1));
-            spans.push(Span::styled(format!(" {err} "), t.error()));
+        )),
+        _ => {
+            let class = WidthClass::of(area.width);
+            let (g1, g2) = help::footer_groups(cx.state, class);
+            let (g1, g2) = help::fit_footer(g1, g2, usize::from(area.width.saturating_sub(2)));
+            let mut line = help::footer_line(cx, &g1, &g2);
+            line.spans.insert(0, Span::raw(" "));
+            line
         }
-        if !filter.text.is_empty() {
-            spans.push(Span::styled(" filter ", t.muted()));
-            spans.push(Span::styled(filter.text.clone(), t.key()));
-            spans.push(Span::raw(" "));
-        }
-        if cx.state.view == View::Orders && cx.state.show_closed && !cx.state.detail_open {
-            spans.push(Span::styled(" +archived, cancelled ", t.title()));
-        }
-        let base: &[(&str, &str)] = if cx.state.detail_open {
-            &[("Esc", "back"), ("?", "help"), ("q", "quit")]
-        } else if cx.state.view == View::Money {
-            &[
-                ("1-4", "view"),
-                ("Tab", "next"),
-                ("r", "refresh"),
-                ("?", "help"),
-                ("q", "quit"),
-            ]
-        } else {
-            &[
-                ("1-4", "view"),
-                ("Tab", "next"),
-                ("/", "filter"),
-                ("r", "refresh"),
-                ("?", "help"),
-                ("q", "quit"),
-            ]
-        };
-        let pair = |k: &str, what: &str| {
-            [
-                Span::styled(format!(" {k} "), t.key()),
-                Span::styled(format!("{what} "), t.muted()),
-            ]
-        };
-        for (k, what) in base {
-            spans.extend(pair(k, what));
-        }
-        // Then the keys of what is on screen, while they fit.
-        let mut used: usize = spans.iter().map(Span::width).sum();
-        for (k, what) in help::keys_for(cx.state, area.width)
-            .iter()
-            .filter(|(k, _)| *k != "Up/Dn")
-        {
-            let p = pair(k, what);
-            let w: usize = p.iter().map(Span::width).sum();
-            if used + w > width {
-                break;
-            }
-            used += w;
-            spans.extend(p);
-        }
-        Line::from(spans)
     };
     frame.render_widget(Paragraph::new(line), area);
 }
@@ -282,7 +396,7 @@ mod tests {
         let text = all(&buf);
         assert!(text.contains("no active orders"), "{text}");
         assert!(!text.contains("no order selected"), "no detail pane");
-        assert!(shell(buf.area, &state).detail.is_none());
+        assert!(shell(buf.area, &state).pane.is_none());
     }
 
     #[test]
@@ -294,11 +408,11 @@ mod tests {
         assert!(top.contains("owed"));
         assert!(row(&buf, 49).contains("q quit"));
         let s = shell(buf.area, &state);
-        let detail = s.detail.expect("detail pane at 200 columns");
+        let detail = s.pane.expect("detail pane at 200 columns");
         assert!(detail.x > s.body.x + s.body.width);
         assert!(all(&buf).contains("no order selected"));
         // Pane layout stays inside the frame.
-        assert!(detail.right() <= 200 && s.hint.bottom() <= 50);
+        assert!(detail.right() <= 200 && s.footer.bottom() <= 50);
     }
 
     #[test]
@@ -307,10 +421,84 @@ mod tests {
         state.data.money.outstanding.gross = 130000;
         state.data.money.month.gross = 80050;
         state.data.money.year.gross = 1_200_000;
-        let top = row(&render(200, 50, &state, true), 0);
-        assert!(top.contains("owed 1300"), "{top}");
-        assert!(top.contains("month 800.50"), "{top}");
-        assert!(top.contains("year 12000"), "{top}");
+        state.data.today = "2026-09-29".into();
+        let buf = render(200, 50, &state, true);
+        let top = row(&buf, 0);
+        assert!(
+            top.ends_with("owed 1,300  \u{b7}  sep 800.50  \u{b7}  2026 12,000 CNY "),
+            "{top}"
+        );
+        assert!(top.starts_with(" gig   1 Orders   2 Drafts   3 Money   4 History"));
+        // The active tab: bold text with an accent underline.
+        let x = top.find("Orders").unwrap() as u16;
+        let c = &buf[(x, 0)];
+        assert!(c.modifier.contains(Modifier::BOLD | Modifier::UNDERLINED));
+        assert_eq!(c.underline_color, Theme::DARK.accent);
+        // Owed > 0 is bold unpaid; 0 is plain text.
+        let x = top.find("1,300").unwrap() as u16;
+        assert_eq!(buf[(x, 0)].fg, Theme::DARK.unpaid);
+        state.data.money.outstanding.gross = 0;
+        let buf = render(200, 50, &state, true);
+        let x = row(&buf, 0).find("owed 0").unwrap() as u16 + 5;
+        assert_eq!(buf[(x, 0)].fg, Theme::DARK.text);
+    }
+
+    #[test]
+    fn below_min_size_only_the_notice() {
+        let buf = render(59, 16, &sample(), true);
+        let text: Vec<String> = (0..16)
+            .map(|y| row(&buf, y).trim().to_string())
+            .filter(|l| !l.is_empty())
+            .collect();
+        assert_eq!(text, vec!["gig needs 60x16, this is 59x16"]);
+        assert!(!all(&render(60, 16, &sample(), true)).contains("gig needs"));
+    }
+
+    #[test]
+    fn width_classes_and_split() {
+        assert_eq!(WidthClass::of(109), WidthClass::Narrow);
+        assert_eq!(WidthClass::of(110), WidthClass::Medium);
+        assert_eq!(WidthClass::of(160), WidthClass::Wide);
+        assert_eq!(split(80), (78, 0));
+        assert_eq!(split(110), (55, 51));
+        assert_eq!(split(120), (76, 40));
+        assert_eq!(split(139), (77, 58));
+        assert_eq!(split(159), (91, 64));
+        assert_eq!(split(160), (98, 58));
+        assert_eq!(split(200), (114, 82));
+        for w in 60..300 {
+            let (l, p) = split(w);
+            if p > 0 {
+                assert_eq!(l + p, w - 4, "{w}");
+                assert!(p >= 40, "{w}");
+            }
+        }
+    }
+
+    #[test]
+    fn toasts_show_on_the_message_row() {
+        let mut state = UiState {
+            toast: Some(crate::app::Toast::info("copied go.jczhang.cc/a30bd870")),
+            ..UiState::default()
+        };
+        let buf = render(80, 24, &state, false);
+        assert!(row(&buf, 1).ends_with("copied go.jczhang.cc/a30bd870 "));
+        state.toast = Some(crate::app::Toast::warn(
+            "unknown theme \"nrod\", using gig-dark",
+        ));
+        let buf = render(80, 24, &state, false);
+        let r = row(&buf, 1);
+        let x = crate::text::width(&r[..r.find("unknown").unwrap()]) as u16;
+        assert_eq!(buf[(x, 1)].fg, Theme::DARK.warranty);
+        // Any key clears it.
+        state.handle_key(
+            crossterm::event::KeyEvent::new(
+                crossterm::event::KeyCode::Down,
+                crossterm::event::KeyModifiers::NONE,
+            ),
+            80,
+        );
+        assert!(state.toast.is_none());
     }
 
     #[test]
@@ -325,7 +513,7 @@ mod tests {
                 ..UiState::default()
             };
             let buf = render(200, 50, &state, true);
-            assert!(shell(buf.area, &state).detail.is_none());
+            assert!(shell(buf.area, &state).pane.is_none());
             assert!(row(&buf, 2).contains(head), "{v:?}: {}", row(&buf, 2));
         }
     }
@@ -349,10 +537,18 @@ mod tests {
                 ..UiState::default()
             };
             let text = all(&render(w, h, &state, true));
-            assert!(text.contains("keys"));
-            assert!(text.contains("refresh"));
-            assert!(text.contains("upload package"));
-            assert!(text.contains("\u{256d}"), "rounded corner");
+            for s in [
+                "keys",
+                "refresh",
+                "close, clear",
+                "next theme",
+                "mark sent",
+                "when a package is checked",
+                "theme gig-dark",
+                "\u{256d}",
+            ] {
+                assert!(text.contains(s), "{w}x{h}: {s}\n{text}");
+            }
         }
     }
 
@@ -362,7 +558,12 @@ mod tests {
         state.filters[0].editing = true;
         state.filters[0].text = "tk-".into();
         let buf = render(80, 24, &state, false);
-        assert!(row(&buf, 23).contains("/ tk-_"));
+        assert!(
+            row(&buf, 1).starts_with(" / tk-\u{258f}  0 of 0"),
+            "{}",
+            row(&buf, 1)
+        );
+        assert_eq!(buf[(1, 1)].fg, Theme::DARK.accent);
     }
 
     #[test]
@@ -385,7 +586,7 @@ mod tests {
             ..UiState::default()
         };
         let buf = render(80, 24, &state, false);
-        assert!(row(&buf, 23).contains("db: locked"));
+        assert!(row(&buf, 1).ends_with("db: locked "));
     }
 
     /// Sample orders with a long Chinese title, a JOB.md status on the
@@ -562,8 +763,8 @@ mod tests {
         let text = all(&buf);
         let (y, row7) = line_of(&text, "tk-denoise").unwrap();
         let y = y as u16;
-        assert!(row7.starts_with('\u{258c}'), "selection marker: {row7}");
-        assert_eq!(buf[(0, y)].fg, Theme::LIGHT.accent);
+        assert!(row7.starts_with(" \u{258c}"), "selection marker: {row7}");
+        assert_eq!(buf[(1, y)].fg, Theme::LIGHT.accent);
         let x = crate::text::width(&row7[..row7.find("tk-denoise").unwrap()]) as u16;
         assert_eq!(buf[(x, y)].bg, Theme::LIGHT.sel);
         let chip_x = crate::text::width(&row7[..row7.find("delivered").unwrap()]) as u16;
@@ -601,20 +802,47 @@ mod tests {
         state.data.money.outstanding.gross = 123_456_700;
         state.data.money.month.gross = 234_567_800;
         state.data.money.year.gross = 987_654_321;
+        state.data.today = "2026-09-29".into();
         let top = row(&render(80, 24, &state, true), 0);
-        assert!(top.contains("owed 1234567"), "{top}");
-        assert!(!top.contains("year"), "{top}");
+        assert!(top.contains("  owed 1,234,567  "), "{top}");
+        assert!(!top.contains("2026"), "{top}");
+        // Mockup 17.2: tabs 2 apart, CNY and the year dropped.
+        let mut state = UiState::default();
+        state.data.today = "2026-09-29".into();
+        state.data.money.outstanding.gross = 160_000;
+        state.data.money.year.gross = 2_955_000;
+        let top = row(&render(80, 24, &state, true), 0);
+        assert_eq!(
+            top,
+            " gig  1 Orders  2 Drafts  3 Money  4 History               owed 1,600  \u{b7}  sep 0 "
+        );
+        // Very narrow: only the active tab keeps its word.
+        state.data.money.outstanding.gross = 12_345_678_900;
+        let top = row(&render(60, 16, &state, true), 0);
+        assert!(top.starts_with(" gig  1 Orders  2  3  4"), "{top}");
     }
 
     #[test]
-    fn hint_line_lists_view_keys_that_fit() {
+    fn footer_follows_the_selected_order() {
         let state = sample();
+        // o7 (tk-denoise, delivered) is selected.
         let wide = row(&render(200, 50, &state, true), 49);
-        for k in [" s start", " p paid", " PgDn scroll detail"] {
-            assert!(wide.contains(k), "{k}: {wide}");
-        }
+        assert!(
+            wide.starts_with(
+                " p paid  y copy link  n note  k score   \u{b7}   / filter  a archived  N new  ? keys  q quit"
+            ),
+            "{wide}"
+        );
+        // Mockup 17.2: Enter detail first, k score and the optional pairs go.
         let narrow = row(&render(80, 24, &state, false), 23);
-        assert!(narrow.contains("q quit"), "{narrow}");
+        assert_eq!(
+            narrow.trim_end(),
+            " Enter detail  p paid  y copy link  n note   \u{b7}   / filter  ? keys  q quit"
+        );
+        // Keys bold, labels muted, the dot dim.
+        let buf = render(80, 24, &state, false);
+        assert!(buf[(1, 23)].modifier.contains(Modifier::BOLD));
+        assert_eq!(buf[(7, 23)].fg, Theme::DARK.muted);
         // From History, the detail shows the order keys.
         let hist = UiState {
             view: View::History,
@@ -622,46 +850,36 @@ mod tests {
             ..sample()
         };
         let line = row(&render(200, 50, &hist, true), 49);
+        assert!(line.starts_with(" Esc back  p paid"), "{line}");
+        // Queued: start, price, note, cancel.
+        let mut q = sample();
+        q.selected = Some(1);
+        let line = row(&render(200, 50, &q, true), 49);
         assert!(
-            line.contains("Esc back") && line.contains(" x cancel"),
+            line.starts_with(" s start  $ price  n note  x cancel"),
             "{line}"
         );
-        let help = all(&render(
-            200,
-            50,
-            &UiState {
-                help_open: true,
-                ..hist
-            },
-            true,
-        ));
-        assert!(help.contains("upload package") && help.contains("order detail"));
-        // The help's global column is not cut.
-        let help = all(&render(
-            80,
-            24,
-            &UiState {
-                help_open: true,
-                ..UiState::default()
-            },
-            false,
-        ));
-        assert!(help.contains("close / clear filter"), "{help}");
+        // Money names its own keys.
+        let mut m = sample();
+        m.view = View::Money;
+        let line = row(&render(120, 36, &m, true), 35);
+        assert!(
+            line.contains("1-4 views  T theme  ? keys  q quit"),
+            "{line}"
+        );
         // Long filter text keeps its end and the cursor.
         let mut f = UiState::default();
         f.filters[0].editing = true;
         f.filters[0].text = format!("{}END", "x".repeat(100));
-        assert!(row(&render(80, 24, &f, false), 23).contains("END_"));
+        assert!(row(&render(80, 24, &f, false), 1).contains("END\u{258f}"));
         // A long refresh error is cut and the keys stay.
         let e = UiState {
             error: Some(format!("db: {}", "locked ".repeat(30))),
             ..UiState::default()
         };
-        let line = row(&render(80, 24, &e, false), 23);
-        assert!(
-            line.contains('\u{2026}') && line.contains("1-4 view"),
-            "{line}"
-        );
+        let buf = render(80, 24, &e, false);
+        assert!(row(&buf, 1).contains('\u{2026}'));
+        assert!(row(&buf, 23).contains("? keys"));
     }
 
     #[test]
@@ -713,7 +931,7 @@ mod tests {
     fn selection_stays_visible_in_a_short_terminal() {
         let mut state = sample();
         state.selected = Some(2); // last row (queued, newest)
-        let buf = render(80, 8, &state, false);
+        let buf = render(80, 16, &state, false);
         let text = all(&buf);
         assert!(line_of(&text, "o2 ").is_some(), "{text}");
     }

@@ -301,8 +301,25 @@ impl Theme {
         Style::new().fg(self.muted)
     }
 
+    /// Titles and headings: bold `text` (accent is for markers only).
     pub fn title(&self) -> Style {
-        Style::new().fg(self.accent).add_modifier(Modifier::BOLD)
+        Style::new().fg(self.text).add_modifier(Modifier::BOLD)
+    }
+
+    /// Separators, empty-cell dots, placeholders.
+    pub fn dim(&self) -> Style {
+        Style::new().fg(self.dim)
+    }
+
+    pub fn accent(&self) -> Style {
+        Style::new().fg(self.accent)
+    }
+
+    /// Short links: underlined `text`.
+    pub fn link(&self) -> Style {
+        Style::new()
+            .fg(self.text)
+            .add_modifier(Modifier::UNDERLINED)
     }
 
     pub fn key(&self) -> Style {
@@ -330,6 +347,81 @@ impl Theme {
     /// sentence (`muted 3.9:1 on sel, needs 4.5`); `None` when all pass.
     pub fn contrast_failure(&self) -> Option<String> {
         contrast::failures(self).into_iter().next()
+    }
+}
+
+/// How the terminal shows colour (TUI-DESIGN.md sections 14.5 and 14.6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ColorMode {
+    TrueColor,
+    /// Slots quantised to the nearest xterm-256 index.
+    Indexed,
+    /// `NO_COLOR`: every slot is the terminal default.
+    NoColor,
+}
+
+impl ColorMode {
+    /// From `NO_COLOR` and `COLORTERM`, read through `env`.
+    pub fn detect(env: impl Fn(&str) -> Option<String>) -> Self {
+        if env("NO_COLOR").is_some_and(|v| !v.is_empty()) {
+            return ColorMode::NoColor;
+        }
+        match env("COLORTERM").as_deref() {
+            Some("truecolor") | Some("24bit") => ColorMode::TrueColor,
+            _ => ColorMode::Indexed,
+        }
+    }
+}
+
+impl Theme {
+    /// This theme as `mode` draws it.
+    pub fn for_mode(&self, mode: ColorMode) -> Theme {
+        let mut t = self.clone();
+        if mode == ColorMode::TrueColor {
+            return t;
+        }
+        for key in SLOTS {
+            if let Some(c) = t.slot_mut(key) {
+                *c = match mode {
+                    ColorMode::NoColor => Color::Reset,
+                    _ => quantise(*c),
+                };
+            }
+        }
+        t
+    }
+
+    /// True under `NO_COLOR` (slots are `Reset`).
+    pub fn no_color(&self) -> bool {
+        self.text == Color::Reset
+    }
+}
+
+/// The nearest xterm-256 colour (cube 16..231 or grey ramp 232..255) by
+/// squared distance in sRGB.
+pub fn quantise(c: Color) -> Color {
+    let Color::Rgb(r, g, b) = c else { return c };
+    const LEVELS: [u8; 6] = [0, 95, 135, 175, 215, 255];
+    let near = |v: u8| {
+        (0..6)
+            .min_by_key(|&i| (i32::from(LEVELS[i]) - i32::from(v)).abs())
+            .unwrap_or(0)
+    };
+    let dist = |x: (u8, u8, u8)| {
+        let d = |a: u8, b: u8| (i32::from(a) - i32::from(b)).pow(2);
+        d(x.0, r) + d(x.1, g) + d(x.2, b)
+    };
+    let (ri, gi, bi) = (near(r), near(g), near(b));
+    let cube = (LEVELS[ri], LEVELS[gi], LEVELS[bi]);
+    let cube_idx = 16 + 36 * ri + 6 * gi + bi;
+    let grey_i = (0..24)
+        .min_by_key(|&i| dist((8 + 10 * i, 8 + 10 * i, 8 + 10 * i)))
+        .unwrap_or(0);
+    let grey = 8 + 10 * grey_i;
+    if dist((grey, grey, grey)) < dist(cube) {
+        Color::Indexed(232 + grey_i)
+    } else {
+        Color::Indexed(cube_idx as u8)
     }
 }
 
@@ -479,6 +571,44 @@ mod tests {
             assert_eq!(failures(&t), Vec::<String>::new(), "{}", t.name);
             assert!(t.contrast_failure().is_none());
         }
+    }
+
+    #[test]
+    fn colour_modes() {
+        let env = |pairs: &'static [(&'static str, &'static str)]| {
+            move |k: &str| {
+                pairs
+                    .iter()
+                    .find(|(n, _)| *n == k)
+                    .map(|(_, v)| v.to_string())
+            }
+        };
+        assert_eq!(
+            ColorMode::detect(env(&[("COLORTERM", "truecolor")])),
+            ColorMode::TrueColor
+        );
+        assert_eq!(
+            ColorMode::detect(env(&[("COLORTERM", "24bit")])),
+            ColorMode::TrueColor
+        );
+        assert_eq!(ColorMode::detect(env(&[])), ColorMode::Indexed);
+        assert_eq!(
+            ColorMode::detect(env(&[("NO_COLOR", "1"), ("COLORTERM", "truecolor")])),
+            ColorMode::NoColor
+        );
+        assert_eq!(
+            ColorMode::detect(env(&[("NO_COLOR", "")])),
+            ColorMode::Indexed
+        );
+        assert_eq!(quantise(rgb(0x000000)), Color::Indexed(16));
+        assert_eq!(quantise(rgb(0xffffff)), Color::Indexed(231));
+        assert_eq!(quantise(rgb(0x14161a)), Color::Indexed(233));
+        assert_eq!(quantise(rgb(0xff0000)), Color::Indexed(196));
+        let q = Theme::GIG_DARK.for_mode(ColorMode::Indexed);
+        assert!(matches!(q.accent, Color::Indexed(_)));
+        let n = Theme::GIG_DARK.for_mode(ColorMode::NoColor);
+        assert!(n.no_color() && n.bg == Color::Reset && n.unpaid == Color::Reset);
+        assert!(!Theme::GIG_DARK.no_color());
     }
 
     #[test]

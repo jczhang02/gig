@@ -31,6 +31,8 @@ pub struct Snapshot {
     /// All drafts, newest first. Use `open_drafts` for the Drafts view.
     pub drafts: Vec<Draft>,
     pub money: Money,
+    /// `[general] default_currency`; empty means CNY.
+    pub currency: String,
 }
 
 /// One order with everything its row and detail need.
@@ -162,6 +164,7 @@ impl Snapshot {
             money: Money::compute(&raw, today),
             orders: rows,
             drafts: drafts::list(conn, true)?,
+            currency: ctx.config.general.default_currency.clone(),
         })
     }
 
@@ -191,6 +194,15 @@ impl Snapshot {
 
     pub fn open_drafts(&self) -> impl Iterator<Item = &Draft> {
         self.drafts.iter().filter(|d| d.status == DraftStatus::Open)
+    }
+
+    /// The default currency code for labels.
+    pub fn currency(&self) -> &str {
+        if self.currency.is_empty() {
+            "CNY"
+        } else {
+            &self.currency
+        }
     }
 
     pub fn order(&self, id: i64) -> Option<&OrderRow> {
@@ -394,6 +406,7 @@ pub(crate) mod tests {
             money: Money::compute(&v, today),
             orders: v.into_iter().rev().map(|o| row(o, today)).collect(),
             drafts: vec![],
+            currency: "CNY".into(),
         }
     }
 

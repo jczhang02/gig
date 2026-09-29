@@ -6,7 +6,7 @@ use crate::icons::Icons;
 use crate::popup::{Form, Popup, Scroll};
 use crate::terminal::{self, Term};
 use crate::theme::Theme;
-use crate::ui;
+use crate::ui::{self, WidthClass};
 use crate::upload::{self, UploadJob};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use gig_core::config::Tui;
@@ -68,6 +68,62 @@ pub struct Filter {
     pub editing: bool,
 }
 
+/// Tone of a toast on the message row (TUI-DESIGN.md section 7.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Tone {
+    /// `text`; clears after `TOAST_TTL` or on the next key.
+    Info,
+    /// `warranty`; clears on the next key.
+    Warn,
+    /// `unpaid`; clears on the next key.
+    Error,
+}
+
+/// One message on the right of the message row.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Toast {
+    pub text: String,
+    pub tone: Tone,
+    /// When an info toast clears by itself.
+    pub until: Option<Instant>,
+}
+
+/// How long an info toast stays.
+pub const TOAST_TTL: Duration = Duration::from_secs(3);
+
+impl Toast {
+    pub fn info(text: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            tone: Tone::Info,
+            until: Instant::now().checked_add(TOAST_TTL),
+        }
+    }
+
+    pub fn warn(text: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            tone: Tone::Warn,
+            until: None,
+        }
+    }
+
+    pub fn error(text: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            tone: Tone::Error,
+            until: None,
+        }
+    }
+}
+
+/// The NOTES.md tail shown by `Enter` in Drafts at Medium and Wide.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NotesPane {
+    pub draft_id: i64,
+    pub lines: Vec<String>,
+}
+
 /// Case-insensitive substring match of `filter` in any of `fields`; an
 /// empty filter matches everything.
 pub fn matches_filter(filter: &str, fields: &[&str]) -> bool {
@@ -84,8 +140,12 @@ pub struct UiState {
     pub help_open: bool,
     /// Full-screen detail (narrow terminals, and History `Enter`).
     pub detail_open: bool,
-    /// Last refresh error, shown on the hint line until the next success.
+    /// Last refresh error, shown on the message row until the next success.
     pub error: Option<String>,
+    /// Message row toast: a copied link, a theme change, a warning.
+    pub toast: Option<Toast>,
+    /// Drafts `Enter` at Medium and Wide: the NOTES.md tail pane.
+    pub notes_pane: Option<NotesPane>,
     pub data: Snapshot,
     /// Open action popup (form, confirmation, result, refusal). Takes every
     /// key while open.
@@ -114,6 +174,8 @@ impl Default for UiState {
             help_open: false,
             detail_open: false,
             error: None,
+            toast: None,
+            notes_pane: None,
             data: Snapshot::default(),
             popup: None,
             selected: None,
@@ -138,12 +200,11 @@ pub enum Outcome {
     Act(Effect),
     /// Ctrl+L: clear the terminal and draw everything again.
     Redraw,
+    /// `T`: the next theme.
+    CycleTheme,
     /// Not a key of this app state: the current view may use it.
     Unhandled(KeyEvent),
 }
-
-/// Terminal width from which the detail pane sits next to the Orders list.
-pub const WIDE_COLUMNS: u16 = 110;
 
 impl UiState {
     pub fn filter(&self) -> &Filter {
@@ -159,6 +220,7 @@ impl UiState {
             self.filter_mut().editing = false;
             self.view = view;
             self.detail_open = false;
+            self.notes_pane = None;
             self.detail_scroll.offset = 0;
         }
     }
@@ -248,7 +310,21 @@ impl UiState {
     /// True when the order detail is on screen: full screen, or the right
     /// pane of Orders at `width` columns.
     pub fn detail_shown(&self, width: u16) -> bool {
-        self.detail_open || (self.view == View::Orders && width >= WIDE_COLUMNS)
+        self.detail_open
+            || (self.view == View::Orders && WidthClass::of(width) != WidthClass::Narrow)
+    }
+
+    /// Delivered, unpaid orders of the Money view, longest waiting first.
+    pub fn owed_ids(&self) -> Vec<i64> {
+        self.data.money.owed.iter().map(|o| o.order_id).collect()
+    }
+
+    /// The selected row of the Money outstanding table.
+    pub fn selected_owed(&self) -> Option<i64> {
+        let ids = self.owed_ids();
+        self.selected
+            .filter(|id| ids.contains(id))
+            .or(ids.first().copied())
     }
 
     /// Up/Down in the current list, clamped at both ends.
@@ -271,8 +347,16 @@ impl UiState {
                 let ids: Vec<i64> = self.draft_list().iter().map(|d| d.id).collect();
                 let cur = self.selected_draft().map(|d| d.id);
                 self.selected_draft = step(&ids, cur, delta);
+                // The notes pane follows the selection.
+                if self.notes_pane.is_some() {
+                    actions::draft_notes(self, true);
+                }
             }
-            View::Money => {}
+            View::Money => {
+                let ids = self.owed_ids();
+                let cur = self.selected_owed();
+                self.selected = step(&ids, cur, delta);
+            }
         }
     }
 
@@ -305,6 +389,8 @@ impl UiState {
         if key.kind != KeyEventKind::Press {
             return Outcome::None;
         }
+        // Toasts last until the next key.
+        self.toast = None;
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         if ctrl && key.code == KeyCode::Char('c') {
             return Outcome::Quit;
@@ -361,6 +447,7 @@ impl UiState {
                 Outcome::None
             }
             KeyCode::Char('r') => Outcome::Refresh,
+            KeyCode::Char('T') => Outcome::CycleTheme,
             KeyCode::Char(c @ '1'..='4') => {
                 if let Some(v) = View::from_digit(c) {
                     self.switch(v);
@@ -384,17 +471,28 @@ impl UiState {
                 if self.detail_open {
                     self.detail_open = false;
                     self.detail_scroll.offset = 0;
+                } else if self.notes_pane.is_some() {
+                    self.notes_pane = None;
                 } else {
                     *self.filter_mut() = Filter::default();
                 }
                 Outcome::None
             }
             KeyCode::Enter
-                if (self.view == View::Orders && width < WIDE_COLUMNS)
+                if (self.view == View::Orders && WidthClass::of(width) == WidthClass::Narrow)
                     || self.view == View::History =>
             {
                 self.detail_open = true;
                 self.detail_scroll.offset = 0;
+                Outcome::None
+            }
+            // Money: the selected outstanding order, full screen.
+            KeyCode::Enter if self.view == View::Money => {
+                if let Some(id) = self.selected_owed() {
+                    self.selected = Some(id);
+                    self.detail_open = true;
+                    self.detail_scroll.offset = 0;
+                }
                 Outcome::None
             }
             KeyCode::PageUp | KeyCode::PageDown | KeyCode::Home | KeyCode::End
@@ -404,7 +502,11 @@ impl UiState {
                 Outcome::None
             }
             KeyCode::Enter if self.view == View::Drafts => {
-                actions::draft_notes(self);
+                if self.notes_pane.is_some() {
+                    self.notes_pane = None;
+                } else {
+                    actions::draft_notes(self, WidthClass::of(width) != WidthClass::Narrow);
+                }
                 Outcome::None
             }
             KeyCode::Up => {
@@ -433,6 +535,8 @@ pub struct App {
     pub ctx: Ctx,
     pub ui: UiState,
     pub theme: Theme,
+    /// Every theme `T` cycles through, as the terminal draws them.
+    pub themes: Vec<Theme>,
     pub icons: Icons,
     /// `None` when `refresh_seconds` is 0.
     pub refresh_every: Option<Duration>,
@@ -450,11 +554,12 @@ const IDLE_POLL: Duration = Duration::from_secs(60);
 const UPLOAD_TICK: Duration = Duration::from_millis(80);
 
 impl App {
-    pub fn new(ctx: Ctx, settings: &Tui, theme: Theme) -> Self {
+    pub fn new(ctx: Ctx, settings: &Tui, theme: Theme, themes: Vec<Theme>) -> Self {
         Self {
             ctx,
             ui: UiState::default(),
             theme,
+            themes,
             icons: Icons::new(settings.icons),
             refresh_every: (settings.refresh_seconds > 0)
                 .then(|| Duration::from_secs(settings.refresh_seconds)),
@@ -462,6 +567,24 @@ impl App {
             clipboard: None,
             jobs: JobCache::default(),
         }
+    }
+
+    /// `T`: the theme after the current one, wrapping. Not persisted.
+    pub fn cycle_theme(&mut self) {
+        let n = self.themes.len();
+        if n == 0 {
+            return;
+        }
+        let at = self
+            .themes
+            .iter()
+            .position(|t| t.name == self.theme.name)
+            .map_or(0, |i| (i + 1) % n);
+        self.theme = self.themes[at].clone();
+        self.ui.toast = Some(Toast::info(format!(
+            "theme {}  \u{b7}  set [tui] theme to keep",
+            self.theme.name
+        )));
     }
 
     /// Reload the snapshot. Errors land on the hint line; nothing is retried.
@@ -484,7 +607,12 @@ impl App {
         loop {
             self.draw(term)?;
 
-            let timeout = match next_tick {
+            let toast_until = self.ui.toast.as_ref().and_then(|t| t.until);
+            let wake = match (next_tick, toast_until) {
+                (Some(a), Some(b)) => Some(a.min(b)),
+                (a, b) => a.or(b),
+            };
+            let timeout = match wake {
                 Some(t) => t.saturating_duration_since(Instant::now()),
                 None => IDLE_POLL,
             };
@@ -496,6 +624,7 @@ impl App {
                             Outcome::Quit => return Ok(()),
                             Outcome::Refresh => self.refresh(),
                             Outcome::Redraw => term.clear()?,
+                            Outcome::CycleTheme => self.cycle_theme(),
                             Outcome::Act(effect) => self.apply(effect, term)?,
                             Outcome::None | Outcome::Unhandled(_) => {}
                         }
@@ -504,6 +633,9 @@ impl App {
                     _ => {}
                 }
                 // Resize and other events just redraw.
+            }
+            if toast_until.is_some_and(|t| Instant::now() >= t) {
+                self.ui.toast = None;
             }
             if let (Some(t), Some(every)) = (next_tick, self.refresh_every) {
                 if Instant::now() >= t {
@@ -553,8 +685,11 @@ impl App {
                 self.refresh();
             }
             Effect::Copy(link) => {
-                let lines = self.copy_lines(link);
-                self.ui.popup = Some(Popup::message("link", lines));
+                let shown = crate::text::strip_scheme(&link).to_string();
+                self.ui.toast = Some(match self.copy(link) {
+                    Ok(()) => Toast::info(format!("copied {shown}")),
+                    Err(e) => Toast::error(format!("clipboard unavailable ({e}): {shown}")),
+                });
             }
             Effect::Upload(job) => self.upload(&job, term)?,
         }
@@ -619,7 +754,11 @@ impl App {
                 let mut lines = done.lines();
                 if let Some(link) = done.link() {
                     lines.push(String::new());
-                    lines.extend(self.copy_lines(link.to_string()));
+                    lines.push(crate::text::strip_scheme(link).to_string());
+                    lines.push(match self.copy(link.to_string()) {
+                        Ok(()) => "copied to clipboard".into(),
+                        Err(_) => "clipboard unavailable, link shown above".into(),
+                    });
                 }
                 self.ui.popup = Some(Popup::message(format!("uploaded {}", done.what), lines));
             }
@@ -679,24 +818,15 @@ impl App {
         ));
     }
 
-    /// `y` and finished uploads: the link goes to the clipboard; without one
-    /// it is only shown. Returns the popup lines saying which.
-    fn copy_lines(&mut self, link: String) -> Vec<String> {
+    /// `y` and finished uploads: the link to the clipboard. On X11 the
+    /// copied text lives in this process, which is why the handle is kept.
+    fn copy(&mut self, link: String) -> std::result::Result<(), String> {
         let clip = self
             .clipboard
             .get_or_insert_with(|| arboard::Clipboard::new().map_err(|e| e.to_string()));
         match clip {
-            Ok(c) => match c.set_text(link.clone()) {
-                // On X11 the copied text lives in this process: without a
-                // clipboard manager it is gone once gig tui quits.
-                Ok(()) if cfg!(target_os = "linux") => vec![
-                    "copied to the clipboard (paste it before quitting gig tui):".into(),
-                    link,
-                ],
-                Ok(()) => vec!["copied to the clipboard:".into(), link],
-                Err(e) => vec![format!("clipboard unavailable ({e}):"), link],
-            },
-            Err(e) => vec![format!("clipboard unavailable ({e}):"), link],
+            Ok(c) => c.set_text(link).map_err(|e| e.to_string()),
+            Err(e) => Err(e.clone()),
         }
     }
 }
@@ -861,6 +991,23 @@ mod tests {
         assert_eq!(s.selected, Some(before[before.len() - 2]));
         let ctrl_l = KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL);
         assert_eq!(s.handle_key(ctrl_l, 80), Outcome::Redraw);
+    }
+
+    #[test]
+    fn t_cycles_themes_and_money_enter_opens_the_order() {
+        let mut s = with_orders();
+        assert_eq!(press(&mut s, KeyCode::Char('T')), Outcome::CycleTheme);
+        press(&mut s, KeyCode::Char('3'));
+        // Owed: o7 (59 days), o6 (1 day), o10 (unknown).
+        assert_eq!(s.selected_owed(), Some(7));
+        press(&mut s, KeyCode::Down);
+        assert_eq!(s.selected_owed(), Some(6));
+        press(&mut s, KeyCode::Enter);
+        assert!(s.detail_open);
+        assert_eq!(s.selected_order().unwrap().order.id, 6);
+        press(&mut s, KeyCode::Esc);
+        assert!(!s.detail_open);
+        assert_eq!(s.view, View::Money);
     }
 
     #[test]

@@ -7,7 +7,7 @@ use crate::text;
 use crate::theme::Theme;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::Style;
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Clear, Paragraph};
 use ratatui::Frame;
@@ -466,6 +466,123 @@ impl Popup {
                 }
             },
         }
+    }
+}
+
+/// Frame and title colour of a popup (TUI-DESIGN.md section 12.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Tone {
+    /// Forms, help, information: `border`.
+    Plain,
+    /// External actions (upload, mark sent): `warranty`.
+    External,
+    /// Destructive actions and refusals: `unpaid`.
+    Danger,
+    /// Results of a write that succeeded: `accent`.
+    Done,
+}
+
+impl Tone {
+    fn color(self, t: &Theme) -> ratatui::style::Color {
+        match self {
+            Tone::Plain => t.border,
+            Tone::External => t.warranty,
+            Tone::Danger => t.unpaid,
+            Tone::Done => t.accent,
+        }
+    }
+}
+
+/// Dim everything already drawn: fg to `dim`, bold and underline removed,
+/// backgrounds kept (section 12.2). Under NO_COLOR only the modifiers go.
+pub fn scrim(frame: &mut Frame, theme: &Theme) {
+    let buf = frame.buffer_mut();
+    let area = buf.area;
+    for y in area.top()..area.bottom() {
+        for x in area.left()..area.right() {
+            let cell = &mut buf[(x, y)];
+            if !theme.no_color() {
+                cell.set_fg(theme.dim);
+            }
+            let m = cell.modifier - Modifier::BOLD - Modifier::UNDERLINED;
+            cell.modifier = m;
+        }
+    }
+}
+
+/// Rows and cells between the frame and the content.
+const PAD_Y: u16 = 1;
+const PAD_X: u16 = 2;
+
+/// Where a popup of `width` x `height` goes: centred horizontally, its top
+/// on the upper third, inside `area` less one row.
+pub fn place(area: Rect, width: u16, height: u16) -> Rect {
+    let width = width.min(area.width);
+    let height = height.min(area.height.saturating_sub(2).max(1));
+    let x = area.x + (area.width - width) / 2;
+    let y = area.y
+        + ((area.height.saturating_sub(height)) / 3)
+            .max(1)
+            .min(area.height - height);
+    Rect::new(x, y, width, height)
+}
+
+/// Scrim, clear, frame and fill a popup for `rows` rows of content and
+/// return the padded content area. `width` is the outer width.
+pub fn open(
+    frame: &mut Frame,
+    area: Rect,
+    width: u16,
+    rows: u16,
+    title: &str,
+    tone: Tone,
+    theme: &Theme,
+) -> Rect {
+    scrim(frame, theme);
+    let rect = place(area, width, rows.saturating_add(2 + 2 * PAD_Y));
+    frame.render_widget(Clear, rect);
+    // A wide glyph cut by the popup edge leaves half a character on screen.
+    let buf = frame.buffer_mut();
+    for y in rect.top()..rect.bottom() {
+        if rect.left() > buf.area.left() {
+            let left = &mut buf[(rect.left() - 1, y)];
+            if text::width(left.symbol()) > 1 {
+                left.set_symbol(" ");
+            }
+        }
+        if rect.right() < buf.area.right() {
+            let right = &mut buf[(rect.right(), y)];
+            if right.symbol().is_empty() {
+                right.set_symbol(" ");
+            }
+        }
+    }
+    let color = tone.color(theme);
+    let title_style = match tone {
+        Tone::Plain => theme.title(),
+        _ => theme.title().fg(color),
+    };
+    let fill = if theme.no_color() {
+        Style::new()
+    } else {
+        Style::new().bg(theme.surface).fg(theme.text)
+    };
+    let max_title = usize::from(rect.width.saturating_sub(6));
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .border_style(Style::new().fg(color))
+        .title(Span::styled(
+            format!(" {} ", text::truncate(title, max_title)),
+            title_style,
+        ))
+        .style(fill);
+    let inner = block.inner(rect);
+    frame.render_widget(block, rect);
+    Rect {
+        x: inner.x + PAD_X,
+        y: inner.y + PAD_Y,
+        width: inner.width.saturating_sub(2 * PAD_X),
+        height: inner.height.saturating_sub(2 * PAD_Y),
     }
 }
 
@@ -1054,7 +1171,7 @@ mod tests {
         };
         let routine = Popup::confirm("Title", vec!["x".into()], Effect::None);
         let danger = Popup::confirm_danger("Title", vec!["x".into()], Effect::None);
-        assert_eq!(title_fg(&routine), Theme::DARK.accent);
+        assert_eq!(title_fg(&routine), Theme::DARK.text);
         assert_eq!(title_fg(&danger), Theme::DARK.unpaid);
         assert_eq!(title_fg(&Popup::done("Title", vec![])), Theme::DARK.accent);
         let screen_text = screen(&routine, 80, 24);

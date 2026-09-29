@@ -1,7 +1,6 @@
-//! Nerd Font glyphs for project types, statuses and views. With icons off
+//! Nerd Font glyphs for project types, and statuses. With icons off
 //! every glyph is empty and the text label next to it stays.
 
-use crate::app::View;
 use gig_core::models::{OrderStatus, ProjectType};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,15 +42,6 @@ impl Icons {
         })
     }
 
-    pub fn view(&self, v: View) -> &'static str {
-        self.pick(match v {
-            View::Orders => "\u{f03a}",  // list
-            View::Drafts => "\u{f040}",  // pencil
-            View::Money => "\u{f0d6}",   // money
-            View::History => "\u{f1da}", // history
-        })
-    }
-
     /// "glyph text" with icons on, "text" with icons off.
     pub fn label(&self, glyph: &str, text: &str) -> String {
         if glyph.is_empty() {
@@ -79,8 +69,8 @@ mod tests {
             assert_eq!(off.label(off.status(*s), s.as_str()), s.as_str());
         }
         assert_eq!(
-            on.label(on.view(View::Money), "Money"),
-            "\u{f0d6} Money".to_string()
+            on.label(on.status(OrderStatus::Paid), "paid"),
+            "\u{f132} paid".to_string()
         );
     }
 }

@@ -185,6 +185,15 @@ pub fn view_key(ui: &mut UiState, key: KeyEvent) -> Option<Effect> {
     if ui.view == View::Drafts && !ui.detail_open {
         return drafts_key(ui, c);
     }
+    // Money: `y` copies the link of the selected outstanding order.
+    if ui.view == View::Money && !ui.detail_open {
+        if c != 'y' {
+            return None;
+        }
+        let id = ui.selected_owed()?;
+        let row = ui.data.order(id)?;
+        return Some(copy_link(ui, row.order.slug.clone(), latest_link(row)));
+    }
     let order_view = ui.view == View::Orders || ui.detail_open;
     if !order_view {
         return None;
@@ -214,19 +223,26 @@ pub fn view_key(ui: &mut UiState, key: KeyEvent) -> Option<Effect> {
                 Effect::None
             }
         },
-        'y' => match latest_link(row) {
-            Some(link) => Effect::Copy(link),
-            None => {
-                ui.popup = Some(Popup::message(
-                    "copy link",
-                    vec![format!("{slug} has no uploaded link yet")],
-                ));
-                Effect::None
-            }
-        },
+        'y' => {
+            let link = latest_link(row);
+            copy_link(ui, slug, link)
+        }
         _ => return None,
     };
     Some(effect)
+}
+
+/// `y`: copy `link`, or say on the message row that there is none.
+fn copy_link(ui: &mut UiState, slug: String, link: Option<String>) -> Effect {
+    match link {
+        Some(link) => Effect::Copy(link),
+        None => {
+            ui.toast = Some(crate::app::Toast::warn(format!(
+                "{slug} has no uploaded link yet"
+            )));
+            Effect::None
+        }
+    }
 }
 
 fn drafts_key(ui: &mut UiState, c: char) -> Option<Effect> {
@@ -248,10 +264,27 @@ fn drafts_key(ui: &mut UiState, c: char) -> Option<Effect> {
 pub const NOTES_TAIL: usize = 30;
 
 /// `Enter` in Drafts: the tail of the selected draft's NOTES.md (read only).
-pub fn draft_notes(ui: &mut UiState) {
+/// With `pane` (Medium and Wide) the tail opens as the right pane
+/// instead of a popup.
+pub fn draft_notes(ui: &mut UiState, pane: bool) {
     let Some(d) = ui.selected_draft() else {
         return;
     };
+    if pane {
+        let lines = match drafts::read_notes(d) {
+            Some(text) => {
+                let all: Vec<&str> = text.lines().collect();
+                let skip = all.len().saturating_sub(NOTES_TAIL);
+                all[skip..].iter().map(|l| l.to_string()).collect()
+            }
+            None => vec![format!("no NOTES.md in {}", d.notes_dir)],
+        };
+        ui.notes_pane = Some(crate::app::NotesPane {
+            draft_id: d.id,
+            lines,
+        });
+        return;
+    }
     let title = format!("notes {}", d.slug);
     ui.popup = Some(match drafts::read_notes(d) {
         Some(text) => {

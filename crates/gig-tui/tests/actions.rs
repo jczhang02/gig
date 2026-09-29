@@ -338,7 +338,17 @@ fn drafts_new_and_promote() {
     let notes = Path::new(&d.notes_dir).join("NOTES.md");
     let body: String = (1..=50).map(|i| format!("line {i}\n")).collect();
     std::fs::write(&notes, &body).unwrap();
+    // Medium and Wide: a pane with the last 30 lines; Enter again closes it.
     h.key(KeyCode::Enter);
+    let pane = h.ui.notes_pane.clone().expect("notes pane at 200 columns");
+    assert_eq!(pane.lines.len(), 30);
+    assert_eq!(pane.lines.last().map(String::as_str), Some("line 50"));
+    assert_eq!(h.ui.popup, None);
+    h.key(KeyCode::Enter);
+    assert_eq!(h.ui.notes_pane, None);
+    // Narrow: the popup.
+    let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
+    assert_eq!(h.ui.handle_key(enter, 80), Outcome::None);
     let text = h.popup_text();
     assert!(text.starts_with("notes tk-draft"), "{text}");
     assert!(text.contains("(20 earlier lines)") && text.contains("line 50"));
@@ -462,7 +472,8 @@ fn other_forms_reach_gig_core() {
     h.key(KeyCode::Char('e'));
     assert_eq!(h.effects.pop(), Some(Effect::EditFile(job)));
     h.key(KeyCode::Char('y'));
-    assert!(h.popup_text().contains("no uploaded link"));
+    let toast = h.ui.toast.clone().expect("a toast");
+    assert!(toast.text.contains("no uploaded link"), "{toast:?}");
 }
 
 // ---- uploads (spec 2.1 `u`, `m`, `U`) ----

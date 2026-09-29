@@ -31,6 +31,20 @@ pub fn render(frame: &mut Frame, area: Rect, view: View, cx: &RenderCx) {
     }
 }
 
+/// `3 of 5`: rows the current view's filter keeps, of all its rows.
+pub fn filter_count(state: &crate::app::UiState) -> String {
+    let (shown, all) = match state.view {
+        View::Orders => (
+            state.order_list().len(),
+            state.data.active_orders(state.show_closed).len(),
+        ),
+        View::History => (state.order_list().len(), state.data.orders.len()),
+        View::Drafts => (state.draft_list().len(), state.data.open_drafts().count()),
+        View::Money => (0, 0),
+    };
+    format!("{shown} of {all}")
+}
+
 /// First item to draw so that item `selected` (of rows `heights`) is fully
 /// inside `rows` lines. The selection sits as low as needed, never lower.
 pub(crate) fn window_start(heights: &[u16], selected: usize, rows: u16) -> usize {

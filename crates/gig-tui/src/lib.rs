@@ -111,17 +111,20 @@ pub fn run(opts: Opts) -> Result<()> {
     let settings = resolve_settings(&ctx.config.tui, &opts)?;
     let catalog = Catalog::load(&ctx.paths.themes_dir());
     let (theme, warning) = catalog.pick(settings.theme.as_deref());
+    let mode = theme::ColorMode::detect(|k| std::env::var(k).ok());
+    let theme = theme.for_mode(mode);
+    let themes = catalog.themes.iter().map(|t| t.for_mode(mode)).collect();
     let here = std::env::current_dir()
         .ok()
         .and_then(|d| gig_core::context::canonical(d).ok())
         .and_then(|d| gig_core::context::resolve_for(&ctx.conn, &d).ok().flatten());
-    let mut app = app::App::new(ctx, &settings, theme);
+    let mut app = app::App::new(ctx, &settings, theme, themes);
     app.refresh();
     if let Some(order) = here {
         app.ui.preselect(order.id);
     }
     if let Some(w) = warning {
-        app.ui.popup = Some(popup::Popup::message("theme", vec![w]));
+        app.ui.toast = Some(app::Toast::warn(w));
     }
     let mut term = terminal::enter()?;
     let _guard = terminal::Guard;

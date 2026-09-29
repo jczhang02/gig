@@ -157,6 +157,80 @@ pub fn wrap_ranges(flat: &str, first: usize, rest: usize) -> Vec<Range<usize>> {
     rows
 }
 
+/// Whole units grouped by thousands with `,`: `29550` -> `29,550`.
+pub fn group(n: i64) -> String {
+    let digits = n.unsigned_abs().to_string();
+    let mut out = String::new();
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    if n < 0 {
+        format!("-{out}")
+    } else {
+        out
+    }
+}
+
+/// Minor units as grouped major units, without decimals when there are no
+/// cents: `2955000` -> `29,550`, `80050` -> `800.50`.
+pub fn money(minor: i64) -> String {
+    let whole = group(minor / 100);
+    let cents = (minor % 100).unsigned_abs();
+    let whole = if minor < 0 && minor > -100 {
+        format!("-{whole}")
+    } else {
+        whole
+    };
+    if cents == 0 {
+        whole
+    } else {
+        format!("{whole}.{cents:02}")
+    }
+}
+
+/// Compact whole units for chart labels (TUI-DESIGN.md section 11.2):
+/// exact below 1,000, then one decimal and `k` or `M`, rounded half up.
+pub fn compact(n: i64) -> String {
+    let n = n.max(0);
+    let scaled = |unit: i64, suffix: &str| {
+        // Tenths, rounded half up on integers (floats print 12.85 as 12.8).
+        let tenths = (n * 10 + unit / 2) / unit;
+        format!("{}.{}{suffix}", tenths / 10, tenths % 10)
+    };
+    if n < 1_000 {
+        n.to_string()
+    } else if n < 1_000_000 && (n * 10 + 500) / 1000 < 10_000 {
+        scaled(1_000, "k")
+    } else {
+        scaled(1_000_000, "M")
+    }
+}
+
+/// `s` cut in the middle to at most `max` cells, keeping its last `keep`
+/// cells whole (a package id keeps its date): `abc…2026-08-26`.
+pub fn truncate_middle(s: &str, max: usize, keep: usize) -> String {
+    let flat = flatten(s);
+    if width(&flat) <= max {
+        return flat;
+    }
+    if max <= keep + 1 {
+        return truncate(&flat, max);
+    }
+    let end = tail(&flat, keep);
+    let head = truncate(&flat, max - width(&end));
+    format!("{head}{end}")
+}
+
+/// A link without its `https://` or `http://`.
+pub fn strip_scheme(link: &str) -> &str {
+    link.strip_prefix("https://")
+        .or_else(|| link.strip_prefix("http://"))
+        .unwrap_or(link)
+}
+
 /// Control characters shown as spaces.
 pub fn flatten(s: &str) -> String {
     s.chars()
@@ -281,6 +355,34 @@ mod tests {
         assert_eq!(truncate_left("/a/b", 8), "/a/b");
         assert_eq!(width(&truncate_left("/数据/发票识别", 7)), 7);
         assert_eq!(tail("图像去噪", 5), "去噪");
+    }
+
+    #[test]
+    fn numbers_group_and_compact() {
+        assert_eq!(group(29550), "29,550");
+        assert_eq!(group(800), "800");
+        assert_eq!(group(1_234_567), "1,234,567");
+        assert_eq!(group(-1600), "-1,600");
+        assert_eq!(group(0), "0");
+        assert_eq!(money(2_955_000), "29,550");
+        assert_eq!(money(80050), "800.50");
+        assert_eq!(money(-50), "-0.50");
+        assert_eq!(compact(12850), "12.9k");
+        assert_eq!(compact(800), "800");
+        assert_eq!(compact(10000), "10.0k");
+        assert_eq!(compact(3100), "3.1k");
+        assert_eq!(compact(999_960), "1.0M");
+        assert_eq!(compact(1_250_000), "1.3M");
+    }
+
+    #[test]
+    fn middle_truncation_keeps_the_end() {
+        let id = "sers-colitis-analysis-delivery-2026-08-26";
+        let cut = truncate_middle(id, 38, 10);
+        assert_eq!(cut, "sers-colitis-analysis-deliv\u{2026}2026-08-26");
+        assert_eq!(width(&cut), 38);
+        assert!(cut.ends_with("2026-08-26"));
+        assert_eq!(truncate_middle("short", 38, 10), "short");
     }
 
     #[test]
