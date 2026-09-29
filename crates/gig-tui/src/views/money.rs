@@ -96,8 +96,9 @@ pub fn render(frame: &mut Frame, area: Rect, cx: &RenderCx) {
     let drill = cx
         .state
         .money_month
+        .as_deref()
         .filter(|_| chart_r.is_some())
-        .and_then(|i| cx.state.data.money.by_month.get(i));
+        .and_then(|l| cx.state.data.money.by_month.iter().find(|m| m.label == l));
     let drill_r = drill.and_then(|m| {
         let want = 2 + m.order_ids.len().max(1) as u16;
         let room = take(0).map_or(0, |r| area.bottom().saturating_sub(r.y));
@@ -302,7 +303,7 @@ fn chart(frame: &mut Frame, area: Rect, cx: &RenderCx, h: u16, term_width: u16) 
             Style::new().fg(t.border),
         );
     }
-    let picked = cx.state.money_month;
+    let picked = cx.state.money_month.as_deref();
     for (i, mo) in months.iter().enumerate() {
         let now = i == last;
         let x0 = area.x + i as u16 * s;
@@ -362,7 +363,7 @@ fn chart(frame: &mut Frame, area: Rect, cx: &RenderCx, h: u16, term_width: u16) 
         if let Some((year, m)) = year_month(&mo.label) {
             let name = MONTHS[m];
             let lx = centred(bx, b, 3).clamp(x0, x0 + s.saturating_sub(3));
-            let style = if picked == Some(i) {
+            let style = if picked == Some(mo.label.as_str()) {
                 // The picked month reads like the active tab: bold, with an
                 // accent underline (section 11.4).
                 let style = t.title().add_modifier(Modifier::UNDERLINED);

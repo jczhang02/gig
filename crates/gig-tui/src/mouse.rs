@@ -742,7 +742,7 @@ mod events {
         let before = draw(&s, 120, 36);
         // The month row: `Aug` is slot 10 of 12 (Oct 2025 .. Sep 2026).
         click_on(&mut s, 120, 36, "Aug", 2, t0);
-        assert_eq!(s.money_month, Some(10));
+        assert_eq!(s.money_month.as_deref(), Some("2026-08"));
         let buf = draw(&s, 120, 36);
         let (_, head) = find(&buf, "Received in August 2026  2");
         // Newest payment first: o8 (08-15), then o4 (08-01).
@@ -767,7 +767,7 @@ mod events {
         let (_, months_y) = find(&before, "Aug");
         let (x, y) = find_from(&before, "Sep", months_y).unwrap();
         click_xy(&mut s, 120, 36, x, y - 3, t0);
-        assert_eq!(s.money_month, Some(11));
+        assert_eq!(s.money_month.as_deref(), Some("2026-09"));
         click_xy(&mut s, 120, 36, x, y - 3, t0 + MS(2000));
         assert_eq!(s.money_month, None);
         // A drill-down row jumps: archived orders to History ...
@@ -789,7 +789,7 @@ mod events {
         // Small terminals: the drill-down and the table share the rest.
         for (w, h) in [(80, 24), (60, 16)] {
             let mut s = money();
-            s.money_month = Some(10);
+            s.money_month = Some("2026-08".into());
             draw(&s, w, h);
         }
     }

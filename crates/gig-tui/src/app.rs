@@ -177,9 +177,10 @@ pub struct UiState {
     pub settings: Option<Settings>,
     /// `T` or the theme row: the theme picker, previewing as it moves.
     pub picker: Option<Picker>,
-    /// Money: the chart month whose paid orders are listed under the chart
-    /// (a bar click), by index into `data.money.by_month`.
-    pub money_month: Option<usize>,
+    /// Money: the chart month (`YYYY-MM`) whose paid orders are listed
+    /// under the chart (a bar click). A label, not a slot, so it stays put
+    /// when the 12-month window moves on.
+    pub money_month: Option<String>,
     /// What the last frame drew where, for mouse events (TUI-SPEC 8.2).
     pub hits: Hits,
     /// The last click, to spot a double-click.
@@ -691,10 +692,11 @@ impl UiState {
             }
             Target::Owed(id) | Target::Paid(id) => self.jump(id),
             Target::Month(i) => {
-                self.money_month = if self.money_month == Some(i) {
+                let label = self.data.money.by_month.get(i).map(|m| m.label.clone());
+                self.money_month = if self.money_month == label {
                     None
                 } else {
-                    Some(i)
+                    label
                 };
             }
             Target::Link(url) => return Outcome::Act(Effect::Copy(url)),

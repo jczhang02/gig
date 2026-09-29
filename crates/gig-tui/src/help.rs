@@ -203,7 +203,11 @@ pub fn footer_groups(state: &UiState, class: WidthClass) -> (Vec<Pair>, Vec<Pair
                 Vec::new()
             };
             // A bar was clicked: its month is listed under the chart.
-            if state.money_month.is_some() {
+            let listed = state
+                .money_month
+                .as_ref()
+                .is_some_and(|l| state.data.money.by_month.iter().any(|m| &m.label == l));
+            if listed {
                 g1.push(("Esc", "close month"));
             }
             (
