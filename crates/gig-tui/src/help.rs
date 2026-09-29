@@ -335,11 +335,18 @@ pub fn render(frame: &mut Frame, area: Rect, cx: &RenderCx) {
         if offset + shown < total {
             shown -= 1;
         }
+        let len = lines.len();
         let mut out = Vec::new();
         if top > 0 {
-            out.push(marker(format!("\u{2191} {offset} above")));
+            // A shorter column counts only its own rows; the row stays so
+            // both columns line up.
+            let above = offset.min(len);
+            out.push(if above > 0 {
+                marker(format!("\u{2191} {above} above"))
+            } else {
+                Line::raw("")
+            });
         }
-        let len = lines.len();
         out.extend(lines.into_iter().skip(offset).take(shown));
         if offset + shown < total {
             while out.len() < h - 1 {

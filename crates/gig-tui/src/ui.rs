@@ -630,6 +630,10 @@ mod tests {
         assert!(text.contains("\u{2191} 9 above"), "{text}");
         assert!(text.contains("PgDn  scroll detail"), "{text}");
         assert!(!text.contains("more"), "{text}");
+        // Money has 3 rows of keys: its column says 3, not 9.
+        state.view = View::Money;
+        let text = all(&render(60, 16, &state, true));
+        assert!(text.contains("\u{2191} 3 above"), "{text}");
     }
 
     #[test]
