@@ -12,7 +12,7 @@ A terminal dashboard for JC, the one human interface to gig. Agents keep using t
 
 ## 2. Views
 
-Keys in the whole app: `?` help, `q` quit, `r` refresh, `1..4` jump to a view, `Tab` next view, `/` filter the current list, `T` next theme (not persisted), `Esc` close a popup or clear the filter.
+Keys in the whole app: `?` help, `q` quit, `r` refresh, `1..4` jump to a view, `Tab` next view, `/` filter the current list, `T` theme picker, `,` settings (section 8.1), `Esc` close a popup or clear the filter.
 
 ### 2.1 Orders (default)
 
@@ -80,7 +80,7 @@ The complete design system (colour roles, typography, spacing, glyphs, width cla
 
 `[tui]` section in config.toml, all optional: `theme = "gig-dark"`, `light = false` (alias: `theme = "gig-light"` when `theme` is unset), `icons = true`, `refresh_seconds = 2`, `mouse = true`. Flags override config; `GIG_TUI_*` env overrides both (`GIG_TUI_THEME`, `GIG_TUI_LIGHT`, `GIG_TUI_ICONS`, `GIG_TUI_REFRESH_SECONDS`, `GIG_TUI_MOUSE`).
 
-Themes: built-in `gig-dark`, `gig-light`, `catppuccin-mocha`, `catppuccin-latte`, `tokyonight`, `gruvbox-dark`, `nord`, `dracula`. User themes are TOML files in the themes directory, `$XDG_CONFIG_HOME/gig/themes/<name>.toml` (`$GIG_HOME/config/themes/` under `GIG_HOME`), with the same keys as the built-ins, selectable by name; a user file shadows a built-in of the same name. An unknown or invalid theme falls back to `gig-dark` with a warning and never blocks startup. `T` cycles themes for the session. Format and rules: TUI-DESIGN.md sections 14 and 15.
+Themes: built-in `gig-dark`, `gig-light`, `catppuccin-mocha`, `catppuccin-latte`, `tokyonight`, `gruvbox-dark`, `nord`, `dracula`. User themes are TOML files in the themes directory, `$XDG_CONFIG_HOME/gig/themes/<name>.toml` (`$GIG_HOME/config/themes/` under `GIG_HOME`), with the same keys as the built-ins, selectable by name; a user file shadows a built-in of the same name. An unknown or invalid theme falls back to `gig-dark` with a warning and never blocks startup. `T` opens the theme picker, whose Enter writes `tui.theme` (section 8.1); theme files are reloaded when they change. Format and rules: TUI-DESIGN.md sections 14 and 15.
 
 ## 6. Tests
 
@@ -90,7 +90,7 @@ Themes: built-in `gig-dark`, `gig-light`, `catppuccin-mocha`, `catppuccin-latte`
 
 ## 7. Out of scope
 
-Package building (files and manifest are the agent's job), archive execution, deleting anything, browser opening, launching agents, theme detection from the terminal background (OSC 11), hot reload of theme files.
+Package building (files and manifest are the agent's job), archive execution, deleting anything, browser opening, launching agents, theme detection from the terminal background (OSC 11). (Hot reload of theme files moved into scope with section 8.1.)
 
 ## 8. In-app settings and mouse (added 2026-09-29)
 
@@ -104,7 +104,8 @@ Decided by the agent on JC's instruction after a shortened grill; every point fo
 - Editing in place: toggles flip with Space or Enter; integers with `+`/`-` or typed; selects open a picker popup; text a single-line field. Each row shows the key path, the current value and its help line.
 - Persistence: every accepted change is written to `config.toml` immediately through gig-core, which now edits the file in place with `toml_edit` (comments and key order preserved; `gig config set` uses the same path). A refused value shows the gig-core error under the row and writes nothing.
 - Theme picker (`T` and the `tui.theme` row): popup list, built-ins first then user files, current one marked, a five-swatch strip per row (bg, text, accent, unpaid, warranty). Moving the cursor previews the whole screen live; Enter keeps it and writes `tui.theme`; Esc restores. Files that fail to load are listed dimmed with the error. `c` copies the highlighted built-in to `<config_dir>/themes/<name>-copy.toml` and opens it in `$EDITOR`. `T` no longer cycles blindly.
-- Hot reload: theme files are re-read when their mtime changes, checked on the refresh tick.
+- Hot reload: theme files are re-read when their mtime changes, checked on the refresh tick (and on `r`); with `refresh_seconds = 0` only `r` checks.
+- Implemented 2026-09-29; the anatomy and the interpretations made while implementing are TUI-DESIGN.md section 12.5.
 
 ### 8.2 Mouse
 

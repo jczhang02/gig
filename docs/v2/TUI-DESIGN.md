@@ -176,7 +176,7 @@ Row 1 is blank spacing when idle and doubles as the message row, so no row of ch
 
 - Left: the filter while typing or active, `/ sers▏` in `accent` followed by `3 of 5` in `muted`.
 - Right, right-aligned to the margin: one toast at a time.
-  - `copied go.jczhang.cc/a30bd870` (`text`), `theme nord  ·  set [tui] theme to keep` (`text`, after `T`), warnings such as `unknown theme "nrod", using gig-dark` (`warranty`). Toasts clear after 3 s or on the next key.
+  - `copied go.jczhang.cc/a30bd870` (`text`), `saved tui.theme = nord` (`text`, after a change in Settings or the theme picker), `theme mine reloaded` (`text`, hot reload), warnings such as `unknown theme "nrod", using gig-dark` (`warranty`). Toasts clear after 3 s or on the next key.
   - Errors that are not shown in a refusal popup (for example the clipboard is unavailable, or `$EDITOR` failed) in `unpaid`. Errors stay until the next key.
 
 ### 7.3 Footer (row H-1)
@@ -201,11 +201,12 @@ Group 2 per view:
 
 | view | group 2 |
 |---|---|
-| Orders | `/ filter  a archived  N new  ? keys  q quit` |
-| Drafts, History | `/ filter  ? keys  q quit` |
-| Money | `1-4 views  T theme  ? keys  q quit` |
+| Orders | `/ filter  a archived  N new  , settings  ? keys  q quit` |
+| Drafts, History | `/ filter  , settings  ? keys  q quit` |
+| Money | `1-4 views  T theme  , settings  ? keys  q quit` |
+| Settings (section 12.5) | `Esc close  T theme  ? keys  q quit`; while typing only `? keys` |
 
-Degradation, whole pairs only, never truncating inside a pair, in this order until the footer fits the width minus the margins: (1) drop the optional pairs `N new`, `a archived`, `T theme`, `1-4 views`; (2) drop pairs from the right end of group 1 until 2 remain; (3) drop `/ filter`, then `q quit`; (4) drop the rest of group 1 from the right. `? keys` is never dropped. Worked example at 80 (Narrow, delivered selected): step 1 removes `N new` and `a archived`, step 2 removes `k score`, giving the footer of mockup 17.2.
+Degradation, whole pairs only, never truncating inside a pair, in this order until the footer fits the width minus the margins: (1) drop the optional pairs `N new`, `a archived`, `T theme`, `1-4 views`, `, settings`; (2) drop pairs from the right end of group 1 until 2 remain; (3) drop `/ filter`, then `q quit`; (4) drop the rest of group 1 from the right. `? keys` is never dropped. Worked example at 80 (Narrow, delivered selected): step 1 removes `N new` and `a archived`, step 2 removes `k score`, giving the footer of mockup 17.2.
 
 ## 8. Orders list
 
@@ -359,7 +360,57 @@ Under NO_COLOR the scrim only removes bold and underline.
 - Refusal (gig-core error): title ` refused `, first line the code in bold (`invalid_state`), then the message verbatim in `text`, wrapped at the popup width.
 - Result: title ` done `, created files in `muted`, the short link underlined `text`, `copied to clipboard` in `muted` (or `clipboard unavailable, link shown above`).
 - Progress: one row, fill `█` plus a partial `▏..▉` in `accent` on a `─` track in `border`, then the percentage in `text` and `12.1 / 18.9 MB` in `muted`. Single PUT: the braille spinner in `accent` at 80 ms per frame plus `uploading` in `muted`. These are the only motion in the app.
-- Help: two columns, `global` and the current view's keys (order keys whenever an order detail is open). Column headings bold. Keys right-aligned in a 4-cell column, bold `key` (a longer key, `Enter`, reaches left into the padding or the gap); label `text`; the right column starts 3 cells after the widest left row; conditional keys add their precondition in `muted`: `when queued or delivered` (`s`), `when delivered` (`p`), `when not archived` (`c`), `when queued or in progress` (`x`), `when a package is checked` (`u`, `m`). Footer: `theme gig-dark   ·   T cycles, [tui] theme keeps it`. When the keys do not fit, both columns scroll together with `Up`/`Down`/`PgUp`/`PgDn`/`Home`/`End`, with `↑ N above` and `↓ N more` in `muted` as in the detail pane.
+- Help: two columns, `global` and the current view's keys (order keys whenever an order detail is open). Column headings bold. Keys right-aligned in a 4-cell column, bold `key` (a longer key, `Enter`, reaches left into the padding or the gap); label `text`; the right column starts 3 cells after the widest left row; conditional keys add their precondition in `muted`: `when queued or delivered` (`s`), `when delivered` (`p`), `when not archived` (`c`), `when queued or in progress` (`x`), `when a package is checked` (`u`, `m`). Footer: `theme gig-dark   ·   T picks and keeps a theme  , settings`. With Settings open the right column is `settings` and lists its keys. When the keys do not fit, both columns scroll together with `Up`/`Down`/`PgUp`/`PgDn`/`Home`/`End`, with `↑ N above` and `↓ N more` in `muted` as in the detail pane.
+
+### 12.5 Settings overlay and theme picker (TUI-SPEC 8.1)
+
+Settings (`,`) replaces the view body; the banner, the message row and the footer stay, as with the full-screen detail. It is a table, so it draws at most 96 cells wide from the left margin; extra width stays margin.
+
+```
+Settings                                        writes ~/.config/gig/config.toml
+                                                                          (blank)
+Dashboard                                             section: bold text, col 0
+  Theme           tui.theme                  ‹ gig-dark ›
+                  Colour theme: a built-in or a file in the themes directory
+  Icons           tui.icons                  [x] yes  ·  this session no
+                  Nerd Font glyphs next to the text labels
+▎ Refresh         tui.refresh_seconds        61█
+▎                 Auto-refresh period in seconds; 0 turns the timer off
+▎                 ! invalid input: tui.refresh_seconds must be a whole number
+▎                   from 0 to 60
+```
+
+- Title row: `Settings` bold `text`; `writes <path>` right-aligned in `muted`, the path cut from the left (`…`) so the file name stays.
+- One section per schema section, in schema order: one blank row, the section name in bold `text` at column 0 (as detail section headings), then its rows.
+- A row is two lines. Line 1: marker column, label in 14 cells (`text`; bold on the cursor row, as a selected slug), 2 cells, the key path in `muted` padded to the longest key, 2 cells, the value. Line 2: the schema help in `muted`, starting under the key path. Below a body width of 70 the label column is dropped and the key path starts at column 2.
+- Values follow the form anatomy of 12.3: toggle `[x] yes` / `[ ] no` (box `muted`), select `‹ name ›` (arrows `muted`), numbers and text in `text`, an empty text value `not set` in italic `dim`. While typing, the value is the typed text and the terminal cursor sits after it.
+- The file's value is shown. When the running dashboard uses another one (a flag or a `GIG_TUI_*`/`GIG_GENERAL_*` variable), `  ·  this session <value>` follows in `muted` (dot `dim`). An accepted change applies to the running dashboard over such an override: it is what the user just asked for.
+- The cursor row (all its lines) is on the `sel` band across the table width with the `▎` marker in `accent`, as a selected order.
+- A refusal is the gig-core error verbatim (`invalid input: ...`), `! ` then the text in `unpaid`, on the lines under the help, wrapped with a hanging indent of 2. Interpretation: 12.3 puts form errors at the value column, but these messages are longer than the value column at 80 cells, so they start under the key path like the help line. Typing, Backspace or Esc on the row clears it.
+- Keys: Up/Down (`j`/`k`), Home/End; toggles flip with Space or Enter; integers and the cut ratio step with `+`/`-` (also `=`, Left/Right, `h`/`l`; the ratio by 0.05) and are typed after a digit or Enter; text is typed after Enter; the theme row opens the picker with Enter or Space. While typing: Enter writes, Esc cancels, Backspace and Ctrl+U edit, `q` and `?` are text. A step past the range is sent to gig-core and refused (the error names the range) rather than clamped silently. A static select (none in the schema yet) cycles its options on Enter. Esc or `,` closes.
+- Footer group 1 by the cursor row's kind: `Space toggle`, `+ - step  Enter type`, `Enter choose`, `Enter edit`; while typing `Enter save  Esc cancel`.
+- Scrolling: the list scrolls so the cursor row is whole, with `↑ N above` / `↓ N more` in `muted` right-aligned on the first and last body rows. The title row never scrolls.
+
+Theme picker (`T`, or the theme row): a form-width popup (`min(64, W - 4)`, `border` tone, title ` theme `).
+
+```
+╭─ theme ──────────────────────────────────────────────────────╮
+│                                                              │
+│▎ gig-dark          current  ██ ██ ██ ██ ██                   │
+│  gig-light                  ██ ██ ██ ██ ██                   │
+│  ...                                                         │
+│  mocha-soft        file     ██ ██ ██ ██ ██                   │
+│  murky             ! missing key "bar"                       │
+│                                                              │
+│  ↑↓ preview  Enter keep  c copy  Esc restore                 │
+╰──────────────────────────────────────────────────────────────╯
+```
+
+- Rows: the catalogue order of 14.2 (built-ins, a shadowing file in its built-in's place, then user files alphabetically), then the files that failed to load. Name column as wide as the longest name (8..20 cells); tag column 7 cells: `current` in `accent` for the theme in use when the picker opened (principle 2: accent marks what is current), else `file` in `muted` for a user theme; then five `██` swatches 1 cell apart in the row's own bg, text, accent, unpaid and warranty.
+- Cursor row: `sel` band across the inner width, `▎` marker, name bold.
+- Broken files: name and `! <error>` in `muted`, no swatches, not selectable (the cursor skips them). Interpretation of "listed dimmed": `muted` rather than `dim`, because the error carries information and the dim rule of section 2 forbids that.
+- Live preview: while the picker is open the whole frame, the picker included, is drawn with the highlighted theme. Esc (or `T`) closes and the theme in use comes back, since nothing was changed. Enter writes `tui.theme` through gig-core, applies it, and toasts `saved tui.theme = <name>`; a refusal goes under the Settings row when Settings is open, else to the message row.
+- `c` on a built-in writes `<config_dir>/themes/<name>-copy.toml` in the section 15 format (a comment naming the source, then the 15 slots aligned), creating the directory, and opens it in `$EDITOR` with the TUI suspended. An existing copy is opened as it is, never overwritten. After the editor the catalogue is reloaded and the cursor sits on the copy, previewing it; Enter keeps it. On a user theme `c` shows the `warranty` toast `c copies a built-in; <name> is a theme file already`.
 
 ## 13. Status chips
 
@@ -400,7 +451,7 @@ Hue logic: the accent is each theme's signature hue that is not red, amber or bl
 
 ### 14.3 Cycling
 
-`T` (free today) cycles to the next theme: built-ins in order, then user themes alphabetically, wrapping. It applies at once, is not persisted, and shows the toast `theme nord  ·  set [tui] theme to keep`. The help popup footer names the current theme.
+Superseded 2026-09-29 by TUI-SPEC 8.1: `T` no longer cycles, it opens the theme picker (section 12.5), whose Enter writes `tui.theme` through gig-core and whose Esc restores. The help popup footer names the current theme.
 
 ### 14.4 Where the theme applies
 
@@ -416,11 +467,11 @@ When `NO_COLOR` is set and non-empty: every slot becomes `Color::Reset`, the `bg
 
 ## 15. Theme file format
 
-- Location: `<config_dir>/themes/<name>.toml`, that is `$XDG_CONFIG_HOME/gig/themes/<name>.toml` (default `~/.config/gig/themes/`), or `$GIG_HOME/config/themes/<name>.toml` when `GIG_HOME` is set. The directory is optional and is not created by gig.
+- Location: `<config_dir>/themes/<name>.toml`, that is `$XDG_CONFIG_HOME/gig/themes/<name>.toml` (default `~/.config/gig/themes/`), or `$GIG_HOME/config/themes/<name>.toml` when `GIG_HOME` is set. The directory is optional; gig creates it only when `c` in the theme picker copies a built-in into it (section 12.5).
 - Name: the file stem. Allowed: `[a-z0-9][a-z0-9-]*`. A `.toml` file with any other stem is reported like a broken file (`file name must be lowercase letters, digits and -`); files that are not `.toml` are ignored.
 - Content: exactly the 15 slot keys of the built-in themes, each a string `"#rrggbb"` (hex digits in either case). No other keys, no sections, no inheritance. A missing key, an unknown key or a malformed value makes the file invalid; the error names the key (`theme mocha-soft: missing key "bar"`, `theme mocha-soft: "muted" is not #rrggbb`).
 - Contrast on load: the thresholds of section 16.1 are checked; a failing file still loads, and the first failure is shown as a toast (`theme mocha-soft: muted 3.9:1 on sel, needs 4.5`).
-- Loaded when the TUI starts and for `--list-themes`; `T` cycles through the themes loaded at start (no hot reload).
+- Loaded when the TUI starts and for `--list-themes`, and again whenever a `.toml` file in the directory is added, removed or gets a new mtime (checked on the refresh tick and on `r`). A changed current theme applies at once with the toast `theme <name> reloaded`; a current file that breaks keeps the colours loaded before, with a `warranty` toast naming the error.
 - Parsed with `toml` into a `BTreeMap<String, String>` (`deny_unknown_fields` semantics implemented by comparing keys), then into `Theme`.
 
 Complete example, `~/.config/gig/themes/mocha-soft.toml` (the catppuccin-mocha values with a softer accent):
@@ -719,7 +770,7 @@ Annotations: `gig` bold; `1 Orders` word bold with accent underline; `owed 1,600
                                                                                no status entries · no client questions  
                                                                                no scorecard (k records one)             
                                                                                                                         
- p paid  y copy link  n note  k score   ·   / filter  a archived  N new  ? keys  q quit                                 
+ p paid  y copy link  n note  k score   ·   / filter  a archived  N new  , settings  ? keys  q quit                     
 ```
 
 ### 17.2 Orders, 80x24 (Narrow: list 78, title 21)
@@ -791,7 +842,7 @@ Annotations: tile values bold (`1,600 CNY` unpaid); chart Apr/May/Jun/Jul bars i
                                                                                                                         
                                                                                                                         
                                                                                                                         
- Enter open order  y copy link   ·   1-4 views  T theme  ? keys  q quit                                                 
+ Enter open order  y copy link   ·   1-4 views  T theme  , settings  ? keys  q quit                                     
 ```
 
 ### 17.4 Help popup (72 wide; first rows shown, the real popup lists every key of `help.rs`)
@@ -807,11 +858,11 @@ Annotations: tile values bold (`1,600 CNY` unpaid); chart Apr/May/Jun/Jul bars i
 │   Tab  next view          n  note                                    │
 │     /  filter             k  scorecard                               │
 │   Esc  close, clear       x  cancel     when queued or in progress   │
-│     T  next theme         A  archive preview                         │
+│     T  theme picker       A  archive preview                         │
 │    ↑↓  select             u  upload     when a package is checked    │
 │ Enter  open               m  mark sent  when a package is checked    │
 │                                                                      │
-│  theme gig-dark   ·   T cycles, [tui] theme keeps it                 │
+│  theme gig-dark   ·   T picks and keeps a theme  , settings          │
 │                                                                      │
 ╰──────────────────────────────────────────────────────────────────────╯
 ```
@@ -883,10 +934,14 @@ Rule references are to sections of this file.
 | `crates/gig-tui/src/views/money.rs` | tiles, chart geometry, labels, baseline, month and year rows, empty state, outstanding table | 11 |
 | `crates/gig-tui/src/data/money.rs` | month totals keyed for the 12-month window including zero months; per-group totals for headings | 8.1, 11 |
 | `docs/v2/TUI-SPEC.md` | entry, flags, section 3 pointer, section 5 keys, section 7 scope (done with this file) | |
+| `crates/gig-tui/src/settings.rs` (new) | the `,` overlay: state from gig-core's schema, keys by kind, rendering of 12.5 | 12.5 |
+| `crates/gig-tui/src/picker.rs` (new) | the theme picker: rows, swatches, preview, `c` | 12.5 |
+| `crates/gig-tui/src/themes.rs` | `to_toml`, `copy_builtin`, `Stamps` for hot reload, `Catalog.user` | 12.5, 15 |
+| `crates/gig-tui/src/app.rs` | `,` and `T` open the overlay and the picker; `write_setting` through `Config::set_in_file`, applied to theme, icons, refresh timer, mouse flag and `ctx.config`; `tick` re-scans theme files | 12.5, 15 |
+| `docs/v2/TUI-SPEC.md` | section 8 (settings and mouse), `T` and `,` in the key list, hot reload in scope | |
 | `README.md`, `skill/partjob/references/gig.md` | say bare `gig` opens the dashboard in a terminal, `gig tui` stays; mention `--theme` and the themes directory | |
 
 ## 20. Deferred
 
 - `theme = "auto"` from the terminal's reported background (OSC 11). Under tmux it needs `allow-passthrough on` and still fails in some setups; not in this round.
-- Hot reload of theme files.
 - Month-grouped History.
