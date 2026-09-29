@@ -1,0 +1,31 @@
+# {{ title }}
+
+- 项目标识: {{ slug }}. 项目类型: {{ project_type }}.{% if platform %} 来源平台: {{ platform }}.{% endif %}
+{% if material_path %}- 原件位于 {{ material_path }}, 只读. 需要的样本复制到 data/ (不入库).
+{% else %}- 原件路径: (待填). 原件只读, 需要的样本复制到 data/ (不入库).
+{% endif %}- 报价与付款以 .gig/QUOTE.md 为准.
+
+## 客户原始需求
+
+{% if client_words %}> {{ client_words }}
+{% else %}(待填: 客户原话, 注明来源文件和编码)
+{% endif %}{% if draft_notes %}
+## 接单前笔记
+
+{{ draft_notes }}
+{% endif %}
+## 素材事实
+
+(客观观察: 文件格式, 尺寸, 数量, 编码, 异常. 不掺判断.)
+
+## 已确认决策
+
+1. ({{ today }}, 立项) 交付形式和范围以本节后续条目为准; 未写入本节的要求不算已确认.
+
+## 待客户确认
+
+(无)
+
+## 状态
+
+- {{ today }}: 立项, 建立目录与基本文件. 尚未对外发送.
