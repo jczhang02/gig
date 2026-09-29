@@ -3,43 +3,33 @@ resolver = "2"
 members = [
     "crates/gig-core",
     "crates/gig-cli",
-    "crates/gig-gui",
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "2.0.0"
 edition = "2021"
 rust-version = "1.91.1"
 license = "MIT"
 authors = ["JC Zhang <jczhang@live.it>"]
-description = "Personal freelance order lifecycle management CLI and local web UI"
+description = "Agent-facing store for freelance orders: drafts, packages, delivery, payment, archive"
 readme = "README.md"
 repository = "https://github.com/jczhang02/gig"
 
 [workspace.dependencies]
-# Shared versions pinned here
-rusqlite = { version = "0.31", features = ["bundled", "time"] }
+rusqlite = { version = "0.31", features = ["bundled"] }
 refinery = { version = "0.8", features = ["rusqlite"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.8"
 time = { version = "0.3", features = ["serde", "formatting", "parsing", "macros"] }
 thiserror = "1"
-directories = "5"
 clap = { version = "4", features = ["derive"] }
 clap_complete = "4"
-comfy-table = "7"
-owo-colors = "4"
 tempfile = "3"
 minijinja = "2"
-ignore = "0.4"
-arboard = "3"
 aws-sdk-s3 = "1"
-tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal", "time"] }
-axum = "0.7"
-rand = "0.8"
-tower-http = { version = "0.6", features = ["trace", "fs"] }
-tower = { version = "0.5", features = ["util"] }
-webbrowser = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
 zip = { version = "0.6", default-features = false, features = ["deflate"] }
 ureq = { version = "2", features = ["json"] }
+sha2 = "0.10"
+hex = "0.4"

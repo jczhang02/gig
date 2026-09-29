@@ -15,15 +15,11 @@ path = "src/main.rs"
 
 [dependencies]
 gig-core = { path = "../gig-core" }
-gig-gui = { path = "../gig-gui" }
 clap = { workspace = true }
 clap_complete = { workspace = true }
-comfy-table = { workspace = true }
-owo-colors = { workspace = true }
-time = { workspace = true }
-rusqlite = { workspace = true }
-arboard = { workspace = true }
-serde_json = "1"
+serde = { workspace = true }
+serde_json = { workspace = true }
 
 [dev-dependencies]
+tempfile = { workspace = true }
 zip = { workspace = true }

@@ -1,10 +1,9 @@
-//! S3-compatible uploader using the official AWS SDK for Rust.
-//!
-//! Works with AWS S3, Alibaba Cloud OSS, Cloudflare R2, MinIO,
-//! and any S3-compatible service.
+//! S3-compatible uploader (AWS S3, Alibaba OSS, R2, MinIO) via the AWS SDK.
+//! Ported from v1: PutObject below 100 MB, multipart above, presigned GET with
+//! a Content-Disposition attachment header so the download keeps its filename.
 
 use super::{validate_https_or_allowed_http_url, UploadOpts, UploadResult, Uploader};
-use crate::config::S3UploaderConfig;
+use crate::secrets::ResolvedS3;
 use crate::{Error, Result};
 use aws_sdk_s3::config::{BehaviorVersion, Credentials, Region};
 use aws_sdk_s3::presigning::PresigningConfig;
@@ -16,12 +15,9 @@ use std::path::Path;
 use std::time::Duration;
 use time::OffsetDateTime;
 
-/// Files at or above this size use multipart upload.
-const MULTIPART_THRESHOLD: u64 = 100 * 1024 * 1024; // 100 MB
-/// Size of each part in a multipart upload.
-const PART_SIZE: usize = 8 * 1024 * 1024; // 8 MB
+const MULTIPART_THRESHOLD: u64 = 100 * 1024 * 1024;
+const PART_SIZE: usize = 8 * 1024 * 1024;
 
-/// Uploader that talks to any S3-compatible API using the official AWS SDK.
 pub struct S3Uploader {
     name: String,
     client: Client,
@@ -32,55 +28,46 @@ pub struct S3Uploader {
 }
 
 impl S3Uploader {
-    /// Create a new S3Uploader from config.
-    pub fn new(name: String, cfg: &S3UploaderConfig) -> Result<Self> {
+    pub fn new(resolved: &ResolvedS3) -> Result<Self> {
+        let cfg = &resolved.config;
         let rt = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
-            .map_err(|e| Error::Invalid(format!("failed to create tokio runtime: {e}")))?;
-
-        validate_https_or_allowed_http_url(&cfg.endpoint, "S3 endpoint", cfg.allow_insecure_http)?;
-        if let Some(download_endpoint) = &cfg.download_endpoint {
-            validate_https_or_allowed_http_url(
-                download_endpoint,
-                "S3 download_endpoint",
-                cfg.allow_insecure_http,
-            )?;
+            .map_err(|e| Error::Upload(format!("failed to create tokio runtime: {e}")))?;
+        if cfg.bucket.trim().is_empty() || cfg.region.trim().is_empty() {
+            return Err(Error::Config(format!(
+                "uploader {} needs bucket and region",
+                resolved.name
+            )));
         }
-
-        let client = make_client(cfg, &cfg.endpoint);
-        let download_endpoint = cfg.download_endpoint.as_deref().unwrap_or(&cfg.endpoint);
-        let download_client = make_client(cfg, download_endpoint);
-
+        validate_https_or_allowed_http_url(&cfg.endpoint, "S3 endpoint", cfg.allow_insecure_http)?;
+        if let Some(d) = cfg
+            .download_endpoint
+            .as_deref()
+            .filter(|d| !d.trim().is_empty())
+        {
+            validate_https_or_allowed_http_url(d, "S3 download_endpoint", cfg.allow_insecure_http)?;
+        }
+        let client = make_client(resolved, &cfg.endpoint);
+        let download_endpoint = cfg
+            .download_endpoint
+            .as_deref()
+            .filter(|d| !d.trim().is_empty())
+            .unwrap_or(&cfg.endpoint);
+        let download_client = make_client(resolved, download_endpoint);
         Ok(Self {
-            name,
+            name: resolved.name.clone(),
             client,
             download_client,
             rt,
             bucket: cfg.bucket.clone(),
-            link_ttl_seconds: cfg.link_ttl_seconds,
+            link_ttl_seconds: resolved.link_ttl_seconds,
         })
     }
-}
 
-fn make_client(cfg: &S3UploaderConfig, endpoint: &str) -> Client {
-    let creds = Credentials::new(&cfg.access_key, &cfg.secret_key, None, None, "gig");
-    let s3_config = aws_sdk_s3::Config::builder()
-        .behavior_version(BehaviorVersion::latest())
-        .credentials_provider(creds)
-        .region(Region::new(cfg.region.clone()))
-        .endpoint_url(endpoint)
-        .force_path_style(cfg.path_style)
-        .build();
-    Client::from_conf(s3_config)
-}
-
-impl S3Uploader {
-    /// Simple single-request upload via PutObject.
     fn put_object(&self, local: &Path, key: &str) -> Result<()> {
         let content =
             std::fs::read(local).map_err(|e| Error::PathUnavailable(local.to_path_buf(), e))?;
-
         self.rt
             .block_on(async {
                 self.client
@@ -92,12 +79,10 @@ impl S3Uploader {
                     .send()
                     .await
             })
-            .map_err(|e| Error::Invalid(format!("S3 PUT failed: {e}")))?;
-
+            .map_err(|e| Error::Upload(format!("S3 PUT failed: {e}")))?;
         Ok(())
     }
 
-    /// Best-effort abort of an in-progress multipart upload.
     fn abort_multipart(&self, key: &str, upload_id: &str) {
         let _ = self.rt.block_on(async {
             self.client
@@ -110,7 +95,6 @@ impl S3Uploader {
         });
     }
 
-    /// Multipart upload for large files.
     fn multipart_upload(&self, local: &Path, key: &str) -> Result<()> {
         let mut file = std::fs::File::open(local)
             .map_err(|e| Error::PathUnavailable(local.to_path_buf(), e))?;
@@ -118,8 +102,6 @@ impl S3Uploader {
             .metadata()
             .map_err(|e| Error::PathUnavailable(local.to_path_buf(), e))?
             .len();
-
-        // Initiate multipart upload.
         let upload_id = self
             .rt
             .block_on(async {
@@ -131,28 +113,22 @@ impl S3Uploader {
                     .send()
                     .await
             })
-            .map_err(|e| Error::Invalid(format!("S3 create multipart upload failed: {e}")))?
+            .map_err(|e| Error::Upload(format!("S3 create multipart upload failed: {e}")))?
             .upload_id()
-            .ok_or_else(|| Error::Invalid("S3 multipart upload returned no upload_id".into()))?
+            .ok_or_else(|| Error::Upload("S3 multipart upload returned no upload_id".into()))?
             .to_string();
 
-        // Upload parts.
-        let mut completed_parts: Vec<CompletedPart> = Vec::new();
+        let mut parts: Vec<CompletedPart> = Vec::new();
         let mut remaining = file_size;
         let mut part_number: i32 = 1;
-
         while remaining > 0 {
-            let chunk_size = std::cmp::min(PART_SIZE as u64, remaining) as usize;
-            let mut buf = vec![0u8; chunk_size];
-            if let Err(e) = file
-                .read_exact(&mut buf)
-                .map_err(|e| Error::PathUnavailable(local.to_path_buf(), e))
-            {
+            let chunk = std::cmp::min(PART_SIZE as u64, remaining) as usize;
+            let mut buf = vec![0u8; chunk];
+            if let Err(e) = file.read_exact(&mut buf) {
                 self.abort_multipart(key, &upload_id);
-                return Err(e);
+                return Err(Error::PathUnavailable(local.to_path_buf(), e));
             }
-
-            let upload_part_output = match self.rt.block_on(async {
+            let out = match self.rt.block_on(async {
                 self.client
                     .upload_part()
                     .bucket(&self.bucket)
@@ -163,66 +139,78 @@ impl S3Uploader {
                     .send()
                     .await
             }) {
-                Ok(output) => output,
+                Ok(o) => o,
                 Err(e) => {
                     self.abort_multipart(key, &upload_id);
-                    return Err(Error::Invalid(format!(
+                    return Err(Error::Upload(format!(
                         "S3 upload part {part_number} failed: {e}"
                     )));
                 }
             };
-
-            completed_parts.push(
+            parts.push(
                 CompletedPart::builder()
-                    .e_tag(upload_part_output.e_tag().unwrap_or_default())
+                    .e_tag(out.e_tag().unwrap_or_default())
                     .part_number(part_number)
                     .build(),
             );
-
-            remaining -= chunk_size as u64;
+            remaining -= chunk as u64;
             part_number += 1;
         }
-
-        // Complete multipart upload.
-        let completed_upload = CompletedMultipartUpload::builder()
-            .set_parts(Some(completed_parts))
+        let completed = CompletedMultipartUpload::builder()
+            .set_parts(Some(parts))
             .build();
-
         if let Err(e) = self.rt.block_on(async {
             self.client
                 .complete_multipart_upload()
                 .bucket(&self.bucket)
                 .key(key)
                 .upload_id(&upload_id)
-                .multipart_upload(completed_upload)
+                .multipart_upload(completed)
                 .send()
                 .await
         }) {
             self.abort_multipart(key, &upload_id);
-            return Err(Error::Invalid(format!(
+            return Err(Error::Upload(format!(
                 "S3 complete multipart upload failed: {e}"
             )));
         }
-
         Ok(())
     }
 
     fn presigned_get_url(&self, object_key: &str, file_name: &str, ttl: u32) -> Result<String> {
         let disposition = format!("attachment; filename=\"{file_name}\"");
         let presigned = self.rt.block_on(async {
-            let presign_config = PresigningConfig::expires_in(Duration::from_secs(ttl as u64))
-                .map_err(|e| Error::Invalid(format!("presigning config error: {e}")))?;
+            let cfg = PresigningConfig::expires_in(Duration::from_secs(ttl as u64))
+                .map_err(|e| Error::Upload(format!("presigning config error: {e}")))?;
             self.download_client
                 .get_object()
                 .bucket(&self.bucket)
                 .key(object_key)
                 .response_content_disposition(&disposition)
-                .presigned(presign_config)
+                .presigned(cfg)
                 .await
-                .map_err(|e| Error::Invalid(format!("presigning failed: {e}")))
+                .map_err(|e| Error::Upload(format!("presigning failed: {e}")))
         })?;
         Ok(presigned.uri().to_string())
     }
+}
+
+fn make_client(resolved: &ResolvedS3, endpoint: &str) -> Client {
+    let creds = Credentials::new(
+        &resolved.access_key,
+        &resolved.secret_key,
+        None,
+        None,
+        "gig",
+    );
+    let cfg = aws_sdk_s3::Config::builder()
+        .behavior_version(BehaviorVersion::latest())
+        .credentials_provider(creds)
+        .region(Region::new(resolved.config.region.clone()))
+        .endpoint_url(endpoint)
+        .force_path_style(resolved.config.path_style)
+        .build();
+    Client::from_conf(cfg)
 }
 
 impl Uploader for S3Uploader {
@@ -233,33 +221,24 @@ impl Uploader for S3Uploader {
     fn upload(&self, local: &Path, opts: &UploadOpts) -> Result<UploadResult> {
         let file_name = local
             .file_name()
-            .ok_or_else(|| Error::Invalid("local path has no filename".into()))?
+            .ok_or_else(|| Error::InvalidInput("local path has no filename".into()))?
             .to_string_lossy()
             .into_owned();
         let object_key = opts.object_key.as_deref().unwrap_or(&file_name);
-
         let file_size = std::fs::metadata(local)
             .map_err(|e| Error::PathUnavailable(local.to_path_buf(), e))?
             .len();
-
         if file_size >= MULTIPART_THRESHOLD {
             self.multipart_upload(local, object_key)?;
         } else {
             self.put_object(local, object_key)?;
         }
-
-        // Generate presigned GET URL with Content-Disposition for proper filename.
-        let ttl = opts
-            .link_ttl_days
-            .map(|d| d * 86_400)
-            .unwrap_or(self.link_ttl_seconds);
-
+        let ttl = self.link_ttl_seconds;
         let url = self.presigned_get_url(object_key, &file_name, ttl)?;
-        let now = OffsetDateTime::now_utc();
-        let expires_at = now.unix_timestamp() + ttl as i64;
-
+        let expires_at = OffsetDateTime::now_utc().unix_timestamp() + ttl as i64;
         Ok(UploadResult {
             url,
+            short_url: None,
             expires_at: Some(expires_at),
             provider: self.name.clone(),
             file_size,
@@ -270,79 +249,51 @@ impl Uploader for S3Uploader {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::S3UploaderConfig;
+    use crate::config::S3;
 
-    fn make_config() -> S3UploaderConfig {
-        S3UploaderConfig {
-            bucket: "gig-delivery".into(),
-            region: "cn-hongkong".into(),
-            endpoint: "https://s3.oss-cn-hongkong.aliyuncs.com".into(),
-            download_endpoint: None,
+    fn resolved() -> ResolvedS3 {
+        ResolvedS3 {
+            name: "s3:test".into(),
+            config: S3 {
+                bucket: "gig-delivery".into(),
+                region: "ap-southeast-1".into(),
+                endpoint: "https://s3.example.test".into(),
+                download_endpoint: None,
+                path_style: false,
+                allow_insecure_http: false,
+            },
             access_key: "AKIAIOSFODNN7EXAMPLE".into(),
             secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".into(),
             link_ttl_seconds: 604_800,
-            path_style: false,
-            allow_insecure_http: false,
         }
     }
 
     #[test]
-    fn s3_uploader_construction() {
-        let cfg = make_config();
-        let u = S3Uploader::new("s3:test".into(), &cfg).unwrap();
+    fn constructs_and_validates_endpoints() {
+        let u = S3Uploader::new(&resolved()).unwrap();
         assert_eq!(u.name(), "s3:test");
-        assert_eq!(u.bucket, "gig-delivery");
-        assert_eq!(u.link_ttl_seconds, 604_800);
+        let mut r = resolved();
+        r.config.endpoint = "http://oss.example.test".into();
+        assert!(S3Uploader::new(&r).is_err());
+        r.config.allow_insecure_http = true;
+        assert!(S3Uploader::new(&r).is_ok());
+        let mut r = resolved();
+        r.config.endpoint = "http://127.0.0.1:9000".into();
+        assert!(S3Uploader::new(&r).is_ok());
     }
 
     #[test]
-    fn rejects_plain_http_non_loopback_endpoint() {
-        let mut cfg = make_config();
-        cfg.endpoint = "http://oss.example.test".into();
-
-        let err = match S3Uploader::new("s3:test".into(), &cfg) {
-            Ok(_) => panic!("plain HTTP endpoint should be rejected"),
-            Err(err) => err.to_string(),
-        };
-
-        assert!(err.contains("https://"));
-    }
-
-    #[test]
-    fn accepts_plain_http_loopback_endpoint_for_local_s3() {
-        let mut cfg = make_config();
-        cfg.endpoint = "http://127.0.0.1:9000".into();
-        cfg.download_endpoint = Some("http://localhost:9000".into());
-
-        let uploader = S3Uploader::new("s3:test".into(), &cfg).unwrap();
-
-        assert_eq!(uploader.name(), "s3:test");
-    }
-
-    #[test]
-    fn accepts_explicitly_allowed_plain_http_s3_endpoint() {
-        let mut cfg = make_config();
-        cfg.endpoint = "http://minio:9000".into();
-        cfg.allow_insecure_http = true;
-
-        let uploader = S3Uploader::new("s3:test".into(), &cfg).unwrap();
-
-        assert_eq!(uploader.name(), "s3:test");
-    }
-
-    #[test]
-    fn presigned_get_url_uses_download_endpoint_when_configured() {
-        let mut cfg = make_config();
-        cfg.download_endpoint = Some("https://oss-accelerate.aliyuncs.com".into());
-        let u = S3Uploader::new("s3:test".into(), &cfg).unwrap();
-
+    fn presigned_url_uses_download_endpoint_and_disposition() {
+        let mut r = resolved();
+        r.config.download_endpoint = Some("https://dl.example.test".into());
+        let u = S3Uploader::new(&r).unwrap();
         let url = u
-            .presigned_get_url("orders/1/client-package.zip", "client-package.zip", 3600)
+            .presigned_get_url("o/p-v1/p-v1.zip", "p-v1.zip", 3600)
             .unwrap();
-
         assert!(
-            url.starts_with("https://gig-delivery.oss-accelerate.aliyuncs.com/"),
-            "expected accelerated download host, got {url}"
+            url.starts_with("https://gig-delivery.dl.example.test/"),
+            "{url}"
         );
+        assert!(url.contains("response-content-disposition="));
     }
 }
