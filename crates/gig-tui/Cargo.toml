@@ -13,6 +13,6 @@ gig-core = { path = "../gig-core" }
 ratatui = { workspace = true }
 crossterm = { workspace = true }
 unicode-width = { workspace = true }
-
-[dev-dependencies]
+arboard = { workspace = true, features = ["wayland-data-control"] }
 tempfile = { workspace = true }
+

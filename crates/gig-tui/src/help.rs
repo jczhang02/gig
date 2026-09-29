@@ -18,6 +18,7 @@ pub const GLOBAL_KEYS: &[(&str, &str)] = &[
 ];
 
 const ORDERS_KEYS: &[(&str, &str)] = &[
+    ("Up/Dn", "select"),
     ("Enter", "detail (narrow)"),
     ("a", "toggle archived"),
     ("s", "start"),
@@ -37,6 +38,7 @@ const ORDERS_KEYS: &[(&str, &str)] = &[
 ];
 
 const DRAFTS_KEYS: &[(&str, &str)] = &[
+    ("Up/Dn", "select"),
     ("Enter", "notes tail"),
     ("N", "new draft"),
     ("P", "promote to order"),

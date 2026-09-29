@@ -1,2 +1,531 @@
-//! Action popups: forms, confirmations, and verbatim error messages.
-//! Filled by a later ticket.
+//! Action popups: forms, confirmations, and messages (results and verbatim
+//! gig-core refusals). Pure state plus drawing; the gig-core calls and the
+//! $EDITOR round trip live in `actions` and `app`.
+
+use crate::actions::{Action, FormKind};
+use crate::text;
+use crate::theme::Theme;
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::layout::{Constraint, Rect};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, BorderType, Clear, Paragraph, Wrap};
+use ratatui::Frame;
+
+/// One input of a form.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Field {
+    pub label: String,
+    pub kind: FieldKind,
+    /// Shown but not editable (the slug when promoting a draft).
+    pub locked: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FieldKind {
+    /// Single line typed in place.
+    Text(String),
+    /// One of `options`; Left/Right/Space cycle.
+    Select { options: Vec<String>, idx: usize },
+    /// Space toggles.
+    Toggle(bool),
+    /// Multi-line text edited in $EDITOR (Enter opens it).
+    Editor(String),
+}
+
+impl Field {
+    pub fn text(label: &str, value: impl Into<String>) -> Self {
+        Self::new(label, FieldKind::Text(value.into()))
+    }
+
+    pub fn select(label: &str, options: &[&str], selected: &str) -> Self {
+        let idx = options.iter().position(|o| *o == selected).unwrap_or(0);
+        Self::new(
+            label,
+            FieldKind::Select {
+                options: options.iter().map(|s| s.to_string()).collect(),
+                idx,
+            },
+        )
+    }
+
+    pub fn toggle(label: &str, on: bool) -> Self {
+        Self::new(label, FieldKind::Toggle(on))
+    }
+
+    pub fn editor(label: &str, value: impl Into<String>) -> Self {
+        Self::new(label, FieldKind::Editor(value.into()))
+    }
+
+    fn new(label: &str, kind: FieldKind) -> Self {
+        Self {
+            label: label.to_string(),
+            kind,
+            locked: false,
+        }
+    }
+
+    pub fn locked(mut self) -> Self {
+        self.locked = true;
+        self
+    }
+
+    /// Text value of the field: the typed text, the chosen option, or
+    /// "yes"/"no" for a toggle.
+    pub fn value(&self) -> &str {
+        match &self.kind {
+            FieldKind::Text(s) | FieldKind::Editor(s) => s,
+            FieldKind::Select { options, idx } => options.get(*idx).map_or("", String::as_str),
+            FieldKind::Toggle(on) => {
+                if *on {
+                    "yes"
+                } else {
+                    "no"
+                }
+            }
+        }
+    }
+
+    pub fn is_on(&self) -> bool {
+        matches!(self.kind, FieldKind::Toggle(true))
+    }
+}
+
+/// A form: labelled fields, one focused, submitted with Enter.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Form {
+    pub title: String,
+    pub kind: FormKind,
+    pub fields: Vec<Field>,
+    pub focus: usize,
+}
+
+impl Form {
+    pub fn new(title: impl Into<String>, kind: FormKind, fields: Vec<Field>) -> Self {
+        let mut f = Self {
+            title: title.into(),
+            kind,
+            fields,
+            focus: 0,
+        };
+        if f.fields.first().is_some_and(|x| x.locked) {
+            f.move_focus(1);
+        }
+        f
+    }
+
+    /// Value of the field labelled `label`; empty when absent.
+    pub fn get(&self, label: &str) -> &str {
+        self.field(label).map_or("", Field::value)
+    }
+
+    pub fn field(&self, label: &str) -> Option<&Field> {
+        self.fields.iter().find(|f| f.label == label)
+    }
+
+    pub fn field_mut(&mut self, label: &str) -> Option<&mut Field> {
+        self.fields.iter_mut().find(|f| f.label == label)
+    }
+
+    /// Replace the focused-or-named field's text (used after $EDITOR returns).
+    pub fn set_text(&mut self, idx: usize, value: String) {
+        if let Some(f) = self.fields.get_mut(idx) {
+            match &mut f.kind {
+                FieldKind::Text(s) | FieldKind::Editor(s) => *s = value,
+                _ => {}
+            }
+        }
+    }
+
+    /// Move to the next (or previous) unlocked field, wrapping.
+    fn move_focus(&mut self, delta: isize) {
+        let n = self.fields.len();
+        if n == 0 {
+            return;
+        }
+        for step in 1..=n {
+            let i = (self.focus as isize + delta * step as isize).rem_euclid(n as isize) as usize;
+            if !self.fields[i].locked {
+                self.focus = i;
+                return;
+            }
+        }
+    }
+
+    fn key(&mut self, key: KeyEvent) -> PopupKey {
+        match key.code {
+            KeyCode::Tab | KeyCode::Down => self.move_focus(1),
+            KeyCode::BackTab | KeyCode::Up => self.move_focus(-1),
+            KeyCode::Enter => {
+                return match self.fields.get(self.focus).map(|f| &f.kind) {
+                    Some(FieldKind::Editor(_)) => PopupKey::EditField(self.focus),
+                    _ => PopupKey::Submit,
+                };
+            }
+            code => {
+                let Some(f) = self.fields.get_mut(self.focus) else {
+                    return PopupKey::None;
+                };
+                if f.locked {
+                    return PopupKey::None;
+                }
+                match (&mut f.kind, code) {
+                    (FieldKind::Text(s), KeyCode::Char(c))
+                        if !key.modifiers.contains(KeyModifiers::CONTROL) =>
+                    {
+                        s.push(c)
+                    }
+                    (FieldKind::Text(s), KeyCode::Backspace) => {
+                        s.pop();
+                    }
+                    (FieldKind::Select { options, idx }, KeyCode::Right | KeyCode::Char(' ')) => {
+                        *idx = (*idx + 1) % options.len().max(1)
+                    }
+                    (FieldKind::Select { options, idx }, KeyCode::Left) => {
+                        let n = options.len().max(1);
+                        *idx = (*idx + n - 1) % n
+                    }
+                    (
+                        FieldKind::Toggle(on),
+                        KeyCode::Char(' ') | KeyCode::Left | KeyCode::Right,
+                    ) => *on = !*on,
+                    (FieldKind::Editor(_), KeyCode::Char('e')) => {
+                        return PopupKey::EditField(self.focus)
+                    }
+                    _ => {}
+                }
+            }
+        }
+        PopupKey::None
+    }
+}
+
+/// What a popup shows.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Popup {
+    Form(Form),
+    /// A dangerous action waits for a typed `y`; any other key cancels.
+    Confirm {
+        title: String,
+        lines: Vec<String>,
+        then: Action,
+    },
+    /// Result or information; any key closes.
+    Message {
+        title: String,
+        lines: Vec<String>,
+        error: bool,
+    },
+}
+
+/// What a key press in a popup asks for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PopupKey {
+    None,
+    Close,
+    /// Enter in a form.
+    Submit,
+    /// Open $EDITOR on the form field at this index.
+    EditField(usize),
+    /// `y` in a confirmation.
+    Confirmed,
+}
+
+impl Popup {
+    pub fn message(title: impl Into<String>, lines: Vec<String>) -> Self {
+        Popup::Message {
+            title: title.into(),
+            lines,
+            error: false,
+        }
+    }
+
+    /// A gig-core refusal, shown verbatim with its code (as the hint line
+    /// shows refresh errors).
+    pub fn error(e: &gig_core::Error) -> Self {
+        Popup::Message {
+            title: "refused".into(),
+            lines: vec![format!("{}: {e}", e.code())],
+            error: true,
+        }
+    }
+
+    pub fn handle_key(&mut self, key: KeyEvent) -> PopupKey {
+        if key.code == KeyCode::Esc {
+            return PopupKey::Close;
+        }
+        match self {
+            Popup::Form(form) => form.key(key),
+            Popup::Confirm { .. } => match key.code {
+                KeyCode::Char('y') => PopupKey::Confirmed,
+                _ => PopupKey::Close,
+            },
+            Popup::Message { .. } => match key.code {
+                KeyCode::Enter | KeyCode::Char('q') | KeyCode::Char(' ') => PopupKey::Close,
+                _ => PopupKey::None,
+            },
+        }
+    }
+}
+
+/// Width of the popup box, clamped to the frame.
+const WIDTH: u16 = 76;
+
+pub fn render(frame: &mut Frame, area: Rect, popup: &Popup, theme: &Theme) {
+    let inner_width = usize::from(WIDTH.min(area.width).saturating_sub(4));
+    let (title, lines, title_style) = match popup {
+        Popup::Form(form) => (
+            form.title.clone(),
+            form_lines(form, theme, inner_width),
+            theme.title(),
+        ),
+        Popup::Confirm { title, lines, .. } => {
+            let mut out: Vec<Line> = lines
+                .iter()
+                .map(|l| Line::from(Span::styled(l.clone(), theme.text())))
+                .collect();
+            out.push(Line::raw(""));
+            out.push(Line::from(vec![
+                Span::styled(" y ", theme.key()),
+                Span::styled("confirm   ", theme.dim()),
+                Span::styled("any other key ", theme.key()),
+                Span::styled("cancel", theme.dim()),
+            ]));
+            (title.clone(), out, theme.error())
+        }
+        Popup::Message {
+            title,
+            lines,
+            error,
+        } => {
+            let style = if *error { theme.error() } else { theme.text() };
+            let mut out: Vec<Line> = lines
+                .iter()
+                .map(|l| Line::from(Span::styled(l.clone(), style)))
+                .collect();
+            out.push(Line::raw(""));
+            out.push(Line::from(vec![
+                Span::styled(" Enter/Esc ", theme.key()),
+                Span::styled("close", theme.dim()),
+            ]));
+            let ts = if *error { theme.error() } else { theme.title() };
+            (title.clone(), out, ts)
+        }
+    };
+    // Wrapped lines may need more rows than `lines.len()`; estimate by width.
+    let rows: usize = lines
+        .iter()
+        .map(|l| l.width().max(1).div_ceil(inner_width.max(1)))
+        .sum();
+    let height = (rows as u16).saturating_add(2).min(area.height);
+    let rect = area.centered(
+        Constraint::Length(WIDTH.min(area.width)),
+        Constraint::Length(height),
+    );
+    frame.render_widget(Clear, rect);
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .border_style(theme.border())
+        .title(Span::styled(format!(" {title} "), title_style))
+        .style(theme.base());
+    let inner = block.inner(rect);
+    frame.render_widget(block, rect);
+    let inner = Rect {
+        x: inner.x + 1,
+        width: inner.width.saturating_sub(2),
+        ..inner
+    };
+    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
+}
+
+/// Label column width in forms.
+const LABEL: usize = 14;
+
+fn form_lines<'a>(form: &Form, t: &Theme, width: usize) -> Vec<Line<'a>> {
+    let mut out = Vec::new();
+    let value_width = width.saturating_sub(LABEL + 2);
+    for (i, f) in form.fields.iter().enumerate() {
+        let focused = i == form.focus && !f.locked;
+        let label_style = if focused { t.key() } else { t.dim() };
+        let value_style = if f.locked { t.dim() } else { t.text() };
+        let value = match &f.kind {
+            FieldKind::Text(s) => {
+                if focused {
+                    // Keep the end of long input visible.
+                    let shown = tail(s, value_width.saturating_sub(1));
+                    format!("{shown}_")
+                } else {
+                    text::truncate(s, value_width)
+                }
+            }
+            FieldKind::Select { options, idx } => {
+                let v = options.get(*idx).map_or("", String::as_str);
+                text::truncate(&format!("< {v} >"), value_width)
+            }
+            FieldKind::Toggle(on) => (if *on { "[x]" } else { "[ ]" }).to_string(),
+            FieldKind::Editor(s) => {
+                let first = s.lines().next().unwrap_or("");
+                let more = s.lines().count() > 1;
+                let shown = if s.trim().is_empty() {
+                    "(empty; Enter opens $EDITOR)".to_string()
+                } else if more {
+                    format!("{first} ...")
+                } else {
+                    first.to_string()
+                };
+                text::truncate(&shown, value_width)
+            }
+        };
+        let mut spans = vec![Span::styled(text::fit(&f.label, LABEL), label_style)];
+        spans.push(Span::raw("  "));
+        let style = if focused {
+            value_style.patch(t.selected())
+        } else {
+            value_style
+        };
+        spans.push(Span::styled(value, style));
+        out.push(Line::from(spans));
+    }
+    out.push(Line::raw(""));
+    out.push(Line::from(vec![
+        Span::styled(" Tab ", t.key()),
+        Span::styled("next  ", t.dim()),
+        Span::styled("Space ", t.key()),
+        Span::styled("choose  ", t.dim()),
+        Span::styled("Enter ", t.key()),
+        Span::styled("submit / edit  ", t.dim()),
+        Span::styled("Esc ", t.key()),
+        Span::styled("cancel", t.dim()),
+    ]));
+    out
+}
+
+/// The last `max` cells of `s`.
+fn tail(s: &str, max: usize) -> String {
+    let mut used = 0;
+    let mut start = s.len();
+    for (i, c) in s.char_indices().rev() {
+        let w = text::width(c.encode_utf8(&mut [0; 4]));
+        if used + w > max {
+            break;
+        }
+        used += w;
+        start = i;
+    }
+    s[start..].to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn key(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    fn form() -> Form {
+        Form::new(
+            "t",
+            FormKind::NewDraft,
+            vec![
+                Field::text("slug", "fixed").locked(),
+                Field::text("title", ""),
+                Field::select("type", &["tool", "custom"], "custom"),
+                Field::toggle("flag", false),
+                Field::editor("words", ""),
+            ],
+        )
+    }
+
+    #[test]
+    fn focus_skips_locked_fields_and_wraps() {
+        let mut f = form();
+        assert_eq!(f.focus, 1);
+        for _ in 0..4 {
+            f.key(key(KeyCode::Tab));
+        }
+        assert_eq!(f.focus, 1, "wrapped past the locked slug");
+        f.key(key(KeyCode::BackTab));
+        assert_eq!(f.focus, 4);
+    }
+
+    #[test]
+    fn typing_selecting_toggling() {
+        let mut f = form();
+        for c in "图 q1".chars() {
+            f.key(key(KeyCode::Char(c)));
+        }
+        f.key(key(KeyCode::Backspace));
+        assert_eq!(f.get("title"), "图 q");
+        f.key(key(KeyCode::Tab));
+        f.key(key(KeyCode::Right));
+        assert_eq!(f.get("type"), "tool");
+        f.key(key(KeyCode::Left));
+        assert_eq!(f.get("type"), "custom");
+        f.key(key(KeyCode::Tab));
+        f.key(key(KeyCode::Char(' ')));
+        assert!(f.field("flag").unwrap().is_on());
+        f.key(key(KeyCode::Tab));
+        assert_eq!(f.key(key(KeyCode::Enter)), PopupKey::EditField(4));
+        f.set_text(4, "a\nb".into());
+        assert_eq!(f.get("words"), "a\nb");
+        f.key(key(KeyCode::Tab));
+        assert_eq!(f.key(key(KeyCode::Enter)), PopupKey::Submit);
+        assert_eq!(f.get("slug"), "fixed");
+    }
+
+    #[test]
+    fn confirm_needs_y() {
+        let mut p = Popup::Confirm {
+            title: "c".into(),
+            lines: vec![],
+            then: Action::Start { slug: "a".into() },
+        };
+        assert_eq!(p.handle_key(key(KeyCode::Char('n'))), PopupKey::Close);
+        assert_eq!(p.handle_key(key(KeyCode::Enter)), PopupKey::Close);
+        assert_eq!(p.handle_key(key(KeyCode::Char('y'))), PopupKey::Confirmed);
+    }
+
+    #[test]
+    fn renders_inside_small_frames() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+        let popups = [
+            Popup::Form(form()),
+            Popup::Confirm {
+                title: "cancel a".into(),
+                lines: vec!["Cancel order a?".into()],
+                then: Action::Start { slug: "a".into() },
+            },
+            Popup::message("m", vec!["x".repeat(300)]),
+        ];
+        for (w, h) in [(80, 24), (30, 8), (200, 50)] {
+            for p in &popups {
+                let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
+                term.draw(|f| render(f, f.area(), p, &Theme::DARK)).unwrap();
+                let buf = term.backend().buffer();
+                let text: String = buf.content().iter().map(|c| c.symbol()).collect();
+                assert!(text.contains('\u{256d}'), "rounded corner at {w}x{h}");
+            }
+        }
+        let mut term = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        term.draw(|f| render(f, f.area(), &popups[0], &Theme::DARK))
+            .unwrap();
+        let text: String = term
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|c| c.symbol())
+            .collect();
+        for label in ["slug", "title", "< custom >", "[ ]", "$EDITOR", "Esc"] {
+            assert!(text.contains(label), "{label}");
+        }
+    }
+
+    #[test]
+    fn tail_keeps_the_end() {
+        assert_eq!(tail("abcdef", 3), "def");
+        assert_eq!(tail("图像去噪", 5), "去噪");
+        assert_eq!(tail("ab", 5), "ab");
+    }
+}

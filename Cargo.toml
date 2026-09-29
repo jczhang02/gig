@@ -35,5 +35,5 @@ sha2 = "0.10"
 hex = "0.4"
 ratatui = "0.30"
 crossterm = "0.29"
-arboard = "3.6"
+arboard = { version = "3.6", default-features = false }
 unicode-width = "0.2"

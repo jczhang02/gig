@@ -5,7 +5,7 @@ use crate::app::{UiState, View, WIDE_COLUMNS};
 use crate::data::money::major;
 use crate::icons::Icons;
 use crate::theme::Theme;
-use crate::{help, views};
+use crate::{help, popup, views};
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
@@ -78,6 +78,9 @@ pub fn draw(frame: &mut Frame, cx: &RenderCx) {
     draw_hint(frame, s.hint, cx);
     if cx.state.help_open {
         help::render(frame, area, cx);
+    }
+    if let Some(p) = &cx.state.popup {
+        popup::render(frame, area, p, cx.theme);
     }
 }
 

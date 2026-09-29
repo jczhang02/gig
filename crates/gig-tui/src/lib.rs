@@ -6,6 +6,7 @@
 pub mod actions;
 pub mod app;
 pub mod data;
+pub mod editor;
 pub mod help;
 pub mod icons;
 pub mod popup;
