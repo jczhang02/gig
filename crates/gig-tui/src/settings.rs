@@ -303,7 +303,7 @@ fn step(kind: Kind, current: &str, up: bool) -> Option<String> {
             let v = if up { n + NUMBER_STEP } else { n - NUMBER_STEP };
             Some(format_number((v * 100.0).round() / 100.0))
         }
-        Kind::Toggle => Some((current != "true").to_string()),
+        // Toggles flip with Space or Enter only.
         _ => None,
     }
 }
