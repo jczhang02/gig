@@ -1,130 +1,94 @@
-//! History view (spec 2.4): every order, archived and cancelled included,
-//! newest first, with scorecard score and warranty end. `Enter` opens the
-//! detail full screen.
+//! History view (TUI-DESIGN.md section 10.2): every order, archived and
+//! cancelled included, newest first, flat. `Enter` opens the detail full
+//! screen.
 
-use super::orders::MIN_TITLE;
+use super::orders::{GAP, PRICE, SLUG, STATUS};
 use super::{
-    banded, cell, cell_right, chip_width, empty, price, status_chip, status_style, window_start,
+    banded, cell, cell_right, empty, empty_right, gap, highlighted, marker, price_cell,
+    status_chip, status_style, window_start,
 };
 use crate::data::{day_part, Group, OrderRow};
-use crate::ui::RenderCx;
+use crate::ui::{RenderCx, WidthClass, MIN_TITLE};
 use ratatui::layout::Rect;
 use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
-/// Column widths of a History row, in display cells. `title` is 0 when
-/// there is no room for it.
+const DATE: usize = 10;
+const SCORE: usize = 3;
+
+/// Column layout of a History row.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Columns {
     pub icon: usize,
-    pub slug: usize,
-    pub chip: usize,
-    /// 10 for `YYYY-MM-DD`, 5 for `MM-DD` under `FULL_DATES` columns.
-    pub date: usize,
-    pub price: usize,
+    /// Created and warranty-end columns (dropped at Narrow).
+    pub dates: bool,
+    /// 0 when there is no room for it.
     pub title: usize,
 }
 
-const SCORE: usize = 5;
-/// From this width the dates keep their year.
-const FULL_DATES: usize = 120;
-
 impl Columns {
-    pub fn fit(width: usize, cx: &RenderCx, rows: &[&OrderRow]) -> Self {
-        let icon = if cx.icons.enabled { 2 } else { 0 };
-        let mut slug = rows
-            .iter()
-            .map(|r| crate::text::width(&r.order.slug))
-            .max()
-            .unwrap_or(4)
-            .clamp(4, 20);
-        let chip = chip_width(cx);
-        let date = if width >= FULL_DATES { 10 } else { 5 };
-        let price_w = rows
-            .iter()
-            .map(|r| crate::text::width(&price(r.order.price_minor)))
-            .max()
-            .unwrap_or(1)
-            .clamp(5, 10);
-        // " " icon slug _ chip _ created _ score __ warranty _ price __ title
-        let mut fixed =
-            1 + icon + slug + 1 + chip + 1 + date + 1 + SCORE + 2 + date + 1 + price_w + 2;
-        // The slug column gives way first: to 8 cells to keep a title, then
-        // to 4 so the row fits.
-        let cut = (fixed + MIN_TITLE)
-            .saturating_sub(width)
-            .min(slug.saturating_sub(8));
-        slug -= cut;
-        fixed -= cut;
-        if fixed > width {
-            let cut = (fixed - width).min(slug - 4.min(slug));
-            slug -= cut;
-            fixed -= cut;
-        }
-        let mut title = width.saturating_sub(fixed);
-        if title < MIN_TITLE {
-            title = 0;
-        }
-        Self {
-            icon,
-            slug,
-            chip,
-            date,
-            price: price_w,
-            title,
-        }
+    pub fn fit(width: usize, class: WidthClass, icons: bool) -> Self {
+        let mut c = Self {
+            icon: if icons { 2 } else { 0 },
+            dates: class != WidthClass::Narrow,
+            title: 0,
+        };
+        let title = width.saturating_sub(c.fixed() + GAP);
+        c.title = if title >= MIN_TITLE { title } else { 0 };
+        c
     }
-}
 
-/// `YYYY-MM-DD`, or `MM-DD` in a 5-cell column.
-fn date(d: Option<&str>, cells: usize) -> String {
-    match d {
-        Some(d) if cells < 10 => d.get(5..10).unwrap_or(d).to_string(),
-        Some(d) => d.to_string(),
-        None => "-".to_string(),
+    /// Cells up to the end of the price column.
+    pub fn fixed(&self) -> usize {
+        let dates = if self.dates { 2 * (DATE + GAP) } else { 0 };
+        2 + self.icon + SLUG + GAP + STATUS + GAP + dates + SCORE + GAP + PRICE
     }
 }
 
 pub fn render(frame: &mut Frame, area: Rect, cx: &RenderCx) {
     let t = cx.theme;
     let rows = cx.state.order_list();
-    let c = Columns::fit(usize::from(area.width), cx, &rows);
-
-    let d = t.muted();
+    let class = WidthClass::of(frame.area().width);
+    let c = Columns::fit(usize::from(area.width), class, cx.icons.enabled);
+    let m = t.muted();
     let mut header = vec![
-        Span::raw(" ".repeat(1 + c.icon)),
-        cell("slug", c.slug, d),
-        Span::raw(" "),
-        cell("status", c.chip, d),
-        Span::raw(" "),
-        cell(if c.date < 10 { "added" } else { "created" }, c.date, d),
-        Span::raw(" "),
-        cell_right("score", SCORE, d),
-        Span::raw("  "),
-        cell(if c.date < 10 { "until" } else { "warranty" }, c.date, d),
-        Span::raw(" "),
-        cell_right("price", c.price, d),
+        gap(2 + c.icon),
+        cell("order", SLUG, m),
+        gap(GAP),
+        cell("status", STATUS, m),
     ];
-    if c.title > 0 {
-        header.push(Span::raw("  "));
-        header.push(cell("title", c.title, d));
+    if c.dates {
+        header.push(gap(GAP));
+        header.push(cell("created", DATE, m));
     }
-    let mut lines = vec![Line::from(header)];
+    // "score" is wider than its 3-cell column: it takes the gap before it.
+    header.push(cell_right("score", GAP + SCORE, m));
+    header.push(gap(GAP));
+    if c.dates {
+        header.push(cell("warranty", DATE, m));
+        header.push(gap(GAP));
+    }
+    header.push(cell_right(cx.state.data.currency(), PRICE, m));
+    if c.title > 0 {
+        header.push(gap(GAP));
+        header.push(Span::styled("title", m));
+    }
+    let mut lines = vec![Line::from(header), Line::raw("")];
     if rows.is_empty() {
         frame.render_widget(Paragraph::new(lines), area);
         let body = Rect {
-            y: area.y + 1,
-            height: area.height.saturating_sub(1),
+            y: area.y + 2,
+            height: area.height.saturating_sub(2),
             ..area
         };
-        let msg = if cx.state.filter().text.is_empty() {
-            "no orders yet"
+        let msg: &[&str] = if cx.state.filter().text.is_empty() {
+            &["no orders yet", "N new order"]
         } else {
-            "no order matches the filter"
+            &["no order matches the filter", "Esc clears it"]
         };
-        empty(frame, body, t, &[msg]);
+        empty(frame, body, t, msg);
         return;
     }
     let selected_id = cx.state.selected_order().map(|r| r.order.id);
@@ -133,62 +97,84 @@ pub fn render(frame: &mut Frame, area: Rect, cx: &RenderCx) {
         .position(|r| Some(r.order.id) == selected_id)
         .unwrap_or(0);
     let heights = vec![1; rows.len()];
-    let start = window_start(&heights, selected, area.height.saturating_sub(1));
+    let start = window_start(&heights, selected, area.height.saturating_sub(2));
     for (i, r) in rows.iter().enumerate().skip(start) {
-        let line = row_line(cx, r, &c);
+        if lines.len() >= usize::from(area.height) {
+            break;
+        }
+        let line = row_line(cx, r, &c, i == selected);
         lines.push(if i == selected {
             banded(line, area.width, t)
         } else {
             line
         });
-        if lines.len() >= usize::from(area.height) {
-            break;
-        }
     }
     frame.render_widget(Paragraph::new(lines), area);
 }
 
-fn row_line(cx: &RenderCx, r: &OrderRow, c: &Columns) -> Line<'static> {
+fn row_line(cx: &RenderCx, r: &OrderRow, c: &Columns, selected: bool) -> Line<'static> {
     let t = cx.theme;
     let o = &r.order;
-    let text = if r.group == Group::Closed {
-        t.muted()
+    let closed = r.group == Group::Closed;
+    let ink = if closed {
+        t.text().fg(t.archived)
     } else {
         t.text()
     };
-    let score = r
-        .scorecard
-        .as_ref()
-        .and_then(|s| s.score)
-        .map_or("-".to_string(), |s| format!("{s}/5"));
-    let mut spans = vec![Span::raw(" ")];
+    let meta = if closed { ink } else { t.muted() };
+    let mut spans: Vec<Span<'static>> = marker(selected, t).into();
     if c.icon > 0 {
-        spans.push(cell(
-            cx.icons.project_type(o.project_type),
-            c.icon,
-            t.muted(),
-        ));
+        spans.push(Span::styled(cx.icons.project_type(o.project_type), meta));
+        spans.push(Span::raw(" "));
     }
-    spans.extend([
-        cell(&o.slug, c.slug, text.add_modifier(Modifier::BOLD)),
-        Span::raw(" "),
-        cell(&status_chip(cx, o.status), c.chip, status_style(cx, r)),
-        Span::raw(" "),
-        cell(&date(day_part(&o.created_at), c.date), c.date, t.muted()),
-        Span::raw(" "),
-        cell_right(&score, SCORE, text),
-        Span::raw("  "),
-        cell(
-            &date(o.warranty_until.as_deref(), c.date),
-            c.date,
-            t.muted(),
-        ),
-        Span::raw(" "),
-        cell_right(&price(o.price_minor), c.price, text),
-    ]);
+    let slug_style = if selected {
+        ink.add_modifier(Modifier::BOLD)
+    } else {
+        ink
+    };
+    spans.extend(highlighted(
+        &o.slug,
+        SLUG,
+        &cx.state.filter().text,
+        slug_style,
+    ));
+    spans.push(gap(GAP));
+    let chip = if closed { ink } else { status_style(cx, r) };
+    spans.push(cell(&status_chip(cx, o.status), STATUS, chip));
+    spans.push(gap(GAP));
+    let date_cell = |d: Option<&str>, style| match d {
+        Some(d) => cell(d, DATE, style),
+        None => cell(super::DOT, DATE, t.dim()),
+    };
+    if c.dates {
+        spans.push(date_cell(day_part(&o.created_at), meta));
+        spans.push(gap(GAP));
+    }
+    let score = r.scorecard.as_ref().and_then(|s| s.score);
+    spans.push(match score {
+        Some(s) => cell_right(&format!("{s}/5"), SCORE, ink),
+        None => empty_right(SCORE, t),
+    });
+    spans.push(gap(GAP));
+    if c.dates {
+        let running = o
+            .warranty_until
+            .as_deref()
+            .is_some_and(|w| w > cx.state.data.today.as_str());
+        let style = if closed {
+            ink
+        } else if running {
+            t.text().fg(t.warranty)
+        } else {
+            t.muted()
+        };
+        spans.push(date_cell(o.warranty_until.as_deref(), style));
+        spans.push(gap(GAP));
+    }
+    spans.push(price_cell(o.price_minor, PRICE, ink, t));
     if c.title > 0 {
-        spans.push(Span::raw("  "));
-        spans.push(cell(&o.title, c.title, text));
+        spans.push(gap(GAP));
+        spans.push(cell(&o.title, c.title, ink));
     }
     Line::from(spans)
 }
@@ -220,24 +206,20 @@ mod tests {
                 icons: &icons,
             };
             let rows = state.order_list();
-            for width in 40..=250usize {
-                let c = Columns::fit(width, &cx, &rows);
-                if width >= 70 {
+            for width in 58..=250usize {
+                let class = WidthClass::of(width as u16 + 2);
+                let c = Columns::fit(width, class, icons.enabled);
+                assert!(c.title == 0 || c.title >= MIN_TITLE);
+                if width >= 78 {
                     assert!(c.title >= MIN_TITLE, "title at {width}: {c:?}");
                 }
-                assert!(c.title == 0 || c.title >= MIN_TITLE);
-                if width >= 60 {
-                    for r in &rows {
-                        let w = row_line(&cx, r, &c).width();
-                        assert!(w <= width, "{w} > {width}");
-                    }
+                for r in &rows {
+                    let w = row_line(&cx, r, &c, true).width();
+                    assert!(w <= width.max(c.fixed()), "{w} > {width}");
                 }
             }
-            // The price column is sized from the data.
-            let c = Columns::fit(200, &cx, &rows);
-            assert_eq!(c.price, "1234567.89".len());
-            assert_eq!(c.date, 10);
-            assert_eq!(Columns::fit(80, &cx, &rows).date, 5);
+            assert!(!Columns::fit(78, WidthClass::Narrow, true).dates);
+            assert!(Columns::fit(198, WidthClass::Wide, true).dates);
         }
     }
 }

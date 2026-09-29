@@ -218,8 +218,11 @@ pub fn sort_orders(rows: &mut [&OrderRow]) {
 }
 
 fn compare_rows(a: &OrderRow, b: &OrderRow) -> Ordering {
+    // Closed orders: archived before cancelled, each under its heading.
+    let cancelled = |r: &OrderRow| r.order.status == OrderStatus::Cancelled;
     a.group
         .cmp(&b.group)
+        .then_with(|| cancelled(a).cmp(&cancelled(b)))
         .then_with(|| {
             b.days_in_status
                 .unwrap_or(i64::MIN)

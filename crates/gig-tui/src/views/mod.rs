@@ -62,8 +62,11 @@ pub(crate) fn window_start(heights: &[u16], selected: usize, rows: u16) -> usize
     }
 }
 
-/// Drawn in the leading cell of the selected row.
-pub(crate) const SELECTED_MARK: &str = "\u{258c}";
+/// Drawn in the marker column of the selected row (both lines).
+pub(crate) const SELECTED_MARK: &str = "\u{258e}";
+
+/// The empty-cell dot, and the separator between meta items.
+pub(crate) const DOT: &str = "\u{b7}";
 
 /// A cell of exactly `cells` display cells.
 pub(crate) fn cell(s: &str, cells: usize, style: Style) -> Span<'static> {
@@ -77,32 +80,6 @@ pub(crate) fn cell_right(s: &str, cells: usize, style: Style) -> Span<'static> {
     Span::styled(format!("{}{t}", " ".repeat(pad)), style)
 }
 
-/// Status chip: glyph (when icons are on) and the gig status word, in the
-/// fixed status colour.
-pub(crate) fn status_chip(cx: &RenderCx, status: OrderStatus) -> String {
-    cx.icons.label(cx.icons.status(status), status.as_str())
-}
-
-/// Colour of a row's status chip: the fixed status colour, except that a
-/// paid order whose warranty has ended (next action "archive") is no longer
-/// amber (spec 3: amber means in warranty).
-pub(crate) fn status_style(cx: &RenderCx, row: &crate::data::OrderRow) -> Style {
-    if row.order.status == OrderStatus::Paid && row.next_action == "archive" {
-        cx.theme.text()
-    } else {
-        cx.theme.status(row.order.status)
-    }
-}
-
-/// Cells the status chip column takes: the longest chip.
-pub(crate) fn chip_width(cx: &RenderCx) -> usize {
-    OrderStatus::ALL
-        .iter()
-        .map(|s| text::width(&status_chip(cx, *s)))
-        .max()
-        .unwrap_or(0)
-}
-
 /// `"12d"`, or `"-"` when unknown.
 pub(crate) fn days(d: Option<i64>) -> String {
     d.map_or_else(|| "-".to_string(), |d| format!("{d}d"))
@@ -113,28 +90,141 @@ pub(crate) fn price(minor: Option<i64>) -> String {
     minor.map_or_else(|| "-".to_string(), crate::data::money::major)
 }
 
-/// A one-line message in the middle-left of an empty view.
+/// Blank cells.
+pub(crate) fn gap(cells: usize) -> Span<'static> {
+    Span::raw(" ".repeat(cells))
+}
+
+/// The marker column and the space after it.
+pub(crate) fn marker(selected: bool, theme: &Theme) -> [Span<'static>; 2] {
+    if selected {
+        [Span::styled(SELECTED_MARK, theme.accent()), Span::raw(" ")]
+    } else {
+        [Span::raw(" "), Span::raw(" ")]
+    }
+}
+
+/// An empty numeric cell: a `dim` dot at the right edge.
+pub(crate) fn empty_right(cells: usize, theme: &Theme) -> Span<'static> {
+    cell_right(DOT, cells, theme.dim())
+}
+
+/// The status word as people read it: `in progress`, not `in_progress`.
+pub fn status_word(status: OrderStatus) -> &'static str {
+    match status {
+        OrderStatus::InProgress => "in progress",
+        s => s.as_str(),
+    }
+}
+
+/// Status chip: glyph (when icons are on) and the status word.
+pub(crate) fn status_chip(cx: &RenderCx, status: OrderStatus) -> String {
+    cx.icons.label(cx.icons.status(status), status_word(status))
+}
+
+/// Colour of a row's status chip (TUI-DESIGN.md section 13): the fixed
+/// status colour, except that a paid order whose warranty has ended is
+/// `muted`, since amber means "in warranty".
+pub(crate) fn status_style(cx: &RenderCx, row: &crate::data::OrderRow) -> Style {
+    if row.order.status == OrderStatus::Paid && row.next_action == "archive" {
+        cx.theme.muted()
+    } else {
+        cx.theme.status(row.order.status)
+    }
+}
+
+/// Days in status: `muted`, bold `unpaid` when a delivered order is
+/// overdue; a `dim` dot when unknown.
+pub(crate) fn days_cell(row: &crate::data::OrderRow, cells: usize, cx: &RenderCx) -> Span<'static> {
+    let t = cx.theme;
+    match row.days_in_status {
+        None => empty_right(cells, t),
+        Some(d) => {
+            let style = if row.group == crate::data::Group::Closed {
+                t.text().fg(t.archived)
+            } else if overdue(row) {
+                t.title().fg(t.unpaid)
+            } else {
+                t.muted()
+            };
+            cell_right(&format!("{d}d"), cells, style)
+        }
+    }
+}
+
+/// A delivered order waiting `OVERDUE_DAYS` or more.
+pub(crate) fn overdue(row: &crate::data::OrderRow) -> bool {
+    row.order.status == OrderStatus::Delivered
+        && row
+            .days_in_status
+            .is_some_and(|d| d >= crate::theme::OVERDUE_DAYS)
+}
+
+/// A price cell: grouped, right-aligned; a `dim` dot when missing.
+pub(crate) fn price_cell(
+    minor: Option<i64>,
+    cells: usize,
+    style: Style,
+    theme: &Theme,
+) -> Span<'static> {
+    match minor {
+        Some(p) => cell_right(&text::money(p), cells, style),
+        None => empty_right(cells, theme),
+    }
+}
+
+/// `s` fitted to `cells` with every case-insensitive match of `needle`
+/// underlined (filter matches in slugs).
+pub(crate) fn highlighted(s: &str, cells: usize, needle: &str, style: Style) -> Vec<Span<'static>> {
+    let shown = text::fit(s, cells);
+    let needle = needle.trim().to_lowercase();
+    if needle.is_empty() || !shown.is_ascii() {
+        return vec![Span::styled(shown, style)];
+    }
+    let lower = shown.to_lowercase();
+    let mut out = Vec::new();
+    let mut at = 0;
+    while let Some(i) = lower[at..].find(&needle) {
+        let start = at + i;
+        let end = start + needle.len();
+        if start > at {
+            out.push(Span::styled(shown[at..start].to_string(), style));
+        }
+        out.push(Span::styled(
+            shown[start..end].to_string(),
+            style.add_modifier(ratatui::style::Modifier::UNDERLINED),
+        ));
+        at = end;
+    }
+    if at < shown.len() {
+        out.push(Span::styled(shown[at..].to_string(), style));
+    }
+    out
+}
+
+/// A message at the list origin, the second line with its key in bold.
 pub(crate) fn empty(frame: &mut Frame, area: Rect, theme: &Theme, lines: &[&str]) {
     let lines: Vec<Line> = lines
         .iter()
-        .map(|l| Line::from(Span::styled(format!(" {l}"), theme.muted())))
+        .enumerate()
+        .map(|(i, l)| {
+            // Later lines start with a key ("N new order"): key bold.
+            match l.split_once(' ') {
+                Some((k, rest)) if i > 0 => Line::from(vec![
+                    Span::raw("  "),
+                    Span::styled(k.to_string(), theme.key()),
+                    Span::styled(format!(" {rest}"), theme.muted()),
+                ]),
+                _ => Line::from(Span::styled(format!("  {l}"), theme.muted())),
+            }
+        })
         .collect();
     frame.render_widget(Paragraph::new(lines), area);
 }
 
-/// `line` padded with the selection band to the full `width`, with an
-/// accent bar in its leading margin cell so the cursor is found without
-/// relying on the band colour alone.
+/// `line` on the selection band, padded to `width`.
 pub(crate) fn banded(mut line: Line<'static>, width: u16, theme: &Theme) -> Line<'static> {
-    if let Some(first) = line.spans.first_mut() {
-        if let Some(rest) = first.content.strip_prefix(' ') {
-            let rest = Span::styled(rest.to_string(), first.style);
-            *first = Span::styled(SELECTED_MARK, Style::new().fg(theme.accent));
-            line.spans.insert(1, rest);
-        }
-    }
-    let used = line.width();
-    let pad = usize::from(width).saturating_sub(used);
+    let pad = usize::from(width).saturating_sub(line.width());
     if pad > 0 {
         line.push_span(Span::raw(" ".repeat(pad)));
     }

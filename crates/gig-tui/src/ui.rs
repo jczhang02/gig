@@ -394,7 +394,8 @@ mod tests {
         }
         assert!(row(&buf, 23).contains("q quit"));
         let text = all(&buf);
-        assert!(text.contains("no active orders"), "{text}");
+        assert!(text.contains("nothing needs you"), "{text}");
+        assert!(text.contains("N new order"), "{text}");
         assert!(!text.contains("no order selected"), "no detail pane");
         assert!(shell(buf.area, &state).pane.is_none());
     }
@@ -504,7 +505,7 @@ mod tests {
     #[test]
     fn other_views_are_full_width() {
         for (v, head) in [
-            (View::Drafts, "material"),
+            (View::Drafts, "draft"),
             (View::Money, "outstanding"),
             (View::History, "warranty"),
         ] {
@@ -628,56 +629,130 @@ mod tests {
     }
 
     #[test]
-    fn orders_rows_at_80x24_and_200x50() {
+    fn orders_rows_at_80x24_120x36_and_200x50() {
         let state = sample();
-        for (w, h, icons) in [(80, 24, false), (200, 50, true), (80, 24, true)] {
+        for (w, h, icons) in [
+            (80, 24, false),
+            (120, 36, true),
+            (200, 50, true),
+            (80, 24, true),
+        ] {
             let buf = render(w, h, &state, icons);
-            let text = all(&buf);
-            // The selected row: slug, status chip, next action, days, price
-            // on one line, and the JOB.md status on the next.
-            let (y, row7) = line_of(&text, "tk-denoise").expect("selected row");
-            for part in ["delivered", "collect", "59d", "1"] {
+            let body = shell(buf.area, &state).body;
+            let list: Vec<String> = (0..h)
+                .map(|y| span_text(&buf, y, body.x..body.right()))
+                .collect();
+            let find = |needle: &str| list.iter().position(|l| l.contains(needle));
+            // The selected row: marker, bold slug, chip, overdue days,
+            // price; the JOB.md status entry on the next line.
+            let y = find("tk-denoise").expect("selected row");
+            let row7 = &list[y];
+            assert!(row7.starts_with("\u{258e} "), "{w}x{h}: {row7:?}");
+            for part in ["delivered", "59d", "0.01"] {
                 assert!(row7.contains(part), "{w}x{h}: {part:?} in {row7:?}");
             }
-            let below = text.lines().nth(y + 1).unwrap();
-            assert!(below.contains("预览已发送"), "{w}x{h}: {below:?}");
-            // Sorted: unpaid first, queued last.
-            let (y6, _) = line_of(&text, " o6 ").unwrap();
-            let (y1, _) = line_of(&text, " o1 ").unwrap();
-            assert!(y < y6 && y6 < y1, "{w}x{h} order");
+            assert_eq!(
+                row7.contains("collect payment"),
+                w >= 160,
+                "{w}: next column"
+            );
+            let below = &list[y + 1];
+            assert!(below.contains("09-20  预览已发送"), "{w}x{h}: {below:?}");
+            assert!(!list.iter().any(|l| l.contains("(no status entry")));
+            // Groups in the spec order, each under its heading.
+            let owed = find("  owed  3").expect("owed heading");
+            let paid = find("  paid  2").expect("paid heading");
+            let prog = find("  in progress  1").expect("in progress heading");
+            let queued = find("  queued  2").expect("queued heading");
+            assert!(
+                owed < y && y < paid && paid < prog && prog < queued,
+                "{w}x{h}"
+            );
+            assert!(
+                list[owed - 1].trim().is_empty(),
+                "a blank row above a group"
+            );
             // Archived orders are hidden until `a`.
-            assert!(line_of(&text, " o8 ").is_none());
-            // The selection band covers the row, not reverse video.
-            let slug_x = row7.find("tk-denoise").unwrap();
-            let x = crate::text::width(&row7[..slug_x]) as u16;
-            let c = &buf[(x, y as u16)];
-            assert_eq!(c.bg, Theme::DARK.sel);
-            assert!(!c.modifier.contains(Modifier::REVERSED));
-            // Status colour: unpaid red.
-            let chip_x = crate::text::width(&row7[..row7.find("delivered").unwrap()]) as u16;
-            assert_eq!(buf[(chip_x, y as u16)].fg, Theme::DARK.unpaid);
+            assert!(find(" o8 ").is_none());
+            // Styles: marker accent, band behind the row, bold slug,
+            // unpaid chip, overdue days bold unpaid.
+            let y = y as u16;
+            let at = |needle: &str| {
+                let l = &list[usize::from(y)];
+                body.x + crate::text::width(&l[..l.find(needle).unwrap()]) as u16
+            };
+            assert_eq!(buf[(body.x, y)].fg, Theme::DARK.accent);
+            let slug = &buf[(at("tk-denoise"), y)];
+            assert_eq!(slug.bg, Theme::DARK.sel);
+            assert!(slug.modifier.contains(Modifier::BOLD));
+            assert!(!slug.modifier.contains(Modifier::REVERSED));
+            assert_eq!(
+                buf[(body.right() - 1, y)].bg,
+                Theme::DARK.sel,
+                "band to the list edge"
+            );
+            assert_eq!(buf[(at("delivered"), y)].fg, Theme::DARK.unpaid);
+            let days = &buf[(at("59d"), y)];
+            assert_eq!(days.fg, Theme::DARK.unpaid);
+            assert!(days.modifier.contains(Modifier::BOLD));
+            // Unselected rows are not bold.
+            let (y6, l6) = list
+                .iter()
+                .enumerate()
+                .find(|(_, l)| l.contains(" o6 "))
+                .unwrap();
+            let x6 = body.x + crate::text::width(&l6[..l6.find("o6").unwrap()]) as u16;
+            assert!(!buf[(x6, y6 as u16)].modifier.contains(Modifier::BOLD));
         }
+    }
+
+    #[test]
+    fn no_icons_moves_the_slug_two_cells_left() {
+        let state = sample();
+        let col = |icons| {
+            let buf = render(80, 24, &state, icons);
+            let text = all(&buf);
+            let l = text
+                .lines()
+                .find(|l| l.contains(" o6 "))
+                .unwrap()
+                .to_string();
+            crate::text::width(&l[..l.find("o6").unwrap()])
+        };
+        assert_eq!(col(true), col(false) + 2);
+        assert_eq!(col(true), 5);
     }
 
     #[test]
     fn chinese_titles_are_cut_by_width() {
         let state = sample();
-        // At 200 columns the list is 55% wide and the detail is beside it.
-        let buf = render(200, 50, &state, true);
-        let body = shell(buf.area, &state).body;
-        let text = all(&buf);
-        let (y, _) = line_of(&text, "tk-denoise").unwrap();
-        let list_part = span_text(&buf, y as u16, body.x..body.right());
-        assert!(list_part.contains("图像去噪"), "{list_part}");
-        assert!(
-            list_part.contains('\u{2026}'),
-            "cut with an ellipsis: {list_part}"
-        );
-        // Nothing of the list row spills into the gutter.
-        for x in body.right()..body.right() + 2 {
-            assert_eq!(buf[(x, y as u16)].symbol(), " ", "gutter at {x}");
+        for (w, h, title) in [(80, 24, 21), (120, 36, 19), (200, 50, 40)] {
+            let buf = render(w, h, &state, true);
+            let body = shell(buf.area, &state).body;
+            let (y, list_part) = (0..h)
+                .map(|y| (y, span_text(&buf, y, body.x..body.right())))
+                .find(|(_, l)| l.contains("tk-denoise"))
+                .unwrap();
+            let start = list_part.find("图像去噪").expect("title shown");
+            let shown = &list_part[start..];
+            assert!(
+                shown.contains('\u{2026}'),
+                "cut with an ellipsis: {list_part}"
+            );
+            assert!(
+                crate::text::width(shown.trim_end()) <= title,
+                "{w}: {shown:?} in {title} cells"
+            );
+            assert!(crate::text::width(shown.trim_end()) >= title - 1);
+            // Nothing of the list row spills into the gutter.
+            if let Some(pane) = shell(buf.area, &state).pane {
+                for x in body.right()..pane.x {
+                    assert_eq!(buf[(x, y)].symbol(), " ", "gutter at {x}");
+                }
+            }
         }
         // The full title is in the detail pane header.
+        let text = all(&render(200, 50, &state, true));
         assert!(text.contains("图像去噪与超分辨率批处理工具开发及交付, 含批量脚本"));
     }
 
@@ -758,23 +833,23 @@ mod tests {
     #[test]
     fn light_theme_band_marker_and_status_colours() {
         let mut state = sample();
-        // o5 is paid with its warranty over: next action "archive".
         let buf = render_with(80, 24, &state, false, Theme::LIGHT);
         let text = all(&buf);
         let (y, row7) = line_of(&text, "tk-denoise").unwrap();
         let y = y as u16;
-        assert!(row7.starts_with(" \u{258c}"), "selection marker: {row7}");
+        assert!(row7.starts_with(" \u{258e}"), "selection marker: {row7}");
         assert_eq!(buf[(1, y)].fg, Theme::LIGHT.accent);
         let x = crate::text::width(&row7[..row7.find("tk-denoise").unwrap()]) as u16;
         assert_eq!(buf[(x, y)].bg, Theme::LIGHT.sel);
         let chip_x = crate::text::width(&row7[..row7.find("delivered").unwrap()]) as u16;
         assert_eq!(buf[(chip_x, y)].fg, Theme::LIGHT.unpaid);
-        // The second line reads as part of the row and is not dim.
+        // The second line: on the band, marker too, date and entry muted.
         let below = text.lines().nth(usize::from(y) + 1).unwrap();
-        assert!(below.contains("\u{21b3} 2026-09-20: 预览已发送"), "{below}");
+        assert!(below.starts_with(" \u{258e}"), "{below}");
         let sx = crate::text::width(&below[..below.find("预览").unwrap()]) as u16;
-        assert_eq!(buf[(sx, y + 1)].fg, Theme::LIGHT.text);
-        // Paid in warranty is amber; paid with the warranty over is not.
+        assert_eq!(buf[(sx, y + 1)].fg, Theme::LIGHT.muted);
+        assert_eq!(buf[(sx, y + 1)].bg, Theme::LIGHT.sel);
+        // Paid in warranty is amber; paid with the warranty over is muted.
         let mut paid = 0;
         for r in &state.data.orders {
             if r.order.status == gig_core::models::OrderStatus::Paid {
@@ -782,7 +857,7 @@ mod tests {
                 let (py, l) = line_of(&text, &format!(" {} ", r.order.slug)).unwrap();
                 let px = crate::text::width(&l[..l.find("paid").unwrap()]) as u16;
                 let want = if r.next_action == "archive" {
-                    Theme::LIGHT.text
+                    Theme::LIGHT.muted
                 } else {
                     Theme::LIGHT.warranty
                 };
@@ -791,9 +866,19 @@ mod tests {
         }
         assert_eq!(paid, 2, "one in warranty, one to archive");
         state.view = View::History;
-        let buf = render_with(80, 24, &state, true, Theme::LIGHT);
+        let buf = render_with(120, 36, &state, true, Theme::LIGHT);
         let text = all(&buf);
-        assert!(text.contains("until") && text.contains("4/5"), "{text}");
+        assert!(
+            text.contains("2026-10-10") && text.contains("4/5"),
+            "{text}"
+        );
+        // Archived rows entirely in `archived`.
+        let (ay, l) = line_of(&text, " o8 ").unwrap();
+        let ax = crate::text::width(&l[..l.find("o8").unwrap()]) as u16;
+        assert_eq!(buf[(ax, ay as u16)].fg, Theme::LIGHT.archived);
+        // Empty cells are dim dots, never `-`.
+        let (_, l2) = line_of(&text, " o2 ").unwrap();
+        assert!(l2.contains('\u{b7}') && !l2.contains(" - "), "{l2}");
     }
 
     #[test]
@@ -934,6 +1019,21 @@ mod tests {
         let buf = render(80, 16, &state, false);
         let text = all(&buf);
         assert!(line_of(&text, "o2 ").is_some(), "{text}");
+        // Sticky heading: the first row under the header names the group
+        // of the first visible order.
+        assert_eq!(row(&buf, 2).split_whitespace().next(), Some("order"));
+        for h in 16..30 {
+            let buf = render(80, h, &state, false);
+            let first = (3..h)
+                .map(|y| row(&buf, y))
+                .find(|l| !l.trim().is_empty())
+                .unwrap();
+            let heading = ["owed  ", "paid  ", "in progress  ", "queued  "]
+                .iter()
+                .any(|w| first.starts_with(&format!("   {w}")));
+            assert!(heading, "{h}: {first:?}");
+            assert!(all(&buf).contains(" o2 "), "{h}");
+        }
     }
 
     #[test]

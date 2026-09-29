@@ -1,7 +1,9 @@
-//! Drafts view (spec 2.2): open drafts with slug, title, material path and
-//! age. `Enter` shows the tail of NOTES.md, `N` new draft, `P` promote.
+//! Drafts view (TUI-DESIGN.md section 10.1): open drafts with slug, age,
+//! title and material path. `Enter` shows the tail of NOTES.md (a pane at
+//! Medium and Wide, a popup at Narrow), `N` new draft, `P` promote.
 
-use super::{banded, cell, cell_right, empty, window_start};
+use super::orders::{GAP, SLUG};
+use super::{banded, cell, cell_right, empty, gap, highlighted, marker, window_start};
 use crate::data::calendar_days;
 use crate::text;
 use crate::ui::RenderCx;
@@ -11,45 +13,64 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
-const AGE: usize = 5;
+const AGE: usize = 4;
+/// Narrowest title column.
+const MIN_TITLE: usize = 16;
+/// Widest material column.
+const MAX_MATERIAL: usize = 40;
+/// Narrowest material column worth drawing.
+const MIN_MATERIAL: usize = 12;
+
+/// Title and material widths for a list `width` cells wide; material 0
+/// when dropped (it goes first).
+pub fn columns(width: usize, longest_material: usize) -> (usize, usize) {
+    let rest = width.saturating_sub(2 + SLUG + GAP + AGE + GAP);
+    let want = longest_material.min(MAX_MATERIAL);
+    let room = rest.saturating_sub(MIN_TITLE + GAP);
+    if want == 0 || room < MIN_MATERIAL.min(want) {
+        return (rest, 0);
+    }
+    let material = want.min(room);
+    (rest - GAP - material, material)
+}
 
 pub fn render(frame: &mut Frame, area: Rect, cx: &RenderCx) {
     let t = cx.theme;
     let drafts = cx.state.draft_list();
     let today = &cx.state.data.today;
-    let slug = drafts
+    let longest = drafts
         .iter()
-        .map(|d| text::width(&d.slug))
+        .filter_map(|d| d.material_path.as_deref())
+        .map(text::width)
         .max()
-        .unwrap_or(4)
-        .clamp(4, 20);
-    // " " slug _ age _ title _ material
-    let rest = usize::from(area.width).saturating_sub(1 + slug + 1 + AGE + 1 + 1);
-    let title_w = rest * 55 / 100;
-    let material_w = rest.saturating_sub(title_w);
+        .unwrap_or(0);
+    let (title_w, material_w) = columns(usize::from(area.width), longest);
 
-    let d = t.muted();
-    let mut lines = vec![Line::from(vec![
-        Span::raw(" "),
-        cell("slug", slug, d),
-        Span::raw(" "),
-        cell_right("age", AGE, d),
-        Span::raw(" "),
-        cell("title", title_w, d),
-        Span::raw(" "),
-        cell("material", material_w, d),
-    ])];
+    let m = t.muted();
+    let mut header = vec![
+        gap(2),
+        cell("draft", SLUG, m),
+        gap(GAP),
+        cell_right("age", AGE, m),
+        gap(GAP),
+        cell("title", title_w, m),
+    ];
+    if material_w > 0 {
+        header.push(gap(GAP));
+        header.push(Span::styled("material", m));
+    }
+    let mut lines = vec![Line::from(header), Line::raw("")];
     if drafts.is_empty() {
         frame.render_widget(Paragraph::new(lines), area);
         let body = Rect {
-            y: area.y + 1,
-            height: area.height.saturating_sub(1),
+            y: area.y + 2,
+            height: area.height.saturating_sub(2),
             ..area
         };
         let msg: &[&str] = if cx.state.filter().text.is_empty() {
-            &["no open drafts", "N records one"]
+            &["no open drafts", "N new draft"]
         } else {
-            &["no draft matches the filter"]
+            &["no draft matches the filter", "Esc clears it"]
         };
         empty(frame, body, t, msg);
         return;
@@ -62,33 +83,48 @@ pub fn render(frame: &mut Frame, area: Rect, cx: &RenderCx) {
     let start = window_start(
         &vec![1; drafts.len()],
         selected,
-        area.height.saturating_sub(1),
+        area.height.saturating_sub(2),
     );
     for (i, dr) in drafts.iter().enumerate().skip(start) {
-        let age = calendar_days(&dr.created_at, today).map_or("-".to_string(), |n| format!("{n}d"));
-        let line = Line::from(vec![
-            Span::raw(" "),
-            cell(&dr.slug, slug, t.text().add_modifier(Modifier::BOLD)),
-            Span::raw(" "),
-            cell_right(&age, AGE, t.muted()),
-            Span::raw(" "),
-            cell(dr.title.as_deref().unwrap_or("-"), title_w, t.text()),
-            Span::raw(" "),
-            // Paths lose their start: the end names the folder.
-            cell(
-                &text::truncate_left(dr.material_path.as_deref().unwrap_or("-"), material_w),
-                material_w,
-                t.muted(),
-            ),
-        ]);
-        lines.push(if i == selected {
+        if lines.len() >= usize::from(area.height) {
+            break;
+        }
+        let is_sel = i == selected;
+        let mut spans: Vec<Span<'static>> = marker(is_sel, t).into();
+        let slug_style = if is_sel {
+            t.text().add_modifier(Modifier::BOLD)
+        } else {
+            t.text()
+        };
+        spans.extend(highlighted(
+            &dr.slug,
+            SLUG,
+            &cx.state.filter().text,
+            slug_style,
+        ));
+        spans.push(gap(GAP));
+        spans.push(match calendar_days(&dr.created_at, today) {
+            Some(n) => cell_right(&format!("{n}d"), AGE, m),
+            None => cell_right(super::DOT, AGE, t.dim()),
+        });
+        spans.push(gap(GAP));
+        spans.push(match dr.title.as_deref() {
+            Some(title) => cell(title, title_w, t.text()),
+            None => cell(super::DOT, title_w, t.dim()),
+        });
+        if material_w > 0 {
+            if let Some(path) = dr.material_path.as_deref() {
+                spans.push(gap(GAP));
+                // Paths lose their start: the end names the file.
+                spans.push(Span::styled(text::truncate_left(path, material_w), m));
+            }
+        }
+        let line = Line::from(spans);
+        lines.push(if is_sel {
             banded(line, area.width, t)
         } else {
             line
         });
-        if lines.len() >= usize::from(area.height) {
-            break;
-        }
     }
     frame.render_widget(Paragraph::new(lines), area);
 }
