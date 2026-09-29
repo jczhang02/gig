@@ -7,18 +7,18 @@ Status: agreed design, 2026-09-29 (grilled with JC). Implementation follows this
 A terminal dashboard for JC, the one human interface to gig. Agents keep using the JSON CLI; the TUI is for what JC does by hand: see who owes money and what comes next, record payments and notes, score orders, register orders and drafts, send packages the agent has built. It never touches project files beyond what `gig new` already does.
 
 - Crate `gig-tui` (Rust, ratatui + crossterm), calling `gig-core` directly. Same state machine, same rules as the CLI.
-- Entry: `gig tui`, the second non-JSON command after `gig completion`. Flags: `--light`, `--no-icons`, `--refresh <seconds>` (default 2, 0 disables).
+- Entry: `gig` with no subcommand launches the dashboard; `gig tui` stays as an alias. Bare `gig` starts the dashboard only when stdin and stdout are terminals; otherwise (agents, pipes) it behaves exactly as before: clap's missing-subcommand error, exit 2. It is the second non-JSON command after `gig completion`. Flags (on bare `gig` and on `gig tui`): `--theme <name>`, `--light` (alias of `--theme gig-light`), `--no-icons`, `--refresh <seconds>` (default 2, 0 disables), `--list-themes` (prints the theme names, one per line, and exits).
 - Runs anywhere; inside a project directory it preselects that order.
 
 ## 2. Views
 
-Keys in the whole app: `?` help, `q` quit, `r` refresh, `1..4` jump to a view, `Tab` next view, `/` filter the current list, `Esc` close a popup or clear the filter.
+Keys in the whole app: `?` help, `q` quit, `r` refresh, `1..4` jump to a view, `Tab` next view, `/` filter the current list, `T` next theme (not persisted), `Esc` close a popup or clear the filter.
 
 ### 2.1 Orders (default)
 
-Left: the active orders, one line each: icon for project type, slug, status chip, next action, days in status, price. The selected row expands to a second line with the latest JOB.md status entry. `a` toggles archived and cancelled orders in. Sorting: unpaid first, then in warranty, then in progress, then queued; within a group by days descending.
+Left: the active orders, one line each: icon for project type, slug, status chip, next action (at 160 columns and wider; below that it repeats the status and is shown for the selected row only), days in status, price, title, grouped under headings with counts and totals. The selected row expands to a second line with the latest JOB.md status entry, or, without one, the next action and the last sent link (TUI-DESIGN.md section 8). `a` toggles archived and cancelled orders in. Sorting: unpaid first, then in warranty, then in progress, then queued; within a group by days descending.
 
-Right (when at least 110 columns): the selected order's detail. Below that width the list is full width and `Enter` opens the detail full screen.
+Right (when at least 110 columns; exact column budgets in TUI-DESIGN.md section 6): the selected order's detail. Below that width the list is full width and `Enter` opens the detail full screen.
 
 Detail sections: header (title, slug, type, platform, price and cut, warranty end), Next action, Packages (id, kind, status, channel, sent date, short link), Latest status (last 3 entries of JOB.md "Status"), Client questions (unanswered ones from JOB.md), Requirement changes, Notes (last 5), Scorecard.
 
@@ -59,12 +59,14 @@ All orders including archived and cancelled, newest first, with scorecard score 
 
 ## 3. Look
 
-- Reference: yazi's layout discipline (whitespace and colour instead of borders), btop's rounded boxes for popups and the bar chart.
-- Colours: an own truecolor palette, dark by default, `--light` variant. Status colours are fixed: unpaid red, warranty amber, in progress default foreground, queued blue, archived and cancelled dim grey. Selection is a subtle background band, not reverse video.
+The complete design system (colour roles, typography, spacing, glyphs, width classes, every view's anatomy, popups, chart, themes with hex values and contrast, mockups, and the file-by-file change list) is [TUI-DESIGN.md](TUI-DESIGN.md). It is binding for appearance. The summary below is kept for orientation; where it and TUI-DESIGN.md differ, TUI-DESIGN.md wins.
+
+- Reference: yazi's layout discipline (whitespace and colour instead of borders), btop's rounded boxes for popups. The bar chart is not boxed (TUI-DESIGN.md section 11.2).
+- Colours: truecolor themes, `gig-dark` by default; eight built-ins and user theme files (section 5). Status colours are fixed roles in every theme: unpaid red, warranty amber, in progress default foreground, queued blue, archived and cancelled grey. Selection is a subtle background band plus an accent marker, not reverse video.
 - Icons: Nerd Font glyphs for project type and status, with text next to them; `--no-icons` replaces glyphs with nothing and keeps the text.
 - Density: one line per order, the selected one expands to two; details in the right pane.
 - Motion: only the upload progress bar and a spinner; no transitions.
-- Width: adaptive; under 110 columns the detail pane is hidden and `Enter` opens it full screen (tmux popup friendly).
+- Width: adaptive; under 110 columns the detail pane is hidden and `Enter` opens it full screen (tmux popup friendly). Below 60x16 the dashboard shows only a size notice.
 - Text: titles may be Chinese; layout uses display width (unicode-width) so columns stay aligned; titles take the remaining width and are truncated with an ellipsis.
 
 ## 4. Data and concurrency
@@ -76,7 +78,9 @@ All orders including archived and cancelled, newest first, with scorecard score 
 
 ## 5. Config
 
-`[tui]` section in config.toml, all optional: `light = false`, `icons = true`, `refresh_seconds = 2`. Flags override config; `GIG_TUI_*` env overrides both.
+`[tui]` section in config.toml, all optional: `theme = "gig-dark"`, `light = false` (alias: `theme = "gig-light"` when `theme` is unset), `icons = true`, `refresh_seconds = 2`. Flags override config; `GIG_TUI_*` env overrides both (`GIG_TUI_THEME`, `GIG_TUI_LIGHT`, `GIG_TUI_ICONS`, `GIG_TUI_REFRESH_SECONDS`).
+
+Themes: built-in `gig-dark`, `gig-light`, `catppuccin-mocha`, `catppuccin-latte`, `tokyonight`, `gruvbox-dark`, `nord`, `dracula`. User themes are TOML files in the themes directory, `$XDG_CONFIG_HOME/gig/themes/<name>.toml` (`$GIG_HOME/config/themes/` under `GIG_HOME`), with the same keys as the built-ins, selectable by name; a user file shadows a built-in of the same name. An unknown or invalid theme falls back to `gig-dark` with a warning and never blocks startup. `T` cycles themes for the session. Format and rules: TUI-DESIGN.md sections 14 and 15.
 
 ## 6. Tests
 
@@ -86,4 +90,4 @@ All orders including archived and cancelled, newest first, with scorecard score 
 
 ## 7. Out of scope
 
-Package building (files and manifest are the agent's job), archive execution, deleting anything, browser opening, launching agents, themes beyond dark/light.
+Package building (files and manifest are the agent's job), archive execution, deleting anything, browser opening, launching agents, theme detection from the terminal background (OSC 11), hot reload of theme files.
