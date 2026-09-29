@@ -254,7 +254,9 @@ pub struct PriceArgs {
 
 #[derive(Args, Debug)]
 pub struct NoteArgs {
-    pub key: Option<String>,
+    /// Order slug or #id; resolved from the working directory when omitted
+    #[arg(long)]
+    pub order: Option<String>,
     pub text: String,
 }
 

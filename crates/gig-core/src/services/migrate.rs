@@ -228,6 +228,11 @@ pub fn plan(opts: &Options) -> Result<Report> {
     } else {
         vec![]
     };
+    let v1_workflow = if table_exists(&conn, "order_workflow")? {
+        read_table(&conn, "order_workflow")?
+    } else {
+        vec![]
+    };
     let v1_order_tags = if table_exists(&conn, "order_tags")? {
         read_table(&conn, "order_tags")?
     } else {
@@ -341,13 +346,36 @@ pub fn plan(opts: &Options) -> Result<Report> {
             ));
         }
 
-        let dev_path = rewrite(row.text("dev_path"), &opts.fix_paths, &mut warnings, &label);
-        let archive_path = rewrite(
+        // v1 kept the project directory in order_workflow.gig_dir when orders.dev_path was NULL.
+        let workflow_root = v1_workflow
+            .iter()
+            .find(|w| w.int("order_id") == Some(id))
+            .and_then(|w| w.text("gig_dir"))
+            .and_then(|g| {
+                Path::new(&g)
+                    .parent()
+                    .map(|p| p.to_string_lossy().into_owned())
+            });
+        let mut dev_path = rewrite(row.text("dev_path"), &opts.fix_paths, &mut warnings, &label);
+        let mut archive_path = rewrite(
             row.text("archive_path"),
             &opts.fix_paths,
             &mut warnings,
             &label,
         );
+        if let Some(wr) =
+            workflow_root.and_then(|w| rewrite(Some(w), &opts.fix_paths, &mut warnings, &label))
+        {
+            if status == OrderStatus::Archived && archive_path.is_none() {
+                warnings.push(format!(
+                    "{label}: archive_path taken from order_workflow: {wr}"
+                ));
+                archive_path = Some(wr);
+            } else if status != OrderStatus::Archived && dev_path.is_none() {
+                warnings.push(format!("{label}: dev_path taken from order_workflow: {wr}"));
+                dev_path = Some(wr);
+            }
+        }
         let root = if status == OrderStatus::Archived {
             archive_path.clone()
         } else {
@@ -716,7 +744,9 @@ INSERT INTO quote_drafts (slug, title, project_type, status, summary, quote_min,
 VALUES ('promoted-q', 'PQ', 'cv_ml', 'accepted', 'promoted summary', 60000, 80000, 100000, '{d}/quotes/promoted-q', 3, '2026-08-20T00:00:00Z', '2026-08-20T00:00:00Z');
 INSERT INTO quote_drafts (slug, title, project_type, status, summary, xdg_path, drop_reason, created_at, updated_at)
 VALUES ('dropped-q', 'DQ', 'custom', 'dropped', 'dropped summary', '{d}/quotes/dropped-q', 'no budget', '2026-08-21T00:00:00Z', '2026-08-21T00:00:00Z');
-INSERT INTO order_workflow (order_id, created_at, updated_at) VALUES (3, 'x', 'x');
+INSERT INTO order_workflow (order_id, gig_dir, created_at, updated_at) VALUES (3, '{d}/delivered/.gig', 'x', 'x');
+INSERT INTO orders (id, slug, title, status, my_cut_ratio, currency, created_at) VALUES (7, 'from-workflow', 'From workflow', 'in_progress', 0.6, 'CNY', 1780456708);
+INSERT INTO order_workflow (order_id, gig_dir, created_at, updated_at) VALUES (7, '{d}/from-workflow/.gig', 'x', 'x');
 "#, d = dir.display())).unwrap();
         p
     }
@@ -749,8 +779,13 @@ INSERT INTO order_workflow (order_id, created_at, updated_at) VALUES (3, 'x', 'x
         let r = run(&opts).unwrap();
         assert!(r.dry_run);
         assert!(!to.exists());
-        assert_eq!(r.counts["v2.orders"], 6);
+        assert_eq!(r.counts["v2.orders"], 7);
         let by_slug = |s: &str| r.orders.iter().find(|o| o.slug == s).unwrap().clone();
+        assert!(by_slug("from-workflow")
+            .dev_path
+            .as_deref()
+            .unwrap()
+            .ends_with("/from-workflow"));
 
         let paid = by_slug("old-paid");
         assert_eq!(paid.status, OrderStatus::Archived);
@@ -808,7 +843,7 @@ INSERT INTO order_workflow (order_id, created_at, updated_at) VALUES (3, 'x', 'x
         assert!(!r2.dry_run);
         let conn = db::open(&to).unwrap();
         let all = repo_orders::list(&conn, true).unwrap();
-        assert_eq!(all.len(), 6);
+        assert_eq!(all.len(), 7);
         let o3 = repo_orders::find_by_id(&conn, 3).unwrap();
         assert_eq!(o3.legacy_id, Some(3));
         assert_eq!(o3.status, OrderStatus::Delivered);

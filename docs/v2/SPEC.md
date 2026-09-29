@@ -233,7 +233,7 @@ Error codes: `not_found`, `invalid_state`, `invalid_input`, `unsafe_package`, `n
 - `gig start [<slug>]` See state machine.
 - `gig change [<slug>] --desc TEXT [--price-delta AMOUNT]` Appends requirement change; when delta != 0 also updates price and price_history.
 - `gig price [<slug>] --amount AMOUNT --reason TEXT`
-- `gig note [<slug>] TEXT` Appends a timestamped line to `notes`.
+- `gig note [--order <slug>] TEXT` Appends a timestamped line to `notes`.
 - `gig paid [<slug>] [--date YYYY-MM-DD] [--amount AMOUNT]` Defaults to today. `--amount` records a final price different from the current one (price_history).
 - `gig scorecard [<slug>] --decisions N --repeat-questions N --cleanups N --report-reworks N --score 1..5 [--note TEXT]` Upserts. `days_to_preview` (started_at to the first preview `sent_at`) and `check_rejections` (counted by `package check` failures for this order, stored in a small `events` table: order_id, kind, at) are computed, not supplied.
 - `gig archive [<slug>] [--yes] [--before-warranty-end] [--no-scorecard] [--purge]`

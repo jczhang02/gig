@@ -225,6 +225,13 @@ fn after_send(
     }
 }
 
+/// Everything `upload` checks before touching the network. Lets the CLI fail on
+/// a stale check before it even builds an uploader.
+pub fn preflight(ctx: &Ctx, key: Option<&str>, package_id: &str) -> Result<()> {
+    let order = context::resolve_key_or_cwd(&ctx.conn, key)?;
+    ready_to_send(ctx, &order, package_id).map(|_| ())
+}
+
 pub fn object_key(order: &Order, package_id: &str, stamp: &str) -> String {
     format!("{}/{package_id}/{stamp}/{package_id}.zip", order.slug)
 }

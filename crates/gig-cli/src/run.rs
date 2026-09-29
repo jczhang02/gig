@@ -176,7 +176,7 @@ fn run_with_db(ctx: &Ctx, cmd: Command) -> Result<Output> {
             parse_amount(&a.amount)?,
             &a.reason,
         )?),
-        Command::Note(a) => out(orders::note(ctx, a.key.as_deref(), &a.text)?),
+        Command::Note(a) => out(orders::note(ctx, a.order.as_deref(), &a.text)?),
         Command::Paid(a) => {
             let amount = a.amount.as_deref().map(parse_amount).transpose()?;
             out(orders::paid(
@@ -245,6 +245,7 @@ fn run_with_db(ctx: &Ctx, cmd: Command) -> Result<Output> {
                     let w = r.warnings.clone();
                     return out_with(r, w);
                 }
+                packages::preflight(ctx, a.order.as_deref(), &a.package_id)?;
                 let uploader = delivery::configured_uploader(&ctx.config, &ctx.paths)?;
                 let r = packages::upload(
                     ctx,

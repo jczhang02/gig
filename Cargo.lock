@@ -972,10 +972,10 @@ dependencies = [
  "clap",
  "clap_complete",
  "gig-core",
+ "rusqlite",
  "serde",
  "serde_json",
  "tempfile",
- "zip",
 ]
 
 [[package]]
