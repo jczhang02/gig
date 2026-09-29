@@ -27,7 +27,8 @@ const GLOBAL_KEYS: &[Entry] = &[
     ("Tab", "next view", ""),
     ("/", "filter", ""),
     ("Esc", "close, clear", ""),
-    ("T", "next theme", ""),
+    ("T", "theme picker", ""),
+    (",", "settings", ""),
     ("\u{2191}\u{2193}", "select", ""),
     ("Enter", "open", ""),
     ("PgDn", "scroll detail", ""),
@@ -62,8 +63,21 @@ const MONEY_KEYS: &[Entry] = &[("Enter", "open order", ""), ("y", "copy link", "
 
 const HISTORY_KEYS: &[Entry] = &[("Enter", "detail", "order keys work there")];
 
+const SETTINGS_KEYS: &[Entry] = &[
+    ("\u{2191}\u{2193}", "select", ""),
+    ("Space", "toggle", "yes or no rows"),
+    ("+ -", "step", "number rows"),
+    ("0-9", "type a value", "number rows"),
+    ("Enter", "edit or choose", ""),
+    ("T", "theme picker", ""),
+    ("Esc", "cancel typing, close", ""),
+];
+
 /// Heading and keys of the right column of the help popup.
 fn view_keys(state: &UiState) -> (&'static str, &'static [Entry]) {
+    if state.settings.is_some() {
+        return ("settings", SETTINGS_KEYS);
+    }
     if state.detail_open {
         return ("order", ORDER_KEYS);
     }
@@ -114,6 +128,19 @@ pub fn footer_groups(state: &UiState, class: WidthClass) -> (Vec<Pair>, Vec<Pair
             .map(order_actions)
             .unwrap_or_default()
     };
+    if let Some(s) = &state.settings {
+        let g2 = if s.edit.is_some() {
+            vec![("?", "keys")]
+        } else {
+            vec![
+                ("Esc", "close"),
+                ("T", "theme"),
+                ("?", "keys"),
+                ("q", "quit"),
+            ]
+        };
+        return (crate::settings::footer_keys(s), g2);
+    }
     if state.detail_open {
         let mut g1 = vec![("Esc", "back")];
         g1.extend(actions());
@@ -137,6 +164,7 @@ pub fn footer_groups(state: &UiState, class: WidthClass) -> (Vec<Pair>, Vec<Pair
                     ("/", "filter"),
                     archived,
                     ("N", "new"),
+                    (",", "settings"),
                     ("?", "keys"),
                     ("q", "quit"),
                 ],
@@ -153,7 +181,15 @@ pub fn footer_groups(state: &UiState, class: WidthClass) -> (Vec<Pair>, Vec<Pair
             } else {
                 vec![("N", "new draft")]
             };
-            (g1, vec![("/", "filter"), ("?", "keys"), ("q", "quit")])
+            (
+                g1,
+                vec![
+                    ("/", "filter"),
+                    (",", "settings"),
+                    ("?", "keys"),
+                    ("q", "quit"),
+                ],
+            )
         }
         View::Money => {
             let g1 = if state.selected_owed().is_some() {
@@ -166,6 +202,7 @@ pub fn footer_groups(state: &UiState, class: WidthClass) -> (Vec<Pair>, Vec<Pair
                 vec![
                     ("1-4", "views"),
                     ("T", "theme"),
+                    (",", "settings"),
                     ("?", "keys"),
                     ("q", "quit"),
                 ],
@@ -177,13 +214,21 @@ pub fn footer_groups(state: &UiState, class: WidthClass) -> (Vec<Pair>, Vec<Pair
             } else {
                 Vec::new()
             };
-            (g1, vec![("/", "filter"), ("?", "keys"), ("q", "quit")])
+            (
+                g1,
+                vec![
+                    ("/", "filter"),
+                    (",", "settings"),
+                    ("?", "keys"),
+                    ("q", "quit"),
+                ],
+            )
         }
     }
 }
 
 /// Keys whose pair goes first when the footer is short.
-const OPTIONAL: [&str; 4] = ["N", "a", "T", "1-4"];
+const OPTIONAL: [&str; 5] = ["N", "a", "T", "1-4", ","];
 
 /// Cells a footer takes: pairs 2 apart, groups joined by `   ·   `.
 pub fn footer_width(g1: &[Pair], g2: &[Pair]) -> usize {
@@ -300,7 +345,9 @@ pub fn render(frame: &mut Frame, area: Rect, cx: &RenderCx) {
         Span::styled("\u{b7}", t.dim()),
         Span::raw("   "),
         Span::styled("T", t.key()),
-        Span::styled(" cycles, [tui] theme keeps it", t.muted()),
+        Span::styled(" picks and keeps a theme  ", t.muted()),
+        Span::styled(",", t.key()),
+        Span::styled(" settings", t.muted()),
     ]);
     let rows = left.len().max(right.len());
     let width = 72.min(area.width.saturating_sub(4));

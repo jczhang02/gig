@@ -9,7 +9,9 @@ pub mod data;
 pub mod editor;
 pub mod help;
 pub mod icons;
+pub mod picker;
 pub mod popup;
+pub mod settings;
 pub mod terminal;
 pub mod text;
 pub mod theme;
@@ -118,12 +120,11 @@ pub fn run(opts: Opts) -> Result<()> {
     let (theme, warning) = catalog.pick(settings.theme.as_deref());
     let mode = theme::ColorMode::detect(|k| std::env::var(k).ok());
     let theme = theme.for_mode(mode);
-    let themes = catalog.themes.iter().map(|t| t.for_mode(mode)).collect();
     let here = std::env::current_dir()
         .ok()
         .and_then(|d| gig_core::context::canonical(d).ok())
         .and_then(|d| gig_core::context::resolve_for(&ctx.conn, &d).ok().flatten());
-    let mut app = app::App::new(ctx, &settings, theme, themes);
+    let mut app = app::App::new(ctx, &settings, theme, catalog, mode);
     app.refresh();
     if let Some(order) = here {
         app.ui.preselect(order.id);

@@ -523,7 +523,7 @@ pub fn scrim(frame: &mut Frame, theme: &Theme) {
 
 /// Rows and cells between the frame and the content.
 const PAD_Y: u16 = 1;
-const PAD_X: u16 = 2;
+pub(crate) const PAD_X: u16 = 2;
 
 /// Where a popup of `width` x `height` goes: centred horizontally, its top
 /// on the upper third, inside `area` less one row.
@@ -607,7 +607,7 @@ const FORM_WIDTH: u16 = 64;
 const NOTE_WIDTH: u16 = 56;
 
 /// A key hint line: keys bold `key`, labels `muted`, pairs 2 apart.
-fn hint_line(t: &Theme, pairs: &[(&str, &str)]) -> Line<'static> {
+pub(crate) fn hint_line(t: &Theme, pairs: &[(&str, &str)]) -> Line<'static> {
     let mut spans = Vec::new();
     for (i, (k, label)) in pairs.iter().enumerate() {
         if i > 0 {

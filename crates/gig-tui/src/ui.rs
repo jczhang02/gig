@@ -98,12 +98,13 @@ pub fn shell(area: Rect, state: &UiState) -> Shell {
     let class = WidthClass::of(area.width);
     let has_pane = class != WidthClass::Narrow
         && !state.detail_open
+        && state.settings.is_none()
         && match state.view {
             View::Orders => true,
             View::Drafts => state.notes_pane.is_some(),
             _ => false,
         };
-    let (body, pane) = if state.detail_open {
+    let (body, pane) = if state.detail_open && state.settings.is_none() {
         // Full-screen detail: left margin 2, prose measure 76.
         let w = area.width.saturating_sub(4).min(76);
         (Rect::new(area.x + 2, area.y + 2, w, body_h), None)
@@ -126,6 +127,21 @@ pub fn shell(area: Rect, state: &UiState) -> Shell {
 }
 
 pub fn draw(frame: &mut Frame, cx: &RenderCx) {
+    // The theme picker previews the highlighted theme on the whole screen.
+    if let Some(preview) = cx.state.picker.as_ref().and_then(|p| p.preview()) {
+        if preview != cx.theme {
+            let cx = RenderCx {
+                state: cx.state,
+                theme: preview,
+                icons: cx.icons,
+            };
+            return draw_frame(frame, &cx);
+        }
+    }
+    draw_frame(frame, cx)
+}
+
+fn draw_frame(frame: &mut Frame, cx: &RenderCx) {
     let area = frame.area();
     let t = cx.theme;
     if !t.no_color() {
@@ -150,7 +166,9 @@ pub fn draw(frame: &mut Frame, cx: &RenderCx) {
     let s = shell(area, cx.state);
     draw_banner(frame, s.banner, cx);
     draw_message(frame, s.message, cx);
-    if cx.state.detail_open {
+    if let Some(settings) = &cx.state.settings {
+        crate::settings::render(frame, s.body, cx, settings);
+    } else if cx.state.detail_open {
         views::detail::render(frame, s.body, cx, true);
     } else {
         views::render(frame, s.body, cx.state.view, cx);
@@ -164,6 +182,9 @@ pub fn draw(frame: &mut Frame, cx: &RenderCx) {
     draw_footer(frame, s.footer, cx);
     if cx.state.help_open {
         help::render(frame, area, cx);
+    }
+    if let Some(p) = &cx.state.picker {
+        crate::picker::render(frame, area, p, cx.theme);
     }
     if let Some(p) = &cx.state.popup {
         popup::render(frame, area, p, cx.theme);
@@ -598,7 +619,8 @@ mod tests {
                 "keys",
                 "refresh",
                 "close, clear",
-                "next theme",
+                "theme picker",
+                "settings",
                 "mark sent",
                 "when a package is checked",
                 "theme gig-dark",
@@ -616,14 +638,14 @@ mod tests {
         for s in [
             "\u{2502}  global                orders",
             "\u{2502}     ?  keys               s  start      when queued or delivered",
-            "\u{2502} Enter  open               m  mark sent",
+            "\u{2502} Enter  open               U  upload artifact",
         ] {
             assert!(text.contains(s), "{s}\n{text}");
         }
         // Too short for every key: both columns scroll, with markers.
         let mut state = state;
         let text = all(&render(60, 16, &state, true));
-        assert!(text.contains("\u{2193} 5 more"), "{text}");
+        assert!(text.contains("\u{2193} 6 more"), "{text}");
         assert!(!text.contains("above"), "{text}");
         state.help_scroll.offset = 99;
         let text = all(&render(60, 16, &state, true));
@@ -1126,7 +1148,7 @@ mod tests {
         let wide = row(&render(200, 50, &state, true), 49);
         assert!(
             wide.starts_with(
-                " p paid  y copy link  n note  k score   \u{b7}   / filter  a archived  N new  ? keys  q quit"
+                " p paid  y copy link  n note  k score   \u{b7}   / filter  a archived  N new  , settings  ? keys  q quit"
             ),
             "{wide}"
         );
@@ -1161,7 +1183,7 @@ mod tests {
         m.view = View::Money;
         let line = row(&render(120, 36, &m, true), 35);
         assert!(
-            line.contains("1-4 views  T theme  ? keys  q quit"),
+            line.contains("1-4 views  T theme  , settings  ? keys  q quit"),
             "{line}"
         );
         // Long filter text keeps its end and the cursor.
@@ -1697,5 +1719,155 @@ mod tests {
         let text = all(&render(80, 24, &state, false));
         let (_, l) = line_of(&text, "dr-ocr").unwrap();
         assert!(l.contains("10d") && l.contains("发票识别") && l.contains("/mnt/m/ocr"));
+    }
+
+    fn settings_state() -> UiState {
+        use gig_core::config::Config;
+        let file = Config::default();
+        let mut running = file.clone();
+        running.tui.icons = false;
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/home/x".into());
+        let mut s = crate::settings::Settings::new(
+            Ok(file),
+            &running,
+            &std::path::Path::new(&home).join(".config/gig/config.toml"),
+        );
+        s.cursor = 2;
+        s.errors[2] =
+            Some("invalid input: tui.refresh_seconds must be a whole number from 0 to 60".into());
+        UiState {
+            settings: Some(s),
+            ..sample()
+        }
+    }
+
+    #[test]
+    fn settings_overlay_at_80x24_and_160x45() {
+        let state = settings_state();
+        for (w, h) in [(80u16, 24u16), (160, 45)] {
+            let buf = render(w, h, &state, true);
+            let text = all(&buf);
+            if std::env::var_os("GIG_PRINT").is_some() {
+                println!("{text}");
+            }
+            // Every schema row: key path, value and help.
+            for e in gig_core::config::schema::ENTRIES {
+                assert!(text.contains(e.key), "{w}x{h}: {}\n{text}", e.key);
+                assert!(text.contains(e.help), "{w}x{h}: {}\n{text}", e.help);
+            }
+            for s in [
+                "Settings",
+                "writes ~/.config/gig/config.toml",
+                "Dashboard",
+                "General",
+                "\u{2039} gig-dark \u{203a}",
+                "[x] yes",
+                "this session no",
+                "! invalid input: tui.refresh_seconds must be a whole number",
+                "0.6",
+                "CNY",
+            ] {
+                assert!(text.contains(s), "{w}x{h}: {s}\n{text}");
+            }
+            // The orders list is hidden; the footer names the row's keys.
+            assert!(!text.contains("tk-denoise"), "{text}");
+            let footer = row(&buf, h - 1);
+            assert!(footer.contains("+ - step  Enter type"), "{footer}");
+            assert!(footer.contains("Esc close"), "{footer}");
+            for y in 0..h {
+                assert!(crate::text::width(&row(&buf, y)) <= usize::from(w));
+            }
+            // The cursor row: accent marker on the sel band.
+            let (y, _) = line_of(&text, "tui.refresh_seconds").unwrap();
+            let y = y as u16;
+            assert_eq!(buf[(1, y)].symbol(), crate::views::SELECTED_MARK);
+            assert_eq!(buf[(1, y)].fg, Theme::DARK.accent);
+            assert_eq!(buf[(40, y)].bg, Theme::DARK.sel);
+            assert_eq!(buf[(40, y + 1)].bg, Theme::DARK.sel, "help line too");
+        }
+        // Typing: the value shows what is typed and the cursor sits after it.
+        let mut state = settings_state();
+        state.settings.as_mut().unwrap().edit = Some("61".into());
+        let text = all(&render(80, 24, &state, true));
+        let (_, l) = line_of(&text, "tui.refresh_seconds").unwrap();
+        assert!(l.trim_end().ends_with("61"), "{l}");
+        assert!(row(&render(80, 24, &state, true), 23).contains("Enter save"));
+    }
+
+    #[test]
+    fn settings_scroll_keeps_the_cursor_row_in_view() {
+        let mut state = settings_state();
+        state.settings.as_mut().unwrap().cursor = 6;
+        let text = all(&render(60, 16, &state, false));
+        assert!(text.contains("general.default_cut_ratio"), "{text}");
+        assert!(text.contains("above"), "{text}");
+        state.settings.as_mut().unwrap().cursor = 0;
+        let text = all(&render(60, 16, &state, false));
+        assert!(text.contains("tui.theme"), "{text}");
+        assert!(text.contains("more"), "{text}");
+    }
+
+    fn picker_state(current: &str) -> UiState {
+        let mut catalog = crate::themes::Catalog::load(std::path::Path::new("/nonexistent"));
+        let mut mine = Theme::NORD.clone();
+        mine.name = "mocha-soft".into();
+        catalog.themes.push(mine);
+        catalog.user.insert("mocha-soft".into());
+        catalog.broken.push(crate::themes::Broken {
+            path: "/t/murky.toml".into(),
+            name: "murky".into(),
+            detail: "missing key \"bar\"".into(),
+        });
+        UiState {
+            picker: Some(crate::picker::Picker::new(
+                &catalog,
+                current,
+                crate::theme::ColorMode::TrueColor,
+            )),
+            ..sample()
+        }
+    }
+
+    #[test]
+    fn theme_picker_lists_marks_and_previews() {
+        let mut state = picker_state("gig-dark");
+        for (w, h) in [(80u16, 24u16), (160, 45)] {
+            let buf = render(w, h, &state, true);
+            let text = all(&buf);
+            if std::env::var_os("GIG_PRINT").is_some() {
+                println!("{text}");
+            }
+            let names: Vec<usize> = Theme::BUILTIN
+                .iter()
+                .map(|t| line_of(&text, &format!(" {} ", t.name)).unwrap().0)
+                .collect();
+            assert!(names.windows(2).all(|p| p[0] < p[1]), "built-in order");
+            let (user, l) = line_of(&text, "mocha-soft").unwrap();
+            assert!(user > names[7] && l.contains("file"), "{l}");
+            let (broken, l) = line_of(&text, "murky").unwrap();
+            assert!(broken > user && l.contains("! missing key \"bar\""), "{l}");
+            let (y, l) = line_of(&text, "gig-dark ").unwrap();
+            assert!(l.contains("current"), "{l}");
+            // Five swatches: bg, text, accent, unpaid, warranty.
+            let x = l.find('\u{2588}').map(|b| l[..b].chars().count()).unwrap() as u16;
+            let t = Theme::DARK;
+            for (k, c) in [t.bg, t.text, t.accent, t.unpaid, t.warranty]
+                .iter()
+                .enumerate()
+            {
+                assert_eq!(buf[(x + 3 * k as u16, y as u16)].fg, *c, "swatch {k}");
+            }
+            assert!(text.contains("Enter keep  c copy  Esc restore"), "{text}");
+        }
+        // Moving previews the whole screen: the page bg is nord's.
+        state.picker.as_mut().unwrap().cursor = 6;
+        let buf = render(80, 24, &state, true);
+        assert_eq!(buf[(0, 0)].bg, Theme::NORD.bg);
+        let text = all(&buf);
+        let (_, l) = line_of(&text, "gig-dark ").unwrap();
+        assert!(l.contains("current"), "the current mark stays: {l}");
+        // Closing restores (the app's theme was never changed).
+        state.picker = None;
+        assert_eq!(render(80, 24, &state, true)[(0, 0)].bg, Theme::DARK.bg);
     }
 }

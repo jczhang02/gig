@@ -3,13 +3,16 @@
 use crate::actions::{self, Action, Effect};
 use crate::data::{JobCache, OrderRow, Snapshot};
 use crate::icons::Icons;
+use crate::picker::{PickCmd, Picker};
 use crate::popup::{Form, Popup, Scroll};
+use crate::settings::{self, Cmd, Settings};
 use crate::terminal::{self, Term};
-use crate::theme::Theme;
+use crate::theme::{ColorMode, Theme};
+use crate::themes::{Catalog, Stamps};
 use crate::ui::{self, WidthClass};
 use crate::upload::{self, UploadJob};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use gig_core::config::Tui;
+use gig_core::config::{Config, Tui};
 use gig_core::delivery::configured_uploader;
 use gig_core::models::Draft;
 use gig_core::services::Ctx;
@@ -166,6 +169,10 @@ pub struct UiState {
     /// The last submitted form while its call is pending or was refused:
     /// closing the refusal brings it back with everything typed.
     pub last_form: Option<Form>,
+    /// `,`: the full-screen Settings overlay (TUI-SPEC 8.1).
+    pub settings: Option<Settings>,
+    /// `T` or the theme row: the theme picker, previewing as it moves.
+    pub picker: Option<Picker>,
 }
 
 impl Default for UiState {
@@ -186,6 +193,8 @@ impl Default for UiState {
             show_closed: false,
             detail_scroll: Scroll::default(),
             last_form: None,
+            settings: None,
+            picker: None,
         }
     }
 }
@@ -203,8 +212,17 @@ pub enum Outcome {
     Act(Effect),
     /// Ctrl+L: clear the terminal and draw everything again.
     Redraw,
-    /// `T`: the next theme.
-    CycleTheme,
+    /// `,`: open Settings (the app reads config.toml for it).
+    OpenSettings,
+    /// `T`, or Enter on the theme row: open the theme picker.
+    OpenPicker,
+    /// A settings change to validate and write through gig-core.
+    WriteSetting {
+        key: &'static str,
+        raw: String,
+    },
+    /// `c` in the picker: copy a built-in theme to a file and edit it.
+    CopyTheme(String),
     /// Not a key of this app state: the current view may use it.
     Unhandled(KeyEvent),
 }
@@ -376,7 +394,12 @@ impl UiState {
         match &mut self.popup {
             Some(Popup::Form(form)) => form.paste(&clean),
             Some(_) => {}
-            None if self.help_open => {}
+            None if self.picker.is_some() || self.help_open => {}
+            None if self.settings.is_some() => {
+                if let Some(s) = &mut self.settings {
+                    s.paste(&clean);
+                }
+            }
             None => {
                 if self.filter().editing {
                     self.filter_mut().text.push_str(&clean);
@@ -404,6 +427,29 @@ impl UiState {
         if self.popup.is_some() {
             return Outcome::Act(actions::popup_key(self, key));
         }
+        if let Some(p) = &mut self.picker {
+            return match p.key(key) {
+                PickCmd::None => Outcome::None,
+                PickCmd::Close => {
+                    self.picker = None;
+                    Outcome::None
+                }
+                PickCmd::Keep(name) => {
+                    self.picker = None;
+                    Outcome::WriteSetting {
+                        key: "tui.theme",
+                        raw: name,
+                    }
+                }
+                PickCmd::Copy(name) => Outcome::CopyTheme(name),
+                PickCmd::NotBuiltin(name) => {
+                    self.toast = Some(Toast::warn(format!(
+                        "c copies a built-in; {name} is a theme file already"
+                    )));
+                    Outcome::None
+                }
+            };
+        }
         if self.help_open {
             match key.code {
                 KeyCode::Esc | KeyCode::Char('?') => self.help_open = false,
@@ -413,6 +459,23 @@ impl UiState {
                 }
             }
             return Outcome::None;
+        }
+        if let Some(s) = &mut self.settings {
+            return match s.key(key) {
+                Cmd::None => Outcome::None,
+                Cmd::Close => {
+                    self.settings = None;
+                    Outcome::None
+                }
+                Cmd::Quit => Outcome::Quit,
+                Cmd::Help => {
+                    self.help_open = true;
+                    self.help_scroll.offset = 0;
+                    Outcome::None
+                }
+                Cmd::Pick => Outcome::OpenPicker,
+                Cmd::Write { key, raw } => Outcome::WriteSetting { key, raw },
+            };
         }
         if self.filter().editing {
             let f = self.filter_mut();
@@ -453,7 +516,8 @@ impl UiState {
                 Outcome::None
             }
             KeyCode::Char('r') => Outcome::Refresh,
-            KeyCode::Char('T') => Outcome::CycleTheme,
+            KeyCode::Char('T') => Outcome::OpenPicker,
+            KeyCode::Char(',') => Outcome::OpenSettings,
             KeyCode::Char(c @ '1'..='4') => {
                 if let Some(v) = View::from_digit(c) {
                     self.switch(v);
@@ -541,11 +605,21 @@ pub struct App {
     pub ctx: Ctx,
     pub ui: UiState,
     pub theme: Theme,
-    /// Every theme `T` cycles through, as the terminal draws them.
-    pub themes: Vec<Theme>,
+    /// Every available theme and the files that failed to load, as read
+    /// from the themes directory (reloaded when a file changes).
+    pub catalog: Catalog,
+    /// How this terminal draws colour; applied to every theme.
+    pub mode: ColorMode,
+    /// The running `[tui]` settings: config, flags and env at start, then
+    /// every change accepted in Settings.
+    pub running: Tui,
     pub icons: Icons,
     /// `None` when `refresh_seconds` is 0.
     pub refresh_every: Option<Duration>,
+    /// When the refresh timer fires next; `None` while it is off.
+    pub next_tick: Option<Instant>,
+    /// Theme file modification times at the last check (hot reload).
+    stamps: Stamps,
     /// Created on first copy and kept: on X11 the clipboard text lives only
     /// as long as this handle. `Err` remembers that there is no clipboard.
     clipboard: Option<std::result::Result<arboard::Clipboard, String>>,
@@ -560,37 +634,192 @@ const IDLE_POLL: Duration = Duration::from_secs(60);
 const UPLOAD_TICK: Duration = Duration::from_millis(80);
 
 impl App {
-    pub fn new(ctx: Ctx, settings: &Tui, theme: Theme, themes: Vec<Theme>) -> Self {
-        Self {
+    /// `theme` is the one picked from `catalog` for `settings.theme`, already
+    /// drawn in `mode`.
+    pub fn new(ctx: Ctx, settings: &Tui, theme: Theme, catalog: Catalog, mode: ColorMode) -> Self {
+        let stamps = Stamps::scan(&ctx.paths.themes_dir());
+        let mut running = settings.clone();
+        running.theme = Some(theme.name.to_string());
+        let mut app = Self {
             ctx,
             ui: UiState::default(),
             theme,
-            themes,
+            catalog,
+            mode,
+            running,
             icons: Icons::new(settings.icons),
-            refresh_every: (settings.refresh_seconds > 0)
-                .then(|| Duration::from_secs(settings.refresh_seconds)),
-            // (An absurd interval simply never fires; see `run_loop`.)
+            refresh_every: None,
+            next_tick: None,
+            stamps,
             clipboard: None,
             jobs: JobCache::default(),
+        };
+        app.set_refresh(settings.refresh_seconds);
+        app
+    }
+
+    /// Start (or stop, at 0) the refresh timer. An absurd interval
+    /// (`--refresh` of centuries) means no timer rather than an overflow.
+    fn set_refresh(&mut self, seconds: u64) {
+        self.refresh_every = (seconds > 0).then(|| Duration::from_secs(seconds));
+        self.next_tick = self
+            .refresh_every
+            .and_then(|d| Instant::now().checked_add(d));
+    }
+
+    /// The running config as Settings compares it with the file.
+    fn running_config(&self) -> Config {
+        Config {
+            general: self.ctx.config.general.clone(),
+            tui: self.running.clone(),
+            ..Config::default()
         }
     }
 
-    /// `T`: the theme after the current one, wrapping. Not persisted.
-    pub fn cycle_theme(&mut self) {
-        let n = self.themes.len();
-        if n == 0 {
+    /// `,`: read config.toml and open the overlay.
+    pub fn open_settings(&mut self) {
+        let path = self.ctx.paths.config_file.clone();
+        let file = settings::file_config(&path);
+        self.ui.settings = Some(Settings::new(file, &self.running_config(), &path));
+    }
+
+    /// `T` or the theme row: the picker over the current catalog.
+    pub fn open_picker(&mut self) {
+        self.ui.picker = Some(Picker::new(&self.catalog, &self.theme.name, self.mode));
+    }
+
+    /// One settings change: gig-core validates and writes it in place; a
+    /// refusal goes under the row (or to the message row when Settings is
+    /// closed) and nothing changes. An accepted value takes effect at once,
+    /// over any flag or `GIG_*` variable that set it at start.
+    pub fn write_setting(&mut self, key: &'static str, raw: &str) {
+        let file = match Config::set_in_file(&self.ctx.paths.config_file, key, raw) {
+            Ok(cfg) => cfg,
+            Err(e) => {
+                let msg = e.to_string();
+                match &mut self.ui.settings {
+                    Some(s) if Settings::index(key).is_some() => s.refused(key, msg),
+                    _ => self.ui.toast = Some(Toast::error(msg)),
+                }
+                return;
+            }
+        };
+        let mut warning = None;
+        match key {
+            "tui.theme" => {
+                let (theme, w) = self.catalog.pick(file.tui.theme.as_deref());
+                self.theme = theme.for_mode(self.mode);
+                self.running.theme = Some(self.theme.name.to_string());
+                warning = w;
+            }
+            "tui.icons" => {
+                self.running.icons = file.tui.icons;
+                self.icons = Icons::new(file.tui.icons);
+            }
+            "tui.refresh_seconds" => {
+                self.running.refresh_seconds = file.tui.refresh_seconds;
+                self.set_refresh(file.tui.refresh_seconds);
+            }
+            "tui.mouse" => self.running.mouse = file.tui.mouse,
+            _ => {
+                // `general.*`: the services read ctx.config, so new orders
+                // pick the value up at once.
+                if let Err(e) = self.ctx.config.set(key, raw) {
+                    warning = Some(e.to_string());
+                }
+            }
+        }
+        let running = self.running_config();
+        if let Some(s) = &mut self.ui.settings {
+            s.accepted(key);
+            s.update(&file, &running);
+        }
+        let shown = settings::raw_value(&file, key);
+        self.ui.toast = Some(match warning {
+            Some(w) => Toast::warn(w),
+            None => Toast::info(format!("saved {key} = {shown}")),
+        });
+    }
+
+    /// `c` in the picker: write `<themes_dir>/<name>-copy.toml` (an existing
+    /// copy is kept) and return it for `$EDITOR`. A failure is shown and
+    /// gives `None`.
+    pub fn copy_theme(&mut self, name: &str) -> Option<std::path::PathBuf> {
+        match crate::themes::copy_builtin(&self.ctx.paths.themes_dir(), name) {
+            Ok((path, _)) => Some(path),
+            Err(e) => {
+                self.ui.toast = Some(Toast::error(format!("theme copy: {e}")));
+                None
+            }
+        }
+    }
+
+    /// After `$EDITOR` closed on a copied theme: reload the catalog and put
+    /// the picker's cursor on the copy, previewing it.
+    pub fn after_theme_edit(&mut self, path: &std::path::Path) {
+        let name = path
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        self.reload_themes();
+        if let Some(p) = &self.ui.picker {
+            self.ui.picker = Some(p.rebuilt(&self.catalog, &name, self.mode));
+        }
+        if let Some(b) = self.catalog.broken.iter().find(|b| b.name == name) {
+            self.ui.toast = Some(Toast::warn(b.reason()));
+        } else {
+            self.ui.toast = Some(Toast::info(format!("theme {name}  \u{b7}  Enter keeps it")));
+        }
+    }
+
+    /// The refresh tick: new data, then hot reload of theme files.
+    pub fn tick(&mut self) {
+        self.refresh();
+        self.check_themes();
+    }
+
+    /// Hot reload (TUI-SPEC 8.1): when a file in the themes directory was
+    /// added, removed or rewritten since the last check, reload the catalog;
+    /// a changed current theme applies at once, a current file that broke
+    /// keeps the colours loaded before and says why.
+    pub fn check_themes(&mut self) {
+        let stamps = Stamps::scan(&self.ctx.paths.themes_dir());
+        if stamps == self.stamps {
             return;
         }
-        let at = self
-            .themes
-            .iter()
-            .position(|t| t.name == self.theme.name)
-            .map_or(0, |i| (i + 1) % n);
-        self.theme = self.themes[at].clone();
-        self.ui.toast = Some(Toast::info(format!(
-            "theme {}  \u{b7}  set [tui] theme to keep",
-            self.theme.name
-        )));
+        self.stamps = stamps;
+        self.reload_themes();
+        if let Some(p) = &self.ui.picker {
+            let at = p.highlighted().unwrap_or_default().to_string();
+            self.ui.picker = Some(p.rebuilt(&self.catalog, &at, self.mode));
+        }
+        let name = self.theme.name.to_string();
+        if !self.catalog.user.contains(&name) {
+            if let Some(b) = self.catalog.broken.iter().find(|b| b.name == name) {
+                self.ui.toast = Some(Toast::warn(format!(
+                    "{}, keeping the colours loaded before",
+                    b.reason()
+                )));
+            }
+            return;
+        }
+        if let Some(t) = self.catalog.get(&name) {
+            let t = t.for_mode(self.mode);
+            if t != self.theme {
+                self.theme = t;
+                let note = match self.theme.contrast_failure() {
+                    Some(f) => Toast::warn(format!("theme {name} reloaded: {f}")),
+                    None => Toast::info(format!("theme {name} reloaded")),
+                };
+                self.ui.toast = Some(note);
+            }
+        }
+    }
+
+    fn reload_themes(&mut self) {
+        let dir = self.ctx.paths.themes_dir();
+        self.stamps = Stamps::scan(&dir);
+        self.catalog = Catalog::load(&dir);
     }
 
     /// Reload the snapshot. Errors land on the hint line; nothing is retried.
@@ -605,16 +834,11 @@ impl App {
     }
 
     pub fn run_loop(&mut self, term: &mut Term) -> Result<()> {
-        // `checked_add`: an absurd interval (`--refresh` of centuries) means
-        // no timer rather than an overflow panic.
-        let mut next_tick = self
-            .refresh_every
-            .and_then(|d| Instant::now().checked_add(d));
         loop {
             self.draw(term)?;
 
             let toast_until = self.ui.toast.as_ref().and_then(|t| t.until);
-            let wake = match (next_tick, toast_until) {
+            let wake = match (self.next_tick, toast_until) {
                 (Some(a), Some(b)) => Some(a.min(b)),
                 (a, b) => a.or(b),
             };
@@ -626,13 +850,9 @@ impl App {
                 match event::read()? {
                     Event::Key(key) => {
                         let width = term.size()?.width;
-                        match self.ui.handle_key(key, width) {
-                            Outcome::Quit => return Ok(()),
-                            Outcome::Refresh => self.refresh(),
-                            Outcome::Redraw => term.clear()?,
-                            Outcome::CycleTheme => self.cycle_theme(),
-                            Outcome::Act(effect) => self.apply(effect, term)?,
-                            Outcome::None | Outcome::Unhandled(_) => {}
+                        let outcome = self.ui.handle_key(key, width);
+                        if self.outcome(outcome, term)? {
+                            return Ok(());
                         }
                     }
                     Event::Paste(text) => self.ui.handle_paste(&text),
@@ -643,13 +863,54 @@ impl App {
             if toast_until.is_some_and(|t| Instant::now() >= t) {
                 self.ui.toast = None;
             }
-            if let (Some(t), Some(every)) = (next_tick, self.refresh_every) {
+            if let (Some(t), Some(every)) = (self.next_tick, self.refresh_every) {
                 if Instant::now() >= t {
-                    self.refresh();
-                    next_tick = Instant::now().checked_add(every);
+                    self.tick();
+                    self.next_tick = Instant::now().checked_add(every);
                 }
             }
         }
+    }
+
+    /// Carry out the outcomes that need no terminal (settings, the theme
+    /// picker, refresh); the others are handed back.
+    pub fn settle(&mut self, outcome: Outcome) -> Option<Outcome> {
+        match outcome {
+            Outcome::Refresh => {
+                self.refresh();
+                self.check_themes();
+            }
+            Outcome::OpenSettings => self.open_settings(),
+            Outcome::OpenPicker => self.open_picker(),
+            Outcome::WriteSetting { key, raw } => self.write_setting(key, &raw),
+            Outcome::None | Outcome::Unhandled(_) => {}
+            other => return Some(other),
+        }
+        None
+    }
+
+    /// Carry out what a key asked for; true means quit.
+    fn outcome(&mut self, outcome: Outcome, term: &mut Term) -> Result<bool> {
+        let Some(outcome) = self.settle(outcome) else {
+            return Ok(false);
+        };
+        match outcome {
+            Outcome::Quit => return Ok(true),
+            Outcome::Redraw => term.clear()?,
+            Outcome::Act(effect) => self.apply(effect, term)?,
+            Outcome::CopyTheme(name) => {
+                if let Some(path) = self.copy_theme(&name) {
+                    match terminal::suspend_while(term, || crate::editor::edit_file(&path))? {
+                        Ok(()) => {}
+                        Err(e) if crate::editor::is_exit_failure(&e) => {}
+                        Err(e) => self.editor_failed(e),
+                    }
+                    self.after_theme_edit(&path);
+                }
+            }
+            _ => {}
+        }
+        Ok(false)
     }
 
     /// Carry out an action effect. gig-core calls end with a refresh whether
@@ -1008,9 +1269,10 @@ mod tests {
     }
 
     #[test]
-    fn t_cycles_themes_and_money_enter_opens_the_order() {
+    fn t_opens_the_picker_and_money_enter_opens_the_order() {
         let mut s = with_orders();
-        assert_eq!(press(&mut s, KeyCode::Char('T')), Outcome::CycleTheme);
+        assert_eq!(press(&mut s, KeyCode::Char('T')), Outcome::OpenPicker);
+        assert_eq!(press(&mut s, KeyCode::Char(',')), Outcome::OpenSettings);
         press(&mut s, KeyCode::Char('3'));
         // Owed: o7 (59 days), o6 (1 day), o10 (unknown).
         assert_eq!(s.selected_owed(), Some(7));
