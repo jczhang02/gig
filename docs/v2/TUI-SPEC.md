@@ -91,3 +91,25 @@ Themes: built-in `gig-dark`, `gig-light`, `catppuccin-mocha`, `catppuccin-latte`
 ## 7. Out of scope
 
 Package building (files and manifest are the agent's job), archive execution, deleting anything, browser opening, launching agents, theme detection from the terminal background (OSC 11), hot reload of theme files.
+
+## 8. In-app settings and mouse (added 2026-09-29)
+
+Decided by the agent on JC's instruction after a shortened grill; every point follows the agent's recommendation.
+
+### 8.1 Settings
+
+- Entry: `,` opens Settings as a full-screen overlay (not a banner tab); Esc closes it. `?` lists it.
+- Data-driven: gig-core exposes a settings schema, one entry per editable key: key path, label, type (toggle | integer with range | select with options | text), one line of help, section. The view renders whatever the schema holds; adding a key is one schema line.
+- Editable keys: `tui.theme` (select), `tui.icons` (toggle), `tui.refresh_seconds` (integer 0..60), `tui.mouse` (toggle, new), `general.warranty_days` (integer 0..365), `general.default_currency` (text), `general.default_cut_ratio` (number 0..1). Paths, the uploader, endpoints and secrets are not editable in the app.
+- Editing in place: toggles flip with Space or Enter; integers with `+`/`-` or typed; selects open a picker popup; text a single-line field. Each row shows the key path, the current value and its help line.
+- Persistence: every accepted change is written to `config.toml` immediately through gig-core, which now edits the file in place with `toml_edit` (comments and key order preserved; `gig config set` uses the same path). A refused value shows the gig-core error under the row and writes nothing.
+- Theme picker (`T` and the `tui.theme` row): popup list, built-ins first then user files, current one marked, a five-swatch strip per row (bg, text, accent, unpaid, warranty). Moving the cursor previews the whole screen live; Enter keeps it and writes `tui.theme`; Esc restores. Files that fail to load are listed dimmed with the error. `c` copies the highlighted built-in to `<config_dir>/themes/<name>-copy.toml` and opens it in `$EDITOR`. `T` no longer cycles blindly.
+- Hot reload: theme files are re-read when their mtime changes, checked on the refresh tick.
+
+### 8.2 Mouse
+
+- On by default (`tui.mouse`, `--mouse`/`--no-mouse`); `M` toggles capture at runtime for native text selection, with a toast.
+- Clicks: a list row selects it; double-click opens the detail; a banner tab switches views; a popup's Confirm/Cancel buttons act as their keys; a click outside a popup closes it (cancel for confirms, discard for forms, same as Esc); footer key hints are buttons that run the key with the same confirmations; a short link copies it to the clipboard with a toast (never opens a browser).
+- Wheel scrolls whatever pane the pointer is over (list, detail, popup body, settings).
+- Money: clicking a bar selects that month and lists its paid orders under the chart; clicking an outstanding row jumps to that order in Orders. History: click selects, double-click opens the detail.
+- No hover effects, no drag-resize, no context menus.
