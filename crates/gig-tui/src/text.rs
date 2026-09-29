@@ -1,14 +1,17 @@
 //! Display-width helpers. Titles may be Chinese, so columns are measured in
 //! terminal cells (unicode-width), never in bytes or chars (spec section 3).
 
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthStr;
 
 /// The ellipsis appended when text is cut. One cell wide.
 pub const ELLIPSIS: char = '\u{2026}';
 
 /// Cells `s` takes on screen once control characters are shown as spaces.
+/// Measured per grapheme cluster, as ratatui draws it, so emoji with a
+/// variation selector or a ZWJ sequence count as the terminal shows them.
 pub fn width(s: &str) -> usize {
-    s.chars().map(cell_width).sum()
+    flatten(s).graphemes(true).map(grapheme_width).sum()
 }
 
 /// `s` on one line, cut to at most `max` cells with a trailing ellipsis when
@@ -16,11 +19,8 @@ pub fn width(s: &str) -> usize {
 /// multi-line note cannot break a row. The result may be one cell short of
 /// `max` when a double-width character would straddle the edge.
 pub fn truncate(s: &str, max: usize) -> String {
-    let flat: String = s
-        .chars()
-        .map(|c| if c.is_control() { ' ' } else { c })
-        .collect();
-    if flat.width() <= max {
+    let flat = flatten(s);
+    if width(&flat) <= max {
         return flat;
     }
     if max == 0 {
@@ -29,16 +29,44 @@ pub fn truncate(s: &str, max: usize) -> String {
     let budget = max - 1;
     let mut out = String::new();
     let mut used = 0;
-    for c in flat.chars() {
-        let w = cell_width(c);
+    for g in flat.graphemes(true) {
+        let w = grapheme_width(g);
         if used + w > budget {
             break;
         }
         used += w;
-        out.push(c);
+        out.push_str(g);
     }
     out.push(ELLIPSIS);
     out
+}
+
+/// `s` on one line, cut from the left to at most `max` cells with a
+/// leading ellipsis: for paths, where the end names the thing.
+pub fn truncate_left(s: &str, max: usize) -> String {
+    let flat = flatten(s);
+    if width(&flat) <= max {
+        return flat;
+    }
+    if max == 0 {
+        return String::new();
+    }
+    format!("{ELLIPSIS}{}", tail(&flat, max - 1))
+}
+
+/// The last `max` cells of `s` (whole grapheme clusters only).
+pub fn tail(s: &str, max: usize) -> String {
+    let mut used = 0;
+    let mut start = s.len();
+    for (i, g) in s.grapheme_indices(true).rev() {
+        let w = grapheme_width(g);
+        if used + w > max {
+            break;
+        }
+        used += w;
+        start = i;
+    }
+    s[start..].to_string()
 }
 
 /// `truncate`, then right-pad with spaces to exactly `cells` wide.
@@ -49,34 +77,68 @@ pub fn fit(s: &str, cells: usize) -> String {
     out
 }
 
-/// `s` split into rows of at most `width` cells (hard wrap, no word
-/// breaking, so CJK text wraps too). Control characters become spaces. An
-/// empty `s` is one empty row; a zero width yields one row per character.
+/// `s` split into rows of at most `width` cells. Rows break after the last
+/// space (or after a wide CJK character) that fits, so English words stay
+/// whole; a word longer than the row is cut hard. Control characters become
+/// spaces. An empty `s` is one empty row; a zero width is treated as 1.
 pub fn wrap(s: &str, width: usize) -> Vec<String> {
     let width = width.max(1);
-    let mut rows = vec![String::new()];
+    let flat = flatten(s);
+    let mut rows = Vec::new();
+    let mut row = String::new();
     let mut used = 0;
-    for c in s.chars() {
-        let c = if c.is_control() { ' ' } else { c };
-        let w = cell_width(c);
+    // Byte offset in `row` just after the last break opportunity, and the
+    // cells used up to it.
+    let mut brk: Option<(usize, usize)> = None;
+    for g in flat.graphemes(true) {
+        let w = grapheme_width(g);
         if used + w > width && used > 0 {
-            rows.push(String::new());
-            used = 0;
+            if g == " " {
+                // The space itself is the break; it is not carried over.
+                rows.push(row.trim_end().to_string());
+                row = String::new();
+                used = 0;
+                brk = None;
+                continue;
+            }
+            match brk {
+                Some((at, cells)) => {
+                    let rest = row.split_off(at);
+                    rows.push(row.trim_end().to_string());
+                    row = rest;
+                    used -= cells;
+                }
+                None => {
+                    rows.push(std::mem::take(&mut row));
+                    used = 0;
+                }
+            }
+            brk = None;
+            // The carried-over word may still leave no room.
+            if used + w > width && used > 0 {
+                rows.push(std::mem::take(&mut row));
+                used = 0;
+            }
         }
+        row.push_str(g);
         used += w;
-        if let Some(row) = rows.last_mut() {
-            row.push(c);
+        if g == " " || w > 1 {
+            brk = Some((row.len(), used));
         }
     }
+    rows.push(row);
     rows
 }
 
-fn cell_width(c: char) -> usize {
-    if c.is_control() {
-        1
-    } else {
-        c.width().unwrap_or(0)
-    }
+/// Control characters shown as spaces.
+fn flatten(s: &str) -> String {
+    s.chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect()
+}
+
+fn grapheme_width(g: &str) -> usize {
+    g.width()
 }
 
 #[cfg(test)]
@@ -137,6 +199,50 @@ mod tests {
         for row in wrap("SERS 数据分析 and more text", 7) {
             assert!(width(&row) <= 7, "{row}");
         }
+    }
+
+    #[test]
+    fn wrap_keeps_words_whole() {
+        assert_eq!(
+            wrap("cannot start. delivered", 16),
+            vec!["cannot start.", "delivered"]
+        );
+        assert_eq!(
+            wrap("the order was delivered today", 12),
+            vec!["the order", "was", "delivered", "today"]
+        );
+        // A word longer than the row is still cut.
+        assert_eq!(wrap("abcdefgh ij", 5), vec!["abcde", "fgh", "ij"]);
+        // CJK wraps anywhere, so no row starts with the punctuation.
+        assert_eq!(
+            wrap("cannot start. 订单已交付", 16),
+            vec!["cannot start. 订", "单已交付"]
+        );
+        assert_eq!(wrap("图像 去噪工具", 6), vec!["图像", "去噪工", "具"]);
+    }
+
+    #[test]
+    fn graphemes_are_measured_whole() {
+        // Heart with VS16: one cluster, two cells, as ratatui draws it.
+        let heart = "\u{2764}\u{fe0f}";
+        assert_eq!(width(heart), 2);
+        assert_eq!(width(&fit(&format!("a{heart}b"), 6)), 6);
+        let family = "\u{1f468}\u{200d}\u{1f469}\u{200d}\u{1f467}";
+        assert_eq!(width(family), 2);
+        // Never split inside a cluster.
+        assert_eq!(
+            truncate(&format!("{family}{family}"), 3),
+            format!("{family}\u{2026}")
+        );
+        assert_eq!(tail(&format!("x{family}"), 2), family);
+    }
+
+    #[test]
+    fn left_truncation_keeps_the_end() {
+        assert_eq!(truncate_left("/mnt/m/projects/ocr", 8), "\u{2026}cts/ocr");
+        assert_eq!(truncate_left("/a/b", 8), "/a/b");
+        assert_eq!(width(&truncate_left("/数据/发票识别", 7)), 7);
+        assert_eq!(tail("图像去噪", 5), "去噪");
     }
 
     #[test]

@@ -22,7 +22,7 @@ pub fn render(frame: &mut Frame, area: Rect, cx: &RenderCx) {
         .map(|d| text::width(&d.slug))
         .max()
         .unwrap_or(4)
-        .clamp(4, 24);
+        .clamp(4, 20);
     // " " slug _ age _ title _ material
     let rest = usize::from(area.width).saturating_sub(1 + slug + 1 + AGE + 1 + 1);
     let title_w = rest * 55 / 100;
@@ -74,8 +74,9 @@ pub fn render(frame: &mut Frame, area: Rect, cx: &RenderCx) {
             Span::raw(" "),
             cell(dr.title.as_deref().unwrap_or("-"), title_w, t.text()),
             Span::raw(" "),
+            // Paths lose their start: the end names the folder.
             cell(
-                dr.material_path.as_deref().unwrap_or("-"),
+                &text::truncate_left(dr.material_path.as_deref().unwrap_or("-"), material_w),
                 material_w,
                 t.dim(),
             ),

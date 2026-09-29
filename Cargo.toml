@@ -37,3 +37,4 @@ ratatui = "0.30"
 crossterm = "0.29"
 arboard = { version = "3.6", default-features = false }
 unicode-width = "0.2"
+unicode-segmentation = "1"

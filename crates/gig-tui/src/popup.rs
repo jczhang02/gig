@@ -557,7 +557,7 @@ fn form_lines<'a>(form: &Form, t: &Theme, width: usize) -> Vec<Line<'a>> {
             FieldKind::Text(s) => {
                 if focused {
                     // Keep the end of long input visible.
-                    let shown = tail(s, value_width.saturating_sub(1));
+                    let shown = text::tail(s, value_width.saturating_sub(1));
                     format!("{shown}_")
                 } else {
                     text::truncate(s, value_width)
@@ -674,21 +674,6 @@ fn progress_lines<'a>(
         ])
     };
     vec![status]
-}
-
-/// The last `max` cells of `s`.
-fn tail(s: &str, max: usize) -> String {
-    let mut used = 0;
-    let mut start = s.len();
-    for (i, c) in s.char_indices().rev() {
-        let w = text::width(c.encode_utf8(&mut [0; 4]));
-        if used + w > max {
-            break;
-        }
-        used += w;
-        start = i;
-    }
-    s[start..].to_string()
 }
 
 #[cfg(test)]
@@ -939,12 +924,5 @@ mod tests {
         });
         assert!(spin.contains("\u{2819} sending"), "{spin}");
         assert!(!spin.contains('%'));
-    }
-
-    #[test]
-    fn tail_keeps_the_end() {
-        assert_eq!(tail("abcdef", 3), "def");
-        assert_eq!(tail("图像去噪", 5), "去噪");
-        assert_eq!(tail("ab", 5), "ab");
     }
 }
