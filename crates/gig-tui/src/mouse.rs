@@ -792,6 +792,93 @@ mod events {
             s.money_month = Some("2026-08".into());
             draw(&s, w, h);
         }
+        // 80x24: the block keeps its heading, header and one order, with
+        // `↓ 1 more` on that order's row (11.4).
+        let mut s = money();
+        s.money_month = Some("2026-08".into());
+        let buf = draw(&s, 80, 24);
+        let (_, head) = find(&buf, "Received in August 2026  2");
+        let (_, y8) = find_from(&buf, " o8  ", head).expect("one order shown");
+        assert_eq!(y8, head + 2);
+        assert!(find_from(&buf, "\u{2193} 1 more", y8).is_some_and(|(_, y)| y == y8));
+        // A month without payments: one blank row before Outstanding.
+        for (w, h) in [(80u16, 30u16), (120, 36), (160, 45)] {
+            let mut s = money();
+            s.money_month = Some("2026-01".into());
+            let buf = draw(&s, w, h);
+            let (_, y) = find(&buf, "no payments in January 2026");
+            let (_, out) = find_from(&buf, "Outstanding", y).unwrap();
+            assert_eq!(out, y + 2, "{w}x{h}");
+        }
+    }
+
+    #[test]
+    fn a_double_click_on_a_bar_or_a_hint_counts_once() {
+        let t0 = Instant::now();
+        let mut s = money();
+        click_on(&mut s, 120, 36, "Aug", 2, t0);
+        click_on(&mut s, 120, 36, "Aug", 2, t0 + MS(100));
+        assert_eq!(s.money_month.as_deref(), Some("2026-08"), "still picked");
+        // `a archived` twice quickly: toggled once.
+        let mut s = state();
+        click_on(&mut s, 200, 50, "a archived", 49, t0);
+        assert!(s.show_closed);
+        click_on(&mut s, 200, 50, "a hide archived", 49, t0 + MS(100));
+        assert!(s.show_closed);
+    }
+
+    #[test]
+    fn keys_hint_while_typing_opens_help_instead_of_typing() {
+        let t0 = Instant::now();
+        let mut s = state();
+        let mut st = settings();
+        st.cursor = crate::settings::Settings::index("general.default_currency").unwrap();
+        st.edit = Some("zz".into());
+        s.settings = Some(st);
+        assert_eq!(click_on(&mut s, 120, 36, "? keys", 35, t0), Outcome::None);
+        assert!(s.help_open);
+        assert_eq!(s.settings.as_ref().unwrap().edit.as_deref(), Some("zz"));
+        // A hint clicked while the filter is typed runs its key: `?` opens
+        // help rather than landing in the filter.
+        let mut s = state();
+        s.filters[0].editing = true;
+        s.filters[0].text = "o".into();
+        click_on(&mut s, 200, 50, "? keys", 49, t0);
+        assert!(s.help_open);
+        assert_eq!(s.filters[0].text, "o");
+        assert!(!s.filters[0].editing);
+    }
+
+    #[test]
+    fn the_wheel_over_the_notes_pane_moves_the_draft_selection() {
+        let mut s = state();
+        s.view = View::Drafts;
+        for (id, slug) in [(2, "dr-two"), (1, "dr-one")] {
+            s.data.drafts.push(gig_core::models::Draft {
+                id,
+                slug: slug.into(),
+                title: Some(slug.into()),
+                material_path: None,
+                project_type: None,
+                notes_dir: "/nonexistent".into(),
+                status: gig_core::models::DraftStatus::Open,
+                drop_reason: None,
+                notes_snapshot: None,
+                promoted_order_id: None,
+                created_at: "2026-09-19T00:00:00Z".into(),
+                closed_at: None,
+            });
+        }
+        let ids: Vec<i64> = s.draft_list().iter().map(|d| d.id).collect();
+        assert_eq!(ids.len(), 2);
+        s.selected_draft = Some(ids[0]);
+        crate::actions::draft_notes(&mut s, true);
+        assert!(s.notes_pane.is_some());
+        let buf = draw(&s, 160, 45);
+        let (x, y) = find(&buf, "Notes");
+        drop(buf);
+        wheel_at(&mut s, 160, 45, x + 2, y + 1, true);
+        assert_eq!(s.selected_draft, Some(ids[1]));
     }
 
     #[test]

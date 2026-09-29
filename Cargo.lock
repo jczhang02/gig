@@ -1318,6 +1318,7 @@ dependencies = [
  "arboard",
  "crossterm",
  "gig-core",
+ "libc",
  "ratatui",
  "tempfile",
  "toml",

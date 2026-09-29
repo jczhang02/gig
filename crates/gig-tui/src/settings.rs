@@ -54,6 +54,8 @@ pub enum Cmd {
     Help,
     /// Open the theme picker (the `tui.theme` row, or `T`).
     Pick,
+    /// `r`: reload the data and check the theme files, as in the views.
+    Refresh,
     /// Validate and write `raw` at `key` through gig-core.
     Write {
         key: &'static str,
@@ -103,6 +105,46 @@ fn format_number(f: f64) -> String {
     }
 }
 
+/// A gig-core error as a row shows it: one line, and for a file that does
+/// not parse, the file's name first.
+pub fn describe(e: &gig_core::Error, path: &Path) -> String {
+    let msg = one_line(&e.to_string());
+    match (e, path.file_name()) {
+        (gig_core::Error::TomlDe(_), Some(name)) => format!("{}: {msg}", name.to_string_lossy()),
+        _ => msg,
+    }
+}
+
+/// A gig-core error on one line. A TOML parse error spans several lines
+/// (the position, the source line, a `^` marker, the reason); a row has
+/// room for the position and the reason only:
+/// `TOML parse error at line 1, column 5: unclosed table, expected ']'`.
+pub fn one_line(msg: &str) -> String {
+    let lines: Vec<&str> = msg
+        .lines()
+        .map(str::trim_end)
+        .filter(|l| !l.trim().is_empty())
+        .collect();
+    let art = |l: &str| {
+        let t = l.trim_start();
+        t.starts_with('|')
+            || t.split_once('|')
+                .is_some_and(|(n, _)| !n.is_empty() && n.trim().chars().all(|c| c.is_ascii_digit()))
+    };
+    match lines.as_slice() {
+        [] => String::new(),
+        [one] => one.to_string(),
+        [first, rest @ ..] => {
+            let reason: Vec<&str> = rest.iter().filter(|l| !art(l)).map(|l| l.trim()).collect();
+            if reason.is_empty() {
+                first.to_string()
+            } else {
+                format!("{first}: {}", reason.join(" "))
+            }
+        }
+    }
+}
+
 /// `~/...` for paths under `$HOME`.
 pub fn display_path(path: &Path) -> String {
     let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
@@ -116,6 +158,7 @@ impl Settings {
     /// The overlay over `file` (the file's config, or why it failed) and
     /// `running` (the dashboard's effective config).
     pub fn new(file: gig_core::Result<Config>, running: &Config, path: &Path) -> Self {
+        let shown = display_path(path);
         let n = schema::ENTRIES.len();
         let mut s = Self {
             cursor: 0,
@@ -123,14 +166,14 @@ impl Settings {
             values: vec![String::new(); n],
             session: vec![None; n],
             errors: vec![None; n],
-            file: display_path(path),
+            file: shown,
             load_error: None,
             offset: Cell::new(0),
         };
         match file {
             Ok(cfg) => s.update(&cfg, running),
             Err(e) => {
-                s.load_error = Some(e.to_string());
+                s.load_error = Some(describe(&e, path));
                 s.update(running, running);
             }
         }
@@ -144,6 +187,27 @@ impl Settings {
             let now = raw_value(running, e.key);
             self.session[i] = (now != v).then_some(now);
             self.values[i] = v;
+        }
+    }
+
+    /// The running dashboard changed without a write (`M`): only the
+    /// `this session` notes move.
+    pub fn update_session(&mut self, running: &Config) {
+        for (i, e) in schema::ENTRIES.iter().enumerate() {
+            let now = raw_value(running, e.key);
+            self.session[i] = (now != self.values[i]).then_some(now);
+        }
+    }
+
+    /// Put the cursor on row `i`. A refusal left under the row the cursor
+    /// leaves goes with it: it described a value that was never written.
+    pub fn move_to(&mut self, i: usize) {
+        let i = i.min(schema::ENTRIES.len() - 1);
+        if i != self.cursor {
+            if let Some(e) = self.errors.get_mut(self.cursor) {
+                *e = None;
+            }
+            self.cursor = i;
         }
     }
 
@@ -231,10 +295,11 @@ impl Settings {
             KeyCode::Char('q') => return Cmd::Quit,
             KeyCode::Char('?') => return Cmd::Help,
             KeyCode::Char('T') => return Cmd::Pick,
-            KeyCode::Up | KeyCode::Char('k') => self.cursor = i.saturating_sub(1),
-            KeyCode::Down | KeyCode::Char('j') => self.cursor = (i + 1).min(last),
-            KeyCode::Home => self.cursor = 0,
-            KeyCode::End => self.cursor = last,
+            KeyCode::Char('r') => return Cmd::Refresh,
+            KeyCode::Up | KeyCode::Char('k') => self.move_to(i.saturating_sub(1)),
+            KeyCode::Down | KeyCode::Char('j') => self.move_to((i + 1).min(last)),
+            KeyCode::Home => self.move_to(0),
+            KeyCode::End => self.move_to(last),
             KeyCode::Enter | KeyCode::Char(' ') => match e.kind {
                 Kind::Toggle => {
                     let on = current == "true";
@@ -250,7 +315,7 @@ impl Settings {
                         raw: next_option(options, &current).to_string(),
                     };
                 }
-                Kind::Integer { .. } | Kind::Number { .. } | Kind::Text
+                Kind::Integer { .. } | Kind::Number { .. } | Kind::Text | Kind::Currency
                     if key.code == KeyCode::Enter =>
                 {
                     self.edit = Some(current);
@@ -317,12 +382,15 @@ pub fn footer_keys(s: &Settings) -> Vec<(&'static str, &'static str)> {
         Kind::Toggle => vec![("Space", "toggle")],
         Kind::Integer { .. } | Kind::Number { .. } => vec![("+ -", "step"), ("Enter", "type")],
         Kind::Select(_) => vec![("Enter", "choose")],
-        Kind::Text => vec![("Enter", "edit")],
+        Kind::Text | Kind::Currency => vec![("Enter", "edit")],
     }
 }
 
 /// Widest the overlay draws (label, key, value and a note fit in it).
 const MEASURE: u16 = 96;
+
+/// Fewest cells a value keeps when a `now <value>` note needs the room.
+const VALUE_MIN: usize = 6;
 
 /// Label column width.
 const LABEL_W: usize = 14;
@@ -333,6 +401,8 @@ const LABEL_MIN_BODY: usize = 70;
 struct Drawn {
     line: Line<'static>,
     row: Option<usize>,
+    /// The section heading this line is, if it is one.
+    heading: Option<&'static str>,
 }
 
 /// The overlay in the view body (the banner, message row and footer stay).
@@ -370,12 +440,14 @@ pub fn render(frame: &mut Frame, area: Rect, cx: &RenderCx, s: &Settings) {
             Span::styled(path, t.muted()),
         ]),
         row: None,
+        heading: None,
     });
     if let Some(err) = &s.load_error {
         for l in text::wrap(&format!("! {err}"), width) {
             lines.push(Drawn {
                 line: Line::from(Span::styled(l, t.error())),
                 row: None,
+                heading: None,
             });
         }
     }
@@ -388,10 +460,12 @@ pub fn render(frame: &mut Frame, area: Rect, cx: &RenderCx, s: &Settings) {
             lines.push(Drawn {
                 line: Line::raw(""),
                 row: None,
+                heading: None,
             });
             lines.push(Drawn {
                 line: Line::from(Span::styled(section.to_string(), t.title())),
                 row: None,
+                heading: Some(e.section),
             });
         }
         let selected = i == s.cursor;
@@ -412,13 +486,32 @@ pub fn render(frame: &mut Frame, area: Rect, cx: &RenderCx, s: &Settings) {
         spans.push(Span::styled(text::fit(e.key, key_w), t.muted()));
         spans.push(Span::raw("  "));
         let editing = if selected { s.edit.as_deref() } else { None };
-        let (value_spans, cursor_col) = value_spans(t, e, &s.values[i], editing, value_w);
-        let used: usize = value_spans.iter().map(Span::width).sum();
-        spans.extend(value_spans);
-        if let (Some(now), None) = (&s.session[i], editing) {
-            let note = format!("this session {}", display_value(e, now));
+        let (mut value, cursor_col) = value_spans(t, e, &s.values[i], editing, value_w);
+        let used: usize = value.iter().map(Span::width).sum();
+        // `  ·  this session <value>`; when that does not fit, `now <value>`,
+        // and the file's value is cut before the session value is.
+        let note = match (&s.session[i], editing) {
+            (Some(now), None) => {
+                let now = display_value(e, now);
+                let long = format!("this session {now}");
+                let short = format!("now {now}");
+                if used + 5 + text::width(&long) <= value_w {
+                    Some(long)
+                } else {
+                    let need = 5 + text::width(&short);
+                    if used + need > value_w && value_w >= need + VALUE_MIN {
+                        value = value_spans(t, e, &s.values[i], None, value_w - need).0;
+                    }
+                    Some(short)
+                }
+            }
+            _ => None,
+        };
+        let used: usize = value.iter().map(Span::width).sum();
+        spans.extend(value);
+        if let Some(note) = note {
             let room = value_w.saturating_sub(used + 5);
-            if room >= 8 {
+            if room >= 4 {
                 spans.push(Span::raw("  "));
                 spans.push(Span::styled("\u{b7}", t.dim()));
                 spans.push(Span::raw("  "));
@@ -431,6 +524,7 @@ pub fn render(frame: &mut Frame, area: Rect, cx: &RenderCx, s: &Settings) {
         lines.push(Drawn {
             line: Line::from(spans),
             row: Some(i),
+            heading: None,
         });
         // Line 2: help.
         let help_x = key_x;
@@ -444,6 +538,7 @@ pub fn render(frame: &mut Frame, area: Rect, cx: &RenderCx, s: &Settings) {
                 ),
             ]),
             row: Some(i),
+            heading: None,
         });
         // Then the refusal, wrapped.
         if let Some(err) = &s.errors[i] {
@@ -458,14 +553,15 @@ pub fn render(frame: &mut Frame, area: Rect, cx: &RenderCx, s: &Settings) {
                         Span::styled(format!("{lead}{l}"), t.error()),
                     ]),
                     row: Some(i),
+                    heading: None,
                 });
             }
         }
     }
 
     // Scroll so the cursor row is whole; the title stays on row 0.
-    let h = usize::from(area.height);
-    let body_h = h.saturating_sub(1);
+    let title = lines.remove(0);
+    let body_h = usize::from(area.height).saturating_sub(1);
     let rows_of = |r: usize| {
         let first = lines.iter().position(|d| d.row == Some(r)).unwrap_or(0);
         let last = lines
@@ -475,31 +571,30 @@ pub fn render(frame: &mut Frame, area: Rect, cx: &RenderCx, s: &Settings) {
         (first, last)
     };
     let (first, last) = rows_of(s.cursor.min(schema::ENTRIES.len() - 1));
-    let total = lines.len() - 1;
-    let mut offset = s.offset.get().min(total.saturating_sub(body_h));
-    // Scrolled body lines are lines[1..]; keep the section heading above
-    // the first row of a section in view when scrolling up to it.
-    let first_body = first - 1;
-    let want_top = if first >= 2 && lines[first - 1].row.is_none() {
-        first_body.saturating_sub(1)
+    // Keep the section heading above the first row of a section in view.
+    let want_top = if first >= 1 && lines[first - 1].heading.is_some() {
+        first - 1
     } else {
-        first_body
+        first
     };
-    if want_top < offset {
-        offset = want_top;
-    }
-    let last_body = last - 1;
-    if last_body >= offset + body_h {
-        offset = last_body + 1 - body_h;
-    }
-    s.offset.set(offset);
+    let view = Window::fit(&lines, body_h, s.offset.get(), want_top, last);
+    s.offset.set(view.start);
 
     let sel_band = !t.no_color();
-    let title = lines.remove(0);
     frame.render_widget(Paragraph::new(title.line), Rect { height: 1, ..area });
-    let below = total.saturating_sub(offset + body_h);
-    for (k, d) in lines.into_iter().skip(offset).take(body_h).enumerate() {
-        let y = area.y + 1 + k as u16;
+    let body_y = area.y + 1 + u16::from(view.top);
+    let start = view.start;
+    let sticky = if view.top {
+        lines[..start.min(lines.len())]
+            .iter()
+            .rev()
+            .find_map(|d| d.heading)
+            .filter(|_| lines.get(start).is_some_and(|d| d.heading.is_none()))
+    } else {
+        None
+    };
+    for (k, d) in lines.into_iter().skip(start).take(view.len).enumerate() {
+        let y = body_y + k as u16;
         let rect = Rect::new(area.x, y, area.width, 1);
         // Mouse: every line of a row (label, help, error) is that row.
         if let Some(i) = d.row {
@@ -512,16 +607,21 @@ pub fn render(frame: &mut Frame, area: Rect, cx: &RenderCx, s: &Settings) {
         }
         frame.render_widget(Paragraph::new(line), rect);
     }
-    if offset > 0 {
-        let msg = format!("\u{2191} {offset} above");
+    // The scroll indicators have rows of their own; the top one also names
+    // the section the first row shown belongs to.
+    if view.top {
         let rect = Rect::new(area.x, area.y + 1, area.width, 1);
+        if let Some(h) = sticky {
+            frame.render_widget(Paragraph::new(Line::from(Span::styled(h, t.title()))), rect);
+        }
+        let msg = format!("\u{2191} {start} above");
         frame.render_widget(
             Paragraph::new(Line::from(Span::styled(msg, t.muted())).right_aligned()),
             rect,
         );
     }
-    if below > 0 {
-        let msg = format!("\u{2193} {below} more");
+    if view.below > 0 {
+        let msg = format!("\u{2193} {} more", view.below);
         let rect = Rect::new(area.x, area.y + area.height - 1, area.width, 1);
         frame.render_widget(
             Paragraph::new(Line::from(Span::styled(msg, t.muted())).right_aligned()),
@@ -530,10 +630,85 @@ pub fn render(frame: &mut Frame, area: Rect, cx: &RenderCx, s: &Settings) {
     }
     if let Some((line_no, Some(col))) = cursor_at {
         let body_line = line_no - 1;
-        if body_line >= offset && body_line < offset + body_h && col < width {
-            let y = area.y + 1 + (body_line - offset) as u16;
+        if body_line >= start && body_line < start + view.len && col < width {
+            let y = body_y + (body_line - start) as u16;
             frame.set_cursor_position((area.x + col as u16, y));
         }
+    }
+}
+
+/// The part of the body on screen: `len` lines from `start`, under an
+/// `↑ N above` row when `top`, over a `↓ N more` row when `below > 0`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Window {
+    start: usize,
+    len: usize,
+    top: bool,
+    below: usize,
+}
+
+impl Window {
+    /// The window starting at `start` in `body_h` rows. A section heading
+    /// is never the last line shown above `↓ N more` (TUI-DESIGN 9.3).
+    fn at(lines: &[Drawn], body_h: usize, start: usize) -> Self {
+        let total = lines.len();
+        let start = start.min(total);
+        // Too short for indicator rows: just the lines.
+        if body_h < 3 {
+            let len = body_h.min(total - start);
+            return Self {
+                start,
+                len,
+                top: false,
+                below: total - start - len,
+            };
+        }
+        let top = start > 0;
+        let avail = body_h - usize::from(top);
+        let mut len = if total - start <= avail {
+            total - start
+        } else {
+            avail - 1
+        };
+        if start + len < total {
+            // Leave out a heading (and the blank above it) at the end.
+            while len > 1 {
+                let d = &lines[start + len - 1];
+                let blank_before_heading = d.row.is_none()
+                    && d.heading.is_none()
+                    && lines.get(start + len).is_some_and(|n| n.heading.is_some());
+                if d.heading.is_some() || blank_before_heading {
+                    len -= 1;
+                } else {
+                    break;
+                }
+            }
+        }
+        Self {
+            start,
+            len,
+            top,
+            below: total - start - len,
+        }
+    }
+
+    /// The window nearest to `prev` that shows lines `want_top..=last`
+    /// whole, without scrolling further than the end needs.
+    fn fit(lines: &[Drawn], body_h: usize, prev: usize, want_top: usize, last: usize) -> Self {
+        let total = lines.len();
+        // Past this start the end of the list would leave rows empty.
+        let max_start = if total <= body_h {
+            0
+        } else {
+            total + 1 - body_h.max(1)
+        };
+        let mut start = prev.min(max_start).min(want_top);
+        let mut w = Self::at(lines, body_h, start);
+        while last >= w.start + w.len && start < want_top {
+            start += 1;
+            w = Self::at(lines, body_h, start);
+        }
+        w
     }
 }
 
@@ -678,5 +853,43 @@ mod tests {
         assert_eq!(format_number(0.65), "0.65");
         assert_eq!(next_option(&["a", "b"], "b"), "a");
         assert_eq!(next_option(&["a", "b"], "x"), "a");
+    }
+
+    #[test]
+    fn r_refreshes_and_a_refusal_goes_when_the_cursor_leaves() {
+        let mut s = open();
+        assert_eq!(s.key(key(KeyCode::Char('r'))), Cmd::Refresh);
+        s.cursor = 2;
+        s.refused("tui.refresh_seconds", "must be 0 to 60".into());
+        s.key(key(KeyCode::Down));
+        assert_eq!(s.errors[2], None);
+        // While typing, `r` is text.
+        s.key(key(KeyCode::Up));
+        s.key(key(KeyCode::Enter));
+        assert_eq!(s.key(key(KeyCode::Char('r'))), Cmd::None);
+    }
+
+    #[test]
+    fn m_moves_only_the_session_note() {
+        let mut s = open();
+        let i = Settings::index("tui.mouse").unwrap();
+        let mut running = Config::default();
+        running.tui.mouse = false;
+        s.update_session(&running);
+        assert_eq!(s.values[i], "true");
+        assert_eq!(s.session[i].as_deref(), Some("false"));
+        s.update_session(&Config::default());
+        assert_eq!(s.session[i], None);
+    }
+
+    #[test]
+    fn toml_errors_fit_on_one_line() {
+        let e = Config::parse("[tui\n").unwrap_err();
+        let msg = describe(&e, Path::new("/x/config.toml"));
+        assert!(!msg.contains('\n'), "{msg}");
+        assert!(msg.starts_with("config.toml: "), "{msg}");
+        assert!(msg.contains("line 1"), "{msg}");
+        assert!(!msg.contains('^') && !msg.contains(" | "), "{msg}");
+        assert_eq!(one_line("plain"), "plain");
     }
 }

@@ -179,9 +179,14 @@ fn draw_frame(frame: &mut Frame, cx: &RenderCx) {
     };
     hits.pane(s.body, body_pane);
     if let Some(pane) = s.pane {
-        if cx.state.view != View::Drafts {
-            hits.pane(pane, Pane::Detail);
-        }
+        // The NOTES.md pane follows the draft selection, so the wheel over
+        // it moves the selection (12.6); the order detail scrolls.
+        let kind = if cx.state.view == View::Drafts {
+            Pane::List
+        } else {
+            Pane::Detail
+        };
+        hits.pane(pane, kind);
     }
     if let Some(settings) = &cx.state.settings {
         crate::settings::render(frame, s.body, cx, settings);
@@ -205,6 +210,15 @@ fn draw_frame(frame: &mut Frame, cx: &RenderCx) {
     }
     if let Some(p) = &cx.state.popup {
         popup::render(frame, area, p, cx.theme, hits);
+    }
+    // A popup scrims the whole screen, the toast included; the toast is the
+    // only feedback of keys pressed in the popup (`c` in the picker, a hot
+    // reload), so it is drawn again on top in its own colour unless the
+    // popup reaches the message row.
+    if let Some(modal) = hits.map().modal {
+        if modal.y > s.message.y {
+            draw_toast(frame, s.message, cx);
+        }
     }
     settle_wide_glyphs(frame.buffer_mut(), t);
 }
@@ -372,30 +386,7 @@ fn record_tabs(cx: &RenderCx, area: Rect, line: &Line) {
 fn draw_message(frame: &mut Frame, area: Rect, cx: &RenderCx) {
     let t = cx.theme;
     let width = usize::from(area.width);
-    let toast = cx
-        .state
-        .toast
-        .as_ref()
-        .map(|toast| {
-            let style = match toast.tone {
-                Tone::Info => t.text(),
-                Tone::Warn => t.text().fg(t.warranty),
-                Tone::Error => t.error(),
-            };
-            (toast.text.clone(), style)
-        })
-        .or_else(|| cx.state.error.clone().map(|e| (e, t.error())));
-    let mut right_w = 0;
-    if let Some((msg, style)) = toast {
-        let msg = text::truncate(&msg, width.saturating_sub(2) * 2 / 3);
-        right_w = text::width(&msg) + 1;
-        frame.render_widget(
-            Paragraph::new(
-                Line::from(vec![Span::styled(msg, style), Span::raw(" ")]).right_aligned(),
-            ),
-            area,
-        );
-    }
+    let right_w = draw_toast(frame, area, cx);
     let filter = cx.state.filter();
     if filter.editing || !filter.text.is_empty() {
         let count = views::filter_count(cx.state);
@@ -410,6 +401,36 @@ fn draw_message(frame: &mut Frame, area: Rect, cx: &RenderCx) {
         spans.push(Span::styled(format!("  {count}"), t.muted()));
         frame.render_widget(Paragraph::new(Line::from(spans)), area);
     }
+}
+
+/// The toast (or the refresh error) right-aligned on the message row;
+/// returns the cells it took.
+fn draw_toast(frame: &mut Frame, area: Rect, cx: &RenderCx) -> usize {
+    let t = cx.theme;
+    let width = usize::from(area.width);
+    let toast = cx
+        .state
+        .toast
+        .as_ref()
+        .map(|toast| {
+            let style = match toast.tone {
+                Tone::Info => t.text(),
+                Tone::Warn => t.text().fg(t.warranty),
+                Tone::Error => t.error(),
+            };
+            (toast.text.clone(), style)
+        })
+        .or_else(|| cx.state.error.clone().map(|e| (e, t.error())));
+    let Some((msg, style)) = toast else {
+        return 0;
+    };
+    let msg = text::truncate(&msg, width.saturating_sub(2) * 2 / 3);
+    let w = text::width(&msg) + 1;
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![Span::styled(msg, style), Span::raw(" ")]).right_aligned()),
+        area,
+    );
+    w
 }
 
 /// The contextual key hints (section 7.3).
@@ -1863,6 +1884,113 @@ mod tests {
         assert!(text.contains("more"), "{text}");
     }
 
+    #[test]
+    fn settings_scroll_indicators_have_rows_of_their_own() {
+        use gig_core::config::Config;
+        let file = Config::default();
+        let mut running = file.clone();
+        running.tui.theme = Some("mocha-soft".into());
+        for (w, h) in [(64u16, 16u16), (60, 16), (80, 17)] {
+            for cursor in 0..gig_core::config::schema::ENTRIES.len() {
+                let mut st = crate::settings::Settings::new(
+                    Ok(file.clone()),
+                    &running,
+                    std::path::Path::new("/x/config.toml"),
+                );
+                st.cursor = cursor;
+                // Walk down to the cursor as the keys would, so the kept
+                // offset is the one a person sees.
+                let state = UiState {
+                    settings: Some(st),
+                    ..sample()
+                };
+                let buf = render(w, h, &state, false);
+                let body: Vec<String> = (3..h - 1).map(|y| row(&buf, y)).collect();
+                for (k, l) in body.iter().enumerate() {
+                    let has_ind = l.contains('\u{2191}') || l.contains('\u{2193}');
+                    if has_ind {
+                        // Nothing but an indicator (and a sticky heading).
+                        let rest = l
+                            .replace("Dashboard", "")
+                            .replace("General", "")
+                            .trim()
+                            .to_string();
+                        assert!(
+                            rest.starts_with('\u{2191}') || rest.starts_with('\u{2193}'),
+                            "{w}x{h} cursor {cursor}: {l:?}\n{body:#?}"
+                        );
+                        assert!(!l.contains('.'), "no row content: {l:?}");
+                    }
+                    if l.contains('\u{2193}') {
+                        // The line above the `↓` row is never a heading.
+                        let above = body[k - 1].trim();
+                        assert!(
+                            above != "Dashboard" && above != "General",
+                            "{w}x{h} cursor {cursor}: orphan heading\n{body:#?}"
+                        );
+                    }
+                }
+                // The cursor row's key path is on screen.
+                let key = gig_core::config::schema::ENTRIES[cursor].key;
+                assert!(body.iter().any(|l| l.contains(key)), "{key}\n{body:#?}");
+            }
+        }
+        // Scrolled: the top row names the section of the first row shown.
+        let mut st = crate::settings::Settings::new(
+            Ok(file.clone()),
+            &running,
+            std::path::Path::new("/x/config.toml"),
+        );
+        st.cursor = 5;
+        let state = UiState {
+            settings: Some(st),
+            ..sample()
+        };
+        let buf = render(64, 16, &state, false);
+        let top = row(&buf, 3);
+        if std::env::var_os("GIG_PRINT").is_some() {
+            println!("{}", all(&buf));
+        }
+        assert!(top.contains("above"), "{top}");
+        assert!(top.trim_start().starts_with("Dashboard"), "{top}");
+    }
+
+    #[test]
+    fn settings_session_note_keeps_the_session_value() {
+        use gig_core::config::Config;
+        let file = Config::default();
+        let mut running = file.clone();
+        running.tui.theme = Some("catppuccin-latte".into());
+        let st = crate::settings::Settings::new(
+            Ok(file),
+            &running,
+            std::path::Path::new("/x/config.toml"),
+        );
+        for (w, h) in [(64u16, 24u16), (80, 24), (160, 45)] {
+            let state = UiState {
+                settings: Some(st.clone()),
+                ..sample()
+            };
+            let text = all(&render(w, h, &state, false));
+            let (_, l) = line_of(&text, "tui.theme").unwrap();
+            assert!(l.contains("catppuccin-latte"), "{w}x{h}: {l}");
+        }
+    }
+
+    #[test]
+    fn a_toast_keeps_its_colour_over_a_popup() {
+        let mut state = picker_state("gig-dark");
+        state.toast = Some(crate::app::Toast::warn(
+            "c copies a built-in; mocha-soft is a theme file already",
+        ));
+        let buf = render(120, 36, &state, true);
+        let text = all(&buf);
+        let (y, l) = line_of(&text, "c copies a built-in").unwrap();
+        assert_eq!(y, 1, "{l}");
+        let x = l.find("c copies").map(|b| l[..b].chars().count()).unwrap() as u16;
+        assert_eq!(buf[(x, 1)].fg, Theme::DARK.warranty);
+    }
+
     fn picker_state(current: &str) -> UiState {
         let mut catalog = crate::themes::Catalog::load(std::path::Path::new("/nonexistent"));
         let mut mine = Theme::NORD.clone();
@@ -1904,12 +2032,16 @@ mod tests {
             assert!(broken > user && l.contains("! missing key \"bar\""), "{l}");
             let (y, l) = line_of(&text, "gig-dark ").unwrap();
             assert!(l.contains("current"), "{l}");
-            // Five swatches: bg, text, accent, unpaid, warranty.
-            let x = l.find('\u{2588}').map(|b| l[..b].chars().count()).unwrap() as u16;
+            // Five swatches: bg (`Aa` in the theme's text on its bg, so
+            // it shows on any popup fill), text, accent, unpaid, warranty.
+            let x = l.find("Aa ").map(|b| l[..b].chars().count()).unwrap() as u16;
             let t = Theme::DARK;
+            let aa = &buf[(x, y as u16)];
+            assert_eq!((aa.fg, aa.bg), (t.text, t.bg), "bg swatch");
             for (k, c) in [t.bg, t.text, t.accent, t.unpaid, t.warranty]
                 .iter()
                 .enumerate()
+                .skip(1)
             {
                 assert_eq!(buf[(x + 3 * k as u16, y as u16)].fg, *c, "swatch {k}");
             }

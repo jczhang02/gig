@@ -100,10 +100,15 @@ pub fn render(frame: &mut Frame, area: Rect, cx: &RenderCx) {
         .filter(|_| chart_r.is_some())
         .and_then(|l| cx.state.data.money.by_month.iter().find(|m| m.label == l));
     let drill_r = drill.and_then(|m| {
-        let want = 2 + m.order_ids.len().max(1) as u16;
+        // Heading and header, then one row per order; a month without
+        // payments has one line under its heading instead.
+        let n = m.order_ids.len() as u16;
+        let want = if n == 0 { 2 } else { 2 + n };
         let room = take(0).map_or(0, |r| area.bottom().saturating_sub(r.y));
         let keep = 1 + 3;
-        let rows = want.min(room.saturating_sub(keep).max(3)).min(room);
+        let rows = want
+            .min(room.saturating_sub(keep).max(want.min(3)))
+            .min(room);
         let r = take(rows);
         take(1);
         r
@@ -569,7 +574,21 @@ fn month_orders(frame: &mut Frame, area: Rect, cx: &RenderCx, class: WidthClass,
     }
     lines.push(Line::from(head));
     let room = usize::from(area.height).saturating_sub(lines.len());
-    let shown = if n <= room { n } else { room.saturating_sub(1) };
+    // `↓ n more` takes a row of its own when there are two or more rows to
+    // spare; with one it goes at the right end of the one order shown, so
+    // the block always lists an order (section 11.4).
+    let shown = match room {
+        _ if n <= room => n,
+        0 | 1 => room,
+        _ => room - 1,
+    };
+    let inline_more = shown > 0 && shown < n && shown == room;
+    let more = format!("\u{2193} {} more", n - shown);
+    let title_w = if inline_more && title_w > 0 {
+        title_w.saturating_sub(text::width(&more) + GAP)
+    } else {
+        title_w
+    };
     for id in m.order_ids.iter().take(shown) {
         let Some(row) = cx.state.data.order(*id) else {
             continue;
@@ -613,14 +632,18 @@ fn month_orders(frame: &mut Frame, area: Rect, cx: &RenderCx, class: WidthClass,
         }
         lines.push(Line::from(spans));
     }
-    let hidden = n - shown;
-    if hidden > 0 {
-        lines.push(Line::from(Span::styled(
-            format!("  \u{2193} {hidden} more"),
-            muted,
-        )));
+    let rows = lines.len() as u16;
+    if shown < n && !inline_more {
+        lines.push(Line::from(Span::styled(format!("  {more}"), muted)));
     }
     frame.render_widget(Paragraph::new(lines), area);
+    if inline_more && rows > 0 {
+        let r = Rect::new(area.x, area.y + rows - 1, area.width, 1);
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(more, muted)).right_aligned()),
+            r,
+        );
+    }
 }
 
 #[cfg(test)]

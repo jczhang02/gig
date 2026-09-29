@@ -94,7 +94,15 @@ what they would do and change nothing.
 
 ## Dashboard
 
-`gig` with no subcommand, run in a terminal, opens the dashboard, the one human interface (`gig tui` is the same; without a terminal bare `gig` still fails with the usual usage error, so agents see no change): orders with their next action, drafts, money (outstanding, this month, this year, a 12-month chart), history; record payments, notes, scorecards, changes; register orders and drafts; send packages the agent has built. Flags `--theme <name>` (`gig-dark`, `gig-light`, `catppuccin-mocha`, `catppuccin-latte`, `tokyonight`, `gruvbox-dark`, `nord`, `dracula`, or a file of your own in `~/.config/gig/themes/<name>.toml`), `--light`, `--no-icons`, `--refresh <seconds>`, `--list-themes`; `T` opens a theme picker that previews on the whole screen and keeps the choice in config.toml; `,` opens Settings (theme, icons, refresh, mouse, warranty days, currency, cut ratio), written to config.toml in place with comments kept; `[tui]` in config.toml holds the same. Design: `docs/v2/TUI-SPEC.md` and `docs/v2/TUI-DESIGN.md`.
+`gig` with no subcommand, run in a terminal, opens the dashboard, the one human interface (`gig tui` is the same; without a terminal bare `gig` still fails with the usual usage error, so agents see no change): orders with their next action, drafts, money (outstanding, this month, this year, a 12-month chart), history; record payments, notes, scorecards, changes; register orders and drafts; send packages the agent has built.
+
+Flags: `--theme <name>` (`gig-dark`, `gig-light`, `catppuccin-mocha`, `catppuccin-latte`, `tokyonight`, `gruvbox-dark`, `nord`, `dracula`, or a file of your own in `~/.config/gig/themes/<name>.toml`), `--light`, `--no-icons`, `--refresh <seconds>` (0 turns the timer off), `--mouse` / `--no-mouse`, `--list-themes`.
+
+Keys: `?` all keys, `q` quit, `r` refresh (also re-reads theme files), `1`-`4` or `Tab` views, `/` filter, `Esc` close or clear, `T` theme picker (previews on the whole screen; `Enter` keeps the theme in config.toml, `c` copies a built-in to a theme file and opens it in `$EDITOR`), `,` Settings, `M` mouse on or off for this session (off gives the terminal its own text selection back). Theme files are reloaded when they change.
+
+Settings (`,`) edits theme, icons, refresh (0 to 60 s), mouse, warranty days (0 to 365), currency (a three-letter code such as `CNY`) and cut ratio (0 to 1). Each accepted change is written to config.toml at once, in place, with comments and key order kept; a refused value is explained under its row and nothing is written. `gig config set` checks the same keys the same way. A hand-edited config.toml, a flag or a `GIG_TUI_*` variable is taken as given; the ranges bind only these two writers. `[tui]` in config.toml holds `theme`, `light`, `icons`, `refresh_seconds` and `mouse`; flags override it and `GIG_TUI_*` overrides both.
+
+Mouse: a click selects a row, a double-click opens it, a banner tab switches views, footer hints and popup buttons act as their keys, a click outside a popup closes it, a short link is copied (never opened), the wheel scrolls or moves the list under the pointer, and a Money bar lists that month's payments. Design: `docs/v2/TUI-SPEC.md` and `docs/v2/TUI-DESIGN.md`.
 
 ## Package safety
 

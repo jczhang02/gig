@@ -75,6 +75,7 @@ const SETTINGS_KEYS: &[Entry] = &[
     ("0-9", "type a value", "number rows"),
     ("Enter", "edit or choose", ""),
     ("T", "theme picker", ""),
+    ("r", "refresh, reload themes", ""),
     ("Esc", "cancel typing, close", ""),
 ];
 
@@ -240,8 +241,9 @@ pub fn footer_groups(state: &UiState, class: WidthClass) -> (Vec<Pair>, Vec<Pair
     }
 }
 
-/// Keys whose pair goes first when the footer is short.
-const OPTIONAL: [&str; 5] = ["N", "a", "T", "1-4", ","];
+/// Keys whose pair goes first when the footer is short, one at a time in
+/// this order (section 7.3 step 1).
+const OPTIONAL: [&str; 5] = ["N", "a", ",", "1-4", "T"];
 
 /// Cells a footer takes: pairs 2 apart, groups joined by `   ·   `.
 pub fn footer_width(g1: &[Pair], g2: &[Pair]) -> usize {
@@ -262,7 +264,11 @@ pub fn fit_footer(mut g1: Vec<Pair>, mut g2: Vec<Pair>, room: usize) -> (Vec<Pai
     if fits(&g1, &g2) {
         return (g1, g2);
     }
-    g2.retain(|(k, _)| !OPTIONAL.contains(k));
+    for key in OPTIONAL {
+        if !fits(&g1, &g2) {
+            g2.retain(|(k, _)| *k != key);
+        }
+    }
     while g1.len() > 2 && !fits(&g1, &g2) {
         g1.pop();
     }
@@ -497,5 +503,30 @@ mod tests {
             let (a, b) = fit_footer(DELIVERED.to_vec(), ORDERS.to_vec(), room);
             assert!(footer_width(&a, &b) <= room || (a.is_empty() && b.len() == 1));
         }
+    }
+
+    #[test]
+    fn optional_pairs_go_one_at_a_time() {
+        // Money at 80: dropping `, settings` alone fits, so `1-4 views` and
+        // `T theme` stay.
+        let g1 = vec![("Enter", "open order"), ("y", "copy link")];
+        let g2 = vec![
+            ("1-4", "views"),
+            ("T", "theme"),
+            (",", "settings"),
+            ("?", "keys"),
+            ("q", "quit"),
+        ];
+        let (a, b) = fit_footer(g1.clone(), g2, 78);
+        assert_eq!(a, g1);
+        assert_eq!(
+            b,
+            vec![
+                ("1-4", "views"),
+                ("T", "theme"),
+                ("?", "keys"),
+                ("q", "quit")
+            ]
+        );
     }
 }

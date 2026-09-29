@@ -142,3 +142,87 @@ fn clicks_switch_views_and_the_footer_opens_forms() {
     assert!(matches!(app.settle(out), Some(Outcome::Act(_))));
     assert!(app.ui.popup.is_none());
 }
+
+#[test]
+fn m_with_settings_open_updates_the_mouse_row_at_once() {
+    let dir = TempDir::new().unwrap();
+    let mut app = app_in(dir.path(), &Tui::default());
+    press(&mut app, KeyCode::Char(','), KeyModifiers::NONE);
+    press(&mut app, KeyCode::Char('M'), KeyModifiers::SHIFT);
+    let screen = draw(&app);
+    let (_, y) = find(&screen, "tui.mouse");
+    let row = &screen[usize::from(y)];
+    assert!(row.contains("this session no"), "{row}");
+    press(&mut app, KeyCode::Char('M'), KeyModifiers::SHIFT);
+    let screen = draw(&app);
+    let (_, y) = find(&screen, "tui.mouse");
+    assert!(!screen[usize::from(y)].contains("this session"));
+}
+
+#[test]
+fn a_deleted_theme_file_in_use_is_reported() {
+    let dir = TempDir::new().unwrap();
+    let paths = Paths::under_root(dir.path());
+    paths.ensure_dirs().unwrap();
+    let themes = paths.themes_dir();
+    std::fs::create_dir_all(&themes).unwrap();
+    // A copy of a built-in, in use, then deleted.
+    let (file, _) = gig_tui::themes::copy_builtin(&themes, "dracula").unwrap();
+    let settings = Tui {
+        theme: Some("dracula-copy".into()),
+        ..Tui::default()
+    };
+    let mut app = app_in(dir.path(), &settings);
+    assert_eq!(app.theme.name, "dracula-copy");
+    std::fs::remove_file(&file).unwrap();
+    press(&mut app, KeyCode::Char('r'), KeyModifiers::NONE);
+    let toast = app.ui.toast.clone().expect("a toast").text;
+    assert_eq!(
+        toast,
+        "theme dracula-copy file removed, keeping the colours loaded before"
+    );
+    // The picker keeps it as the current row instead of previewing another.
+    press(&mut app, KeyCode::Char('T'), KeyModifiers::SHIFT);
+    let p = app.ui.picker.as_ref().unwrap();
+    assert_eq!(p.highlighted(), Some("dracula-copy"));
+    assert_eq!(
+        p.preview().map(|t| t.name.to_string()).as_deref(),
+        Some("dracula-copy")
+    );
+
+    // A file shadowing a built-in: the built-in takes over.
+    let dir = TempDir::new().unwrap();
+    let paths = Paths::under_root(dir.path());
+    paths.ensure_dirs().unwrap();
+    let themes = paths.themes_dir();
+    std::fs::create_dir_all(&themes).unwrap();
+    let (copy, _) = gig_tui::themes::copy_builtin(&themes, "nord").unwrap();
+    let text = std::fs::read_to_string(&copy).unwrap();
+    let nord = themes.join("nord.toml");
+    let red: Vec<&str> = text
+        .lines()
+        .map(|l| {
+            if l.starts_with("accent ") {
+                "accent = \"#ff0000\""
+            } else {
+                l
+            }
+        })
+        .collect();
+    std::fs::write(&nord, red.join("\n")).unwrap();
+    std::fs::remove_file(&copy).unwrap();
+    let settings = Tui {
+        theme: Some("nord".into()),
+        ..Tui::default()
+    };
+    let mut app = app_in(dir.path(), &settings);
+    let shadowed = app.theme.clone();
+    std::fs::remove_file(&nord).unwrap();
+    press(&mut app, KeyCode::Char('r'), KeyModifiers::NONE);
+    assert_eq!(
+        app.ui.toast.clone().unwrap().text,
+        "theme nord file removed, using the built-in"
+    );
+    assert_ne!(app.theme, shadowed);
+    assert_eq!(app.theme.name, "nord");
+}

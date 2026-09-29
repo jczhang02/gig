@@ -35,6 +35,10 @@ pub struct Picker {
     pub cursor: usize,
     /// The theme in use when the picker opened; marked `current`.
     pub current: String,
+    /// The colours in use, kept when their file is gone from the catalogue
+    /// (deleted while the dashboard runs): listed first as `current`, so
+    /// opening the picker previews nothing else.
+    pub in_use: Option<Theme>,
     /// First drawn row, kept between frames.
     pub offset: Cell<usize>,
 }
@@ -85,14 +89,42 @@ impl Picker {
             rows,
             cursor,
             current: current.to_string(),
+            in_use: None,
             offset: Cell::new(0),
         }
+    }
+
+    /// `theme` is what the screen is drawn with. When the catalogue no
+    /// longer lists it (its file was deleted), it gets a row of its own at
+    /// the top, with the cursor on it.
+    pub fn with_in_use(mut self, theme: &Theme) -> Self {
+        let listed = self
+            .rows
+            .iter()
+            .any(|r| r.theme.is_some() && r.name == self.current);
+        if !listed {
+            self.rows.insert(
+                0,
+                Row {
+                    name: self.current.clone(),
+                    theme: Some(theme.clone()),
+                    builtin: false,
+                    error: None,
+                },
+            );
+            self.cursor = 0;
+            self.in_use = Some(theme.clone());
+        }
+        self
     }
 
     /// The same picker over a reloaded catalog, the cursor on `name` when it
     /// is still there.
     pub fn rebuilt(&self, catalog: &Catalog, name: &str, mode: ColorMode) -> Self {
         let mut p = Self::new(catalog, &self.current, mode);
+        if let Some(t) = &self.in_use {
+            p = p.with_in_use(t);
+        }
         if let Some(i) = p
             .rows
             .iter()
@@ -168,22 +200,25 @@ const WIDTH: u16 = 64;
 /// Cells of the tag column (`current`, `file`).
 const TAG_W: usize = 7;
 
-/// The five swatches: bg, text, accent, unpaid, warranty.
+/// The five swatches: bg, text, accent, unpaid, warranty. The bg swatch is
+/// `Aa` in the theme's text on its bg: a block in the bg colour would vanish
+/// on a popup fill of the same lightness.
 fn swatches(t: &Theme) -> Vec<Span<'static>> {
-    let mut out = Vec::new();
-    for (i, c) in [t.bg, t.text, t.accent, t.unpaid, t.warranty]
-        .into_iter()
-        .enumerate()
-    {
-        if i > 0 {
-            out.push(Span::raw(" "));
-        }
-        let style = if c == Color::Reset {
+    let paint = |c: Color| {
+        if c == Color::Reset {
             Style::new()
         } else {
             Style::new().fg(c)
-        };
-        out.push(Span::styled("\u{2588}\u{2588}", style));
+        }
+    };
+    let mut bg = paint(t.text);
+    if t.bg != Color::Reset {
+        bg = bg.bg(t.bg);
+    }
+    let mut out = vec![Span::styled("Aa", bg)];
+    for c in [t.text, t.accent, t.unpaid, t.warranty] {
+        out.push(Span::raw(" "));
+        out.push(Span::styled("\u{2588}\u{2588}", paint(c)));
     }
     out
 }
@@ -360,5 +395,23 @@ mod tests {
         );
         assert_eq!(p.key(key(KeyCode::Enter)), PickCmd::Keep("gig-dark".into()));
         assert_eq!(p.key(key(KeyCode::Esc)), PickCmd::Close);
+    }
+
+    #[test]
+    fn a_theme_whose_file_is_gone_stays_current() {
+        let mut gone = Theme::NORD.clone();
+        gone.name = "dracula-copy".into();
+        let p = Picker::new(&catalog(), "dracula-copy", ColorMode::TrueColor).with_in_use(&gone);
+        assert_eq!(p.cursor, 0);
+        assert_eq!(p.rows[0].name, "dracula-copy");
+        assert_eq!(p.preview(), Some(&gone), "opening previews nothing else");
+        // Listed themes get no extra row.
+        let p = Picker::new(&catalog(), "nord", ColorMode::TrueColor).with_in_use(&Theme::NORD);
+        assert_eq!(p.rows.iter().filter(|r| r.name == "nord").count(), 1);
+        assert_eq!(p.in_use, None);
+        // A rebuild keeps the row.
+        let p = Picker::new(&catalog(), "dracula-copy", ColorMode::TrueColor).with_in_use(&gone);
+        let r = p.rebuilt(&catalog(), "dracula-copy", ColorMode::TrueColor);
+        assert_eq!(r.rows[0].name, "dracula-copy");
     }
 }

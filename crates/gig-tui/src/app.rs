@@ -497,6 +497,7 @@ impl UiState {
                     Outcome::None
                 }
                 Cmd::Pick => Outcome::OpenPicker,
+                Cmd::Refresh => Outcome::Refresh,
                 Cmd::Write { key, raw } => Outcome::WriteSetting { key, raw },
             };
         }
@@ -670,7 +671,24 @@ impl UiState {
                 self.settings = None;
                 self.switch(v);
             }
-            Target::Key(key) => return self.handle_key(key, width),
+            // A hint is a button, not a toggle to click twice: the second
+            // click of a double-click does nothing.
+            Target::Key(_) if double => {}
+            Target::Key(key) => {
+                let settings_typing = self.settings.as_ref().is_some_and(|s| s.edit.is_some());
+                if settings_typing && key.code == KeyCode::Char('?') {
+                    // `?` is text while typing (12.5); its button opens help.
+                    self.help_open = true;
+                    self.help_scroll.offset = 0;
+                    return Outcome::None;
+                }
+                if self.settings.is_none() && self.filter().editing {
+                    // A button is not typed into the filter: the filter is
+                    // kept, as Enter, and the key runs.
+                    self.filter_mut().editing = false;
+                }
+                return self.handle_key(key, width);
+            }
             Target::Order(id) => {
                 if self.selected != Some(id) {
                     self.selected = Some(id);
@@ -691,6 +709,8 @@ impl UiState {
                 }
             }
             Target::Owed(id) | Target::Paid(id) => self.jump(id),
+            // A double-click would pick the month and drop it again.
+            Target::Month(_) if double => {}
             Target::Month(i) => {
                 let label = self.data.money.by_month.get(i).map(|m| m.label.clone());
                 self.money_month = if self.money_month == label {
@@ -707,7 +727,7 @@ impl UiState {
                             // Leaving a row being typed cancels, as Esc.
                             s.key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
                         }
-                        s.cursor = i;
+                        s.move_to(i);
                     }
                 }
                 if double {
@@ -846,6 +866,16 @@ pub struct App {
 /// How long to wait for input when the refresh timer is off.
 const IDLE_POLL: Duration = Duration::from_secs(60);
 
+/// Most queued events handled before a redraw.
+const EVENT_BATCH: usize = 256;
+
+/// What one input event left to do.
+enum Handled {
+    Quit,
+    Redraw,
+    Nothing,
+}
+
 /// Redraw interval of the upload progress popup.
 const UPLOAD_TICK: Duration = Duration::from_millis(80);
 
@@ -897,6 +927,11 @@ impl App {
     pub fn set_mouse(&mut self, on: bool) {
         self.running.mouse = on;
         self.ui.last_click = None;
+        // `M` writes nothing: the Settings row shows `this session no`.
+        let running = self.running_config();
+        if let Some(s) = &mut self.ui.settings {
+            s.update_session(&running);
+        }
         if let Err(e) = terminal::set_mouse(on) {
             self.ui.toast = Some(Toast::error(format!("mouse: {e}")));
         }
@@ -911,7 +946,8 @@ impl App {
 
     /// `T` or the theme row: the picker over the current catalog.
     pub fn open_picker(&mut self) {
-        self.ui.picker = Some(Picker::new(&self.catalog, &self.theme.name, self.mode));
+        self.ui.picker =
+            Some(Picker::new(&self.catalog, &self.theme.name, self.mode).with_in_use(&self.theme));
     }
 
     /// One settings change: gig-core validates and writes it in place; a
@@ -922,7 +958,7 @@ impl App {
         let file = match Config::set_in_file(&self.ctx.paths.config_file, key, raw) {
             Ok(cfg) => cfg,
             Err(e) => {
-                let msg = e.to_string();
+                let msg = settings::describe(&e, &self.ctx.paths.config_file);
                 match &mut self.ui.settings {
                     Some(s) if Settings::index(key).is_some() => s.refused(key, msg),
                     _ => self.ui.toast = Some(Toast::error(msg)),
@@ -1014,21 +1050,32 @@ impl App {
             return;
         }
         self.stamps = stamps;
-        self.reload_themes();
-        if let Some(p) = &self.ui.picker {
-            let at = p.highlighted().unwrap_or_default().to_string();
-            self.ui.picker = Some(p.rebuilt(&self.catalog, &at, self.mode));
-        }
         let name = self.theme.name.to_string();
+        let was_file = self.catalog.user.contains(&name);
+        self.reload_themes();
         if !self.catalog.user.contains(&name) {
             if let Some(b) = self.catalog.broken.iter().find(|b| b.name == name) {
                 self.ui.toast = Some(Toast::warn(format!(
                     "{}, keeping the colours loaded before",
                     b.reason()
                 )));
+            } else if was_file {
+                // The file in use was deleted: a built-in of that name
+                // takes over, else the colours stay until the next start.
+                self.ui.toast = Some(match Theme::builtin(&name) {
+                    Some(t) => {
+                        self.theme = t.for_mode(self.mode);
+                        Toast::warn(format!("theme {name} file removed, using the built-in"))
+                    }
+                    None => Toast::warn(format!(
+                        "theme {name} file removed, keeping the colours loaded before"
+                    )),
+                });
             }
+            self.rebuild_picker();
             return;
         }
+        self.rebuild_picker();
         if let Some(t) = self.catalog.get(&name) {
             let t = t.for_mode(self.mode);
             if t != self.theme {
@@ -1039,6 +1086,19 @@ impl App {
                 };
                 self.ui.toast = Some(note);
             }
+        }
+    }
+
+    /// The open picker over the reloaded catalogue, its cursor kept.
+    fn rebuild_picker(&mut self) {
+        if let Some(p) = &self.ui.picker {
+            let at = p.highlighted().unwrap_or_default().to_string();
+            let p = p.rebuilt(&self.catalog, &at, self.mode);
+            self.ui.picker = Some(if p.current == self.theme.name {
+                p.with_in_use(&self.theme)
+            } else {
+                p
+            });
         }
     }
 
@@ -1077,37 +1137,33 @@ impl App {
                 None => IDLE_POLL,
             };
             if event::poll(timeout)? {
-                match event::read()? {
-                    Event::Key(key) => {
-                        let width = term.size()?.width;
-                        let outcome = self.ui.handle_key(key, width);
-                        if self.outcome(outcome, term)? {
-                            return Ok(());
-                        }
+                // Everything already queued is handled before the next
+                // draw, so a burst of wheel notches or keys costs one frame,
+                // not one frame each. A click ends the batch: the next one
+                // must hit-test against the frame that click produced.
+                let mut any = false;
+                for _ in 0..EVENT_BATCH {
+                    let ev = event::read()?;
+                    let click = matches!(
+                        ev,
+                        Event::Mouse(MouseEvent {
+                            kind: MouseEventKind::Down(_),
+                            ..
+                        })
+                    );
+                    match self.event(ev, term)? {
+                        Handled::Quit => return Ok(()),
+                        Handled::Redraw => any = true,
+                        Handled::Nothing => {}
                     }
-                    Event::Paste(text) => self.ui.handle_paste(&text),
-                    // Pointer motion arrives often and changes nothing:
-                    // no redraw for it.
-                    Event::Mouse(m)
-                        if !matches!(
-                            m.kind,
-                            MouseEventKind::Down(MouseButton::Left)
-                                | MouseEventKind::ScrollUp
-                                | MouseEventKind::ScrollDown
-                        ) =>
-                    {
-                        redraw = false;
+                    if click || !event::poll(Duration::ZERO)? {
+                        break;
                     }
-                    Event::Mouse(m) => {
-                        let width = term.size()?.width;
-                        let outcome = self.ui.handle_mouse(m, Instant::now(), width);
-                        if self.outcome(outcome, term)? {
-                            return Ok(());
-                        }
-                    }
-                    _ => {}
                 }
-                // Resize and other events just redraw.
+                redraw = any;
+                // Bytes crossterm left unread in the tty would wait for the
+                // next key; make it read them now.
+                terminal::nudge();
             }
             if toast_until.is_some_and(|t| Instant::now() >= t) {
                 self.ui.toast = None;
@@ -1121,6 +1177,41 @@ impl App {
                 }
             }
         }
+    }
+
+    /// One input event. Pointer motion arrives often and changes nothing, so
+    /// it asks for no redraw; resize and other events just redraw.
+    fn event(&mut self, ev: Event, term: &mut Term) -> Result<Handled> {
+        let outcome = match ev {
+            Event::Key(key) => {
+                let width = term.size()?.width;
+                self.ui.handle_key(key, width)
+            }
+            Event::Paste(text) => {
+                self.ui.handle_paste(&text);
+                Outcome::None
+            }
+            Event::Mouse(m)
+                if !matches!(
+                    m.kind,
+                    MouseEventKind::Down(MouseButton::Left)
+                        | MouseEventKind::ScrollUp
+                        | MouseEventKind::ScrollDown
+                ) =>
+            {
+                return Ok(Handled::Nothing);
+            }
+            Event::Mouse(m) => {
+                let width = term.size()?.width;
+                self.ui.handle_mouse(m, Instant::now(), width)
+            }
+            _ => Outcome::None,
+        };
+        Ok(if self.outcome(outcome, term)? {
+            Handled::Quit
+        } else {
+            Handled::Redraw
+        })
     }
 
     /// Carry out the outcomes that need no terminal (settings, the theme
@@ -1158,7 +1249,7 @@ impl App {
         };
         match outcome {
             Outcome::Quit => return Ok(true),
-            Outcome::Redraw => term.clear()?,
+            Outcome::Redraw => terminal::full_clear(term)?,
             Outcome::Act(effect) => self.apply(effect, term)?,
             Outcome::CopyTheme(name) => {
                 if let Some(path) = self.copy_theme(&name) {

@@ -31,7 +31,9 @@ pub struct Snapshot {
     /// All drafts, newest first. Use `open_drafts` for the Drafts view.
     pub drafts: Vec<Draft>,
     pub money: Money,
-    /// `[general] default_currency`; empty means CNY.
+    /// The code the totals are labelled with: the currency most orders are
+    /// in, else `[general] default_currency` (no orders yet); empty means
+    /// CNY. Changing the default relabels nothing already recorded.
     pub currency: String,
 }
 
@@ -164,7 +166,7 @@ impl Snapshot {
             money: Money::compute(&raw, today),
             orders: rows,
             drafts: drafts::list(conn, true)?,
-            currency: ctx.config.general.default_currency.clone(),
+            currency: label_currency(&raw, &ctx.config.general.default_currency),
         })
     }
 
@@ -208,6 +210,24 @@ impl Snapshot {
     pub fn order(&self, id: i64) -> Option<&OrderRow> {
         self.orders.iter().find(|r| r.order.id == id)
     }
+}
+
+/// The currency most `orders` are recorded in (ties go to the default, then
+/// to the alphabetically first); `default` when there are none.
+pub fn label_currency(orders: &[Order], default: &str) -> String {
+    let mut counts: std::collections::BTreeMap<&str, usize> = Default::default();
+    for o in orders.iter().filter(|o| !o.currency.is_empty()) {
+        *counts.entry(o.currency.as_str()).or_default() += 1;
+    }
+    let top = counts.values().copied().max().unwrap_or(0);
+    if top == 0 || counts.get(default) == Some(&top) {
+        return default.to_string();
+    }
+    counts
+        .into_iter()
+        .find(|&(_, n)| n == top)
+        .map(|(c, _)| c.to_string())
+        .unwrap_or_else(|| default.to_string())
 }
 
 /// Spec 2.1: unpaid, in warranty, in progress, queued (then closed); within a
@@ -592,5 +612,24 @@ pub(crate) mod tests {
         assert_eq!(s.money.outstanding.gross, 80000);
         assert_eq!(s.money.outstanding.take_home, 48000);
         assert!(s.drafts.is_empty());
+    }
+
+    #[test]
+    fn totals_are_labelled_with_the_orders_currency() {
+        let mut a = order(1, OrderStatus::Paid, 100);
+        a.currency = "CNY".into();
+        let mut b = order(2, OrderStatus::Paid, 100);
+        b.currency = "CNY".into();
+        let mut c = order(3, OrderStatus::Paid, 100);
+        c.currency = "USD".into();
+        // A new default relabels nothing already recorded.
+        assert_eq!(
+            label_currency(&[a.clone(), b.clone(), c.clone()], "ZZZ"),
+            "CNY"
+        );
+        // A tie goes to the default.
+        assert_eq!(label_currency(&[a.clone(), c.clone()], "USD"), "USD");
+        // No orders: the default.
+        assert_eq!(label_currency(&[], "EUR"), "EUR");
     }
 }

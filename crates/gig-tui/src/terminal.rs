@@ -11,21 +11,31 @@
 //! and `tui.mouse` (or `M`) says so. Every way out (quit, error, panic,
 //! `$EDITOR`) goes through `leave`, which always turns it off, and
 //! `suspend_while` turns it back on afterwards.
+//!
+//! Capture asks only for clicks, drags and the wheel (`?1000`, `?1002`,
+//! SGR `?1006`), not for every pointer motion (`?1003`, which crossterm's
+//! `EnableMouseCapture` turns on). The app ignores motion, and a sweep of
+//! the pointer would otherwise queue kilobytes of reports: crossterm 0.29
+//! reads the tty in 1024-byte chunks and can split a report, and a split
+//! report swallows the next reply or key. For the same reason `leave`
+//! throws away input still queued, so reports never reach the shell or
+//! `$EDITOR`, and redraws never ask the terminal for the cursor position.
 
 use crossterm::cursor::Show;
-use crossterm::event::{
-    DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
-};
-use crossterm::execute;
+use crossterm::event::{DisableBracketedPaste, EnableBracketedPaste};
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
+use crossterm::{execute, Command};
 use ratatui::backend::CrosstermBackend;
+use ratatui::layout::Rect;
 use ratatui::Terminal;
-use std::io::{self, Stdout};
+use std::fmt;
+use std::io::{self, Stdout, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, Once, OnceLock};
 use std::thread::{self, ThreadId};
+use std::time::Duration;
 
 pub type Term = Terminal<CrosstermBackend<Stdout>>;
 
@@ -64,19 +74,144 @@ pub fn enter() -> io::Result<Term> {
     })
 }
 
+/// Clicks, drags and the wheel in SGR encoding; no motion reports.
+struct EnableMouse;
+
+impl Command for EnableMouse {
+    fn write_ansi(&self, f: &mut impl fmt::Write) -> fmt::Result {
+        f.write_str("\x1b[?1000h\x1b[?1002h\x1b[?1006h")
+    }
+    #[cfg(windows)]
+    fn execute_winapi(&self) -> io::Result<()> {
+        crossterm::event::EnableMouseCapture.execute_winapi()
+    }
+}
+
+/// Every mouse mode off, `?1003` included (harmless when it was not on).
+struct DisableMouse;
+
+impl Command for DisableMouse {
+    fn write_ansi(&self, f: &mut impl fmt::Write) -> fmt::Result {
+        f.write_str("\x1b[?1006l\x1b[?1015l\x1b[?1003l\x1b[?1002l\x1b[?1000l")
+    }
+    #[cfg(windows)]
+    fn execute_winapi(&self) -> io::Result<()> {
+        crossterm::event::DisableMouseCapture.execute_winapi()
+    }
+}
+
 /// Undo `enter`. Safe to call more than once. Mouse capture is always
 /// turned off (harmless when it was not on), so the shell gets its mouse
-/// back after a quit, an error or a panic.
+/// back after a quit, an error or a panic. The escape codes are sent even
+/// when raw mode cannot be left, and input still queued (mouse reports,
+/// keys typed ahead) is thrown away so it never reaches the next reader of
+/// the terminal. The first error is returned.
 pub fn leave() -> io::Result<()> {
-    ENTERED.store(false, Ordering::SeqCst);
-    disable_raw_mode()?;
-    execute!(
+    let was_entered = ENTERED.swap(false, Ordering::SeqCst);
+    let out = execute!(
         io::stdout(),
-        DisableMouseCapture,
+        DisableMouse,
         DisableBracketedPaste,
         LeaveAlternateScreen,
         Show
-    )
+    );
+    if was_entered {
+        discard_input();
+    }
+    let raw = disable_raw_mode();
+    out.and(raw)
+}
+
+/// Drop what is queued on stdin: crossterm's own buffer, then the tty's.
+/// The terminal was just told to stop reporting the mouse; reports already
+/// on their way are read until the input has been quiet for a moment, and
+/// bytes crossterm left in the tty are made readable with `nudge`, so a
+/// report it had only half read is completed and dropped rather than left
+/// in its parser, where it would eat the first keys typed after `$EDITOR`.
+fn discard_input() {
+    let started = std::time::Instant::now();
+    for _ in 0..64 {
+        if started.elapsed() > DRAIN_MAX {
+            break;
+        }
+        // What crossterm has already parsed.
+        for _ in 0..4096 {
+            match crossterm::event::poll(Duration::ZERO) {
+                Ok(true) if crossterm::event::read().is_ok() => {}
+                _ => break,
+            }
+        }
+        let quiet = if ask_status_if_pending() {
+            DRAIN_REPLY
+        } else {
+            DRAIN_QUIET
+        };
+        if !matches!(crossterm::event::poll(quiet), Ok(true)) {
+            break;
+        }
+    }
+    #[cfg(unix)]
+    // SAFETY: tcflush only reads its two integer arguments; on a stdin that
+    // is not a terminal it fails with ENOTTY, which is ignored.
+    unsafe {
+        libc::tcflush(libc::STDIN_FILENO, libc::TCIFLUSH);
+    }
+}
+
+/// Input quiet this long counts as drained.
+const DRAIN_QUIET: Duration = Duration::from_millis(30);
+/// How long to wait for the terminal's reply to a nudge.
+const DRAIN_REPLY: Duration = Duration::from_millis(100);
+/// Longest the drain may take, however much keeps arriving.
+const DRAIN_MAX: Duration = Duration::from_millis(500);
+
+/// Bytes the tty holds that nobody has read yet.
+#[cfg(unix)]
+fn pending_input() -> usize {
+    let mut n: libc::c_int = 0;
+    // SAFETY: FIONREAD writes one c_int through the pointer, which points
+    // at a live local.
+    let ok = unsafe { libc::ioctl(libc::STDIN_FILENO, libc::FIONREAD, &mut n) } == 0;
+    if ok {
+        usize::try_from(n).unwrap_or(0)
+    } else {
+        0
+    }
+}
+
+/// crossterm 0.29 reads the tty only when new input arrives (its epoll is
+/// edge-triggered) and stops after the first 1024-byte chunk that holds an
+/// event, so the rest of a larger burst waits in the tty until the next key
+/// arrives. When bytes are waiting there, ask the terminal where its cursor
+/// is (`CSI 6 n`): the reply is new input, so crossterm reads again. The
+/// reply must parse to something: crossterm's read loop only returns once a
+/// chunk yields an event, and the tty is a blocking fd, so a reply that
+/// parses to nothing (`CSI 5 n`'s) would leave it blocked in `read` until
+/// the next key. A cursor report is an internal crossterm event that
+/// `event::read` never returns. Returns whether it asked.
+pub fn nudge() -> bool {
+    ENTERED.load(Ordering::SeqCst) && ask_status_if_pending()
+}
+
+/// `nudge` without the check that the dashboard holds the terminal (used
+/// by `leave` while it drains).
+fn ask_status_if_pending() -> bool {
+    #[cfg(unix)]
+    if pending_input() > 0 {
+        let mut out = io::stdout();
+        return out.write_all(b"\x1b[6n").and_then(|_| out.flush()).is_ok();
+    }
+    false
+}
+
+/// Clear the screen and make the next draw repaint every cell, without
+/// `Terminal::clear`, which asks the terminal for the cursor position: a
+/// reply that arrives inside a split mouse report is never recognised and
+/// the dashboard would wait for it.
+pub fn full_clear(term: &mut Term) -> io::Result<()> {
+    let size = term.size()?;
+    term.resize(Rect::new(0, 0, size.width, size.height))?;
+    io::stdout().flush()
 }
 
 /// Turn mouse capture on or off. Outside the dashboard (tests, before
@@ -87,9 +222,9 @@ pub fn set_mouse(on: bool) -> io::Result<()> {
         return Ok(());
     }
     if on {
-        execute!(io::stdout(), EnableMouseCapture)
+        execute!(io::stdout(), EnableMouse)
     } else {
-        execute!(io::stdout(), DisableMouseCapture)
+        execute!(io::stdout(), DisableMouse)
     }
 }
 
@@ -107,9 +242,9 @@ pub fn suspend_while<T>(term: &mut Term, f: impl FnOnce() -> T) -> io::Result<T>
     execute!(io::stdout(), EnterAlternateScreen, EnableBracketedPaste)?;
     ENTERED.store(true, Ordering::SeqCst);
     if mouse() {
-        execute!(io::stdout(), EnableMouseCapture)?;
+        execute!(io::stdout(), EnableMouse)?;
     }
-    term.clear()?;
+    full_clear(term)?;
     Ok(out)
 }
 

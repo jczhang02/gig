@@ -160,9 +160,20 @@ pub(crate) fn merge(item: &mut Item, want: &toml::Table, key: &str) -> Result<()
 }
 
 /// Replace `path` with `text` atomically. A symlinked config is followed so
-/// the link itself survives; an existing file keeps its permissions.
+/// the link itself survives; an existing file keeps its permissions. A file
+/// its owner made read-only is refused, as a plain write would be, rather
+/// than replaced by the rename; every error names the config file, never
+/// the temporary one beside it.
 pub(crate) fn write_atomic(path: &Path, text: &str) -> Result<()> {
     let target = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let denied = |e: std::io::Error| Error::PathUnavailable(path.to_path_buf(), e);
+    if let Ok(meta) = std::fs::metadata(&target) {
+        if meta.permissions().readonly() {
+            return Err(denied(std::io::Error::from(
+                std::io::ErrorKind::PermissionDenied,
+            )));
+        }
+    }
     let dir = target
         .parent()
         .map(Path::to_path_buf)
@@ -176,7 +187,7 @@ pub(crate) fn write_atomic(path: &Path, text: &str) -> Result<()> {
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| "config.toml".into());
     let tmp = dir.join(format!(".{name}.{}.tmp", std::process::id()));
-    let io = |e| Error::PathUnavailable(tmp.clone(), e);
+    let io = denied;
     let result = (|| {
         let mut f = std::fs::OpenOptions::new()
             .write(true)
@@ -189,7 +200,7 @@ pub(crate) fn write_atomic(path: &Path, text: &str) -> Result<()> {
             f.set_permissions(meta.permissions()).map_err(io)?;
         }
         f.sync_all().map_err(io)?;
-        std::fs::rename(&tmp, &target).map_err(|e| Error::PathUnavailable(target.clone(), e))
+        std::fs::rename(&tmp, &target).map_err(denied)
     })();
     if result.is_err() {
         let _ = std::fs::remove_file(&tmp);
@@ -263,5 +274,22 @@ default_currency = \"CNY\"
         .unwrap_err();
         assert_eq!(err.code(), "invalid_input");
         assert!(set_key(&mut doc, "general..x", &toml::Value::Integer(1)).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_read_only_file_is_refused_and_kept() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "[tui]\nmouse = true\n").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o444)).unwrap();
+        let err = write_atomic(&path, "[tui]\nmouse = false\n").unwrap_err();
+        assert!(err.to_string().contains("config.toml"), "{err}");
+        assert!(!err.to_string().contains(".config.toml."), "{err}");
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "[tui]\nmouse = true\n"
+        );
     }
 }

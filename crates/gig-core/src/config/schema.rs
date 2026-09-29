@@ -34,6 +34,9 @@ pub enum Kind {
     Select(SelectSource),
     /// A single line of text.
     Text,
+    /// An ISO 4217 style currency code: three letters, stored upper case.
+    /// The dashboard uses it as a column header, so it must stay short.
+    Currency,
 }
 
 /// One editable key.
@@ -96,8 +99,8 @@ pub static ENTRIES: &[Entry] = &[
         key: "general.default_currency",
         section: SECTION_GENERAL,
         label: "Currency",
-        kind: Kind::Text,
-        help: "Currency for new orders, e.g. CNY",
+        kind: Kind::Currency,
+        help: "Currency code for new orders, e.g. CNY",
     },
     Entry {
         key: "general.default_cut_ratio",
@@ -168,6 +171,15 @@ pub fn validate_entry(e: &Entry, raw: &str) -> Result<toml::Value> {
                 Ok(toml::Value::String(raw.into()))
             } else {
                 Err(bad(format!("must be one of {}", options.join(", "))))
+            }
+        }
+        Kind::Currency => {
+            if raw.len() == 3 && raw.chars().all(|c| c.is_ascii_alphabetic()) {
+                Ok(toml::Value::String(raw.to_ascii_uppercase()))
+            } else {
+                Err(bad(
+                    "must be a three-letter currency code such as CNY or USD".into(),
+                ))
             }
         }
         Kind::Text => {
@@ -274,10 +286,35 @@ mod tests {
             validate(k, "USD").unwrap(),
             toml::Value::String("USD".into())
         );
+        assert_eq!(
+            validate(k, " eur ").unwrap(),
+            toml::Value::String("EUR".into())
+        );
+        assert_eq!(
+            err(k, "CNY人民币"),
+            "invalid input: general.default_currency must be a three-letter currency code such as CNY or USD"
+        );
         err(k, "");
         err(k, "  ");
+        err(k, "US");
+        err(k, "US1");
         err(k, "a\tb");
-        err(k, &"x".repeat(TEXT_MAX_CHARS + 1));
+
+        // Free text rows: not empty, one line, bounded.
+        let e = Entry {
+            key: "x.text",
+            section: "",
+            label: "",
+            kind: Kind::Text,
+            help: "",
+        };
+        assert_eq!(
+            validate_entry(&e, "hi").unwrap(),
+            toml::Value::String("hi".into())
+        );
+        assert!(validate_entry(&e, "").is_err());
+        assert!(validate_entry(&e, "a\tb").is_err());
+        assert!(validate_entry(&e, &"x".repeat(TEXT_MAX_CHARS + 1)).is_err());
 
         assert_eq!(
             validate("tui.theme", "gruvbox-dark").unwrap(),

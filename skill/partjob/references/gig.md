@@ -45,13 +45,13 @@ gig delete <slug> --yes                      removes the row only, never files; 
 
 gig doctor [--fix]
 gig config get KEY
-gig config set KEY VALUE
+gig config set KEY VALUE                     edits config.toml in place; Settings keys are range-checked (tui.refresh_seconds 0..60, general.warranty_days 0..365, general.default_cut_ratio 0..1, general.default_currency a 3-letter code) and a refusal is invalid_input
 gig config path
 gig config split-secrets [--yes]
 gig migrate --from OLD.db [--to NEW.db] [--dry-run] [--fix-path OLD=NEW]
 gig backup
 gig completion zsh                           raw text
-gig tui [--theme NAME] [--light] [--no-icons] [--refresh N]  JC's dashboard (bare gig in a terminal); agents never run it
+gig tui [--theme NAME] [--light] [--no-icons] [--refresh N] [--mouse|--no-mouse]  JC's dashboard (bare gig in a terminal); agents never run it
 gig version
 ```
 
