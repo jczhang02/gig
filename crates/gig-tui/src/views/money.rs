@@ -1,7 +1,15 @@
 //! Money view (spec 2.3): header numbers with take-home, received per month
 //! for the last 12 months as a bar chart, and the outstanding list.
 
-use super::{cell, cell_right, days, price};
+use super::{cell, cell_right};
+
+fn days(d: Option<i64>) -> String {
+    d.map_or_else(|| "-".to_string(), |d| format!("{d}d"))
+}
+
+fn price(minor: Option<i64>) -> String {
+    minor.map_or_else(|| "-".to_string(), crate::data::money::major)
+}
 use crate::data::money::{major, Amount};
 use crate::text;
 use crate::ui::RenderCx;

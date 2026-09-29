@@ -756,40 +756,169 @@ mod tests {
         assert!(text.contains("图像去噪与超分辨率批处理工具开发及交付, 含批量脚本"));
     }
 
+    /// `sample()` with a sent package, a client question and a long
+    /// requirement change on the selected order.
+    fn rich() -> UiState {
+        let mut state = sample();
+        for r in &mut state.data.orders {
+            if r.order.id == 7 {
+                r.order.platform = Some("xianyu".into());
+                r.order.price_minor = Some(80000);
+                r.job = crate::data::JobMd::parse(
+                    "## Status\n\n- 2026-09-20: 预览已发送, 等客户确认.\n\n## Client questions\n\n- 2026-09-21: 输出 PNG 还是 TIFF?\n",
+                );
+                r.requirement_changes = vec![gig_core::models::RequirementChange {
+                    id: 1,
+                    order_id: 7,
+                    description: "JC要求把模型优化的验证方案改为客户现有代码重跑方案, 每6条文件排序光谱划为一个伪小鼠, 按伪小鼠做5折分层交叉验证".into(),
+                    price_delta_minor: 0,
+                    created_at: "2026-08-21T10:00:00Z".into(),
+                }];
+                r.packages = vec![gig_core::models::Package {
+                    id: 1,
+                    order_id: 7,
+                    package_id: "sers-colitis-analysis-delivery-2026-08-26".into(),
+                    kind: gig_core::models::PackageKind::Full,
+                    dir: String::new(),
+                    manifest_path: String::new(),
+                    zip_path: String::new(),
+                    zip_sha256: None,
+                    file_count: Some(3),
+                    status: gig_core::models::PackageStatus::Sent,
+                    checked_at: None,
+                    sent_at: Some("2026-08-26T10:00:00Z".into()),
+                    channel: Some(gig_core::models::Channel::Oss),
+                    uploader: None,
+                    remote_url: None,
+                    short_url: Some("https://go.jczhang.cc/a30bd870".into()),
+                    expires_at: None,
+                    created_at: "2026-08-26T10:00:00Z".into(),
+                    updated_at: "2026-08-26T10:00:00Z".into(),
+                }];
+            }
+        }
+        state
+    }
+
     #[test]
     fn detail_sections_are_drawn() {
+        let state = rich();
+        let buf = render(200, 50, &state, true);
+        let pane = shell(buf.area, &state).pane.unwrap();
+        let rows: Vec<String> = (0..50)
+            .map(|y| {
+                span_text(&buf, y, pane.x..pane.right())
+                    .trim_end()
+                    .to_string()
+            })
+            .collect();
+        let text = rows.join("\n");
+        for s in [
+            "tk-denoise \u{b7} \u{f0ad} tool \u{b7} xianyu",
+            "delivered \u{b7} 59 days in status",
+            "price          800 CNY",
+            "cut             60%",
+            "take-home      480 CNY",
+            "Next",
+            "Packages  1",
+            "  sers-colitis-analysis-delivery-2026-08-26",
+            "  full \u{b7} sent \u{b7} oss \u{b7} 08-26  go.jczhang.cc/a30bd870",
+            "Latest status  1",
+            "  09-20  预览已发送, 等客户确认.",
+            "Client questions  1",
+            "  ? 09-21  输出 PNG 还是 TIFF?",
+            "Requirement changes  1",
+            "Notes  1",
+            "  09-21  client paid half",
+            "Scorecard",
+            "  score 4/5  \u{b7}  3 decisions  \u{b7}  0 repeat questions  \u{b7}  1 cleanup",
+        ] {
+            assert!(text.contains(s), "{s:?}\n{text}");
+        }
+        let next = rows.iter().find(|l| l.contains("collect payment")).unwrap();
+        assert!(next.ends_with("p paid"), "{next:?}");
+        // Headings bold, link underlined.
+        let (hy, _) = rows
+            .iter()
+            .enumerate()
+            .find(|(_, l)| l.starts_with("Packages"))
+            .unwrap();
+        assert!(buf[(pane.x, hy as u16)].modifier.contains(Modifier::BOLD));
+        let (ly, l) = rows
+            .iter()
+            .enumerate()
+            .find(|(_, l)| l.contains("go.jczhang"))
+            .unwrap();
+        let lx = pane.x + crate::text::width(&l[..l.find("go.jczhang").unwrap()]) as u16;
+        assert!(buf[(lx, ly as u16)].modifier.contains(Modifier::UNDERLINED));
+        // Overdue days are bold unpaid.
+        let (sy, l) = rows
+            .iter()
+            .enumerate()
+            .find(|(_, l)| l.contains("59 days"))
+            .unwrap();
+        let sx = pane.x + crate::text::width(&l[..l.find("59 days").unwrap()]) as u16;
+        assert_eq!(buf[(sx, sy as u16)].fg, Theme::DARK.unpaid);
+        // The empty sections are named once, together.
         let state = sample();
         let text = all(&render(200, 50, &state, true));
-        for s in [
-            "Next action",
-            "collect payment",
-            "Packages",
-            "Latest status",
-            "预览已发送",
-            "Client questions",
-            "Requirement changes",
-            "Notes",
-            "client paid half",
-            "Scorecard",
-            "score 4",
-            "cut 60%",
-        ] {
-            assert!(text.contains(s), "{s}");
-        }
+        assert!(
+            text.contains("no packages \u{b7} no client questions \u{b7} no requirement changes"),
+            "{text}"
+        );
+        assert!(!text.contains("(none)"));
         // Narrow: Enter shows the same detail full screen.
         let narrow = UiState {
             detail_open: true,
-            ..sample()
+            ..rich()
         };
         let text = all(&render(80, 24, &narrow, false));
-        assert!(text.contains("tk-denoise") && text.contains("Next action"));
+        assert!(text.contains("tk-denoise") && text.contains("Next"));
+    }
+
+    #[test]
+    fn pane_at_120x36_keeps_links_whole_and_titles_long() {
+        let state = rich();
+        let buf = render(120, 36, &state, true);
+        let s = shell(buf.area, &state);
+        let pane = s.pane.unwrap();
+        assert_eq!((s.body.width, pane.width), (76, 40));
+        let rows: Vec<String> = (pane.y..pane.bottom())
+            .map(|y| span_text(&buf, y, pane.x..pane.right()).trim().to_string())
+            .collect();
+        for r in &rows {
+            assert!(crate::text::width(r) != 1, "a one-character row: {rows:?}");
+        }
+        assert!(
+            rows.iter().any(|r| r == "go.jczhang.cc/a30bd870"),
+            "{rows:?}"
+        );
+        // Pane entries are capped at 2 rows, the second ending in an ellipsis.
+        let at = rows.iter().position(|r| r.starts_with("08-21")).unwrap();
+        assert!(rows[at + 1].ends_with('\u{2026}'), "{rows:?}");
+        // Every unselected order row shows at least 18 cells of its title.
+        for r in state.order_list() {
+            if r.order.id == 7 {
+                continue;
+            }
+            let slug = format!(" {} ", r.order.slug);
+            let l = (0..36)
+                .map(|y| span_text(&buf, y, s.body.x..s.body.right()))
+                .find(|l| l.contains(&slug))
+                .unwrap();
+            let title = l[l.find("Order ").unwrap()..].trim_end();
+            assert!(
+                crate::text::width(title) >= 18 || title == r.order.title,
+                "{l:?}"
+            );
+        }
     }
 
     #[test]
     fn full_screen_detail_scrolls_to_every_section() {
         let mut state = UiState {
             detail_open: true,
-            ..sample()
+            ..rich()
         };
         // A long note list and a multi-line change, so it overflows 24 rows.
         for r in &mut state.data.orders {
@@ -810,7 +939,7 @@ mod tests {
             )
         };
         let text = all(&render(80, 24, &state, false));
-        assert!(text.contains("more lines"), "{text}");
+        assert!(text.contains("more  PgDn"), "{text}");
         assert!(!text.contains("Scorecard"), "{text}");
         let mut seen = String::new();
         for _ in 0..5 {

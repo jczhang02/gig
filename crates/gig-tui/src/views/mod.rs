@@ -80,16 +80,6 @@ pub(crate) fn cell_right(s: &str, cells: usize, style: Style) -> Span<'static> {
     Span::styled(format!("{}{t}", " ".repeat(pad)), style)
 }
 
-/// `"12d"`, or `"-"` when unknown.
-pub(crate) fn days(d: Option<i64>) -> String {
-    d.map_or_else(|| "-".to_string(), |d| format!("{d}d"))
-}
-
-/// Price in major units, or `"-"` when there is none.
-pub(crate) fn price(minor: Option<i64>) -> String {
-    minor.map_or_else(|| "-".to_string(), crate::data::money::major)
-}
-
 /// Blank cells.
 pub(crate) fn gap(cells: usize) -> Span<'static> {
     Span::raw(" ".repeat(cells))
