@@ -37,6 +37,7 @@ impl Cli {
             Command::Config(c) => format!("config {}", c.name()),
             Command::Backup => "backup".into(),
             Command::Completion(_) => "completion".into(),
+            Command::Tui(_) => "tui".into(),
             Command::Version => "version".into(),
         }
     }
@@ -90,6 +91,8 @@ pub enum Command {
     Backup,
     /// Print a shell completion script
     Completion(CompletionArgs),
+    /// Terminal dashboard for humans (not JSON)
+    Tui(TuiArgs),
     /// Print the version
     Version,
 }
@@ -510,4 +513,28 @@ impl ConfigCmd {
 pub struct CompletionArgs {
     #[arg(value_enum)]
     pub shell: clap_complete::Shell,
+}
+
+#[derive(Args, Debug)]
+pub struct TuiArgs {
+    /// Light palette ([tui] light)
+    #[arg(long)]
+    pub light: bool,
+    /// Text labels without Nerd Font glyphs ([tui] icons = false)
+    #[arg(long)]
+    pub no_icons: bool,
+    /// Auto-refresh period in seconds, 0 disables ([tui] refresh_seconds, default 2)
+    #[arg(long, value_name = "SECONDS")]
+    pub refresh: Option<u64>,
+}
+
+impl TuiArgs {
+    /// Only flags actually given override the config.
+    pub fn opts(&self) -> gig_tui::Opts {
+        gig_tui::Opts {
+            light: self.light.then_some(true),
+            icons: self.no_icons.then_some(false),
+            refresh_seconds: self.refresh,
+        }
+    }
 }

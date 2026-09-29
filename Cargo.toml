@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/gig-core",
     "crates/gig-cli",
+    "crates/gig-tui",
 ]
 
 [workspace.package]
@@ -32,3 +33,7 @@ zip = { version = "0.6", default-features = false, features = ["deflate"] }
 ureq = { version = "2", features = ["json"] }
 sha2 = "0.10"
 hex = "0.4"
+ratatui = "0.30"
+crossterm = "0.29"
+arboard = "3.6"
+unicode-width = "0.2"

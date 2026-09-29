@@ -56,6 +56,9 @@ pub fn run(cli: Cli) -> Result<Output> {
             clap_complete::generate(a.shell, &mut cmd, "gig", &mut buf);
             out(json!({ "script": String::from_utf8_lossy(&buf) }))
         }
+        Command::Tui(_) => Err(Error::InvalidInput(
+            "gig tui draws a terminal UI and has no JSON output".into(),
+        )),
         Command::Config(c) => run_config(c),
         Command::Migrate(a) => run_migrate(a),
         other => {
@@ -331,7 +334,11 @@ fn run_with_db(ctx: &Ctx, cmd: Command) -> Result<Output> {
                 .map_err(Error::Db)?;
             out(json!({ "backup": dest }))
         }
-        Command::Version | Command::Completion(_) | Command::Config(_) | Command::Migrate(_) => {
+        Command::Version
+        | Command::Completion(_)
+        | Command::Tui(_)
+        | Command::Config(_)
+        | Command::Migrate(_) => {
             unreachable!()
         }
     }

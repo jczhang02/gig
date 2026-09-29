@@ -105,6 +105,7 @@ pub(crate) fn secure_dir(_path: &Path) -> Result<()> {
 pub struct Config {
     pub general: General,
     pub delivery: Delivery,
+    pub tui: Tui,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
@@ -187,6 +188,62 @@ pub struct S3 {
     pub allow_insecure_http: bool,
 }
 
+/// `[tui]`: settings for `gig tui`. Flags override these; `GIG_TUI_*` overrides both.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(default, deny_unknown_fields)]
+pub struct Tui {
+    /// Light palette instead of the dark default.
+    pub light: bool,
+    /// Nerd Font glyphs next to the text labels.
+    pub icons: bool,
+    /// Auto-refresh period; 0 disables the timer.
+    pub refresh_seconds: u64,
+}
+
+impl Default for Tui {
+    fn default() -> Self {
+        Self {
+            light: false,
+            icons: true,
+            refresh_seconds: 2,
+        }
+    }
+}
+
+impl Tui {
+    /// Apply `GIG_TUI_LIGHT`, `GIG_TUI_ICONS` and `GIG_TUI_REFRESH_SECONDS`.
+    /// Idempotent, so `gig tui` can call it again after applying its flags
+    /// to keep the env > flags > file precedence.
+    pub fn apply_env_overrides(&mut self) -> Result<()> {
+        self.apply_overrides(|k| std::env::var(k).ok().filter(|v| !v.is_empty()))
+    }
+
+    fn apply_overrides(&mut self, env: impl Fn(&str) -> Option<String>) -> Result<()> {
+        if let Some(v) = env("GIG_TUI_LIGHT") {
+            self.light = parse_bool("GIG_TUI_LIGHT", &v)?;
+        }
+        if let Some(v) = env("GIG_TUI_ICONS") {
+            self.icons = parse_bool("GIG_TUI_ICONS", &v)?;
+        }
+        if let Some(v) = env("GIG_TUI_REFRESH_SECONDS") {
+            self.refresh_seconds = v.parse().map_err(|_| {
+                Error::Config("GIG_TUI_REFRESH_SECONDS must be a non-negative integer".into())
+            })?;
+        }
+        Ok(())
+    }
+}
+
+fn parse_bool(var: &str, raw: &str) -> Result<bool> {
+    match raw.to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Ok(true),
+        "0" | "false" | "no" | "off" => Ok(false),
+        _ => Err(Error::Config(format!(
+            "{var} must be true or false (also 1/0, yes/no, on/off)"
+        ))),
+    }
+}
+
 const SECRET_KEYS: [&str; 3] = ["access_key", "secret_key", "token"];
 
 impl Config {
@@ -246,7 +303,7 @@ impl Config {
                 Error::Config("GIG_DELIVERY_LINK_TTL_SECONDS must be an integer".into())
             })?;
         }
-        Ok(())
+        self.tui.apply_env_overrides()
     }
 
     pub fn save(&self, path: &Path) -> Result<()> {
@@ -423,6 +480,77 @@ endpoint = "https://x"
             "secrets"
         );
         assert!(cfg.set("general.warranty_days", "soon").is_err());
+    }
+
+    #[test]
+    fn tui_section_defaults_and_parses() {
+        let cfg = Config::parse("").unwrap();
+        assert_eq!(cfg.tui, Tui::default());
+        assert!(!cfg.tui.light);
+        assert!(cfg.tui.icons);
+        assert_eq!(cfg.tui.refresh_seconds, 2);
+
+        let cfg =
+            Config::parse("[tui]\nlight = true\nicons = false\nrefresh_seconds = 0\n").unwrap();
+        assert!(cfg.tui.light);
+        assert!(!cfg.tui.icons);
+        assert_eq!(cfg.tui.refresh_seconds, 0);
+
+        // Partial sections keep the other defaults.
+        let cfg = Config::parse("[tui]\nrefresh_seconds = 5\n").unwrap();
+        assert!(cfg.tui.icons);
+        assert_eq!(cfg.tui.refresh_seconds, 5);
+    }
+
+    #[test]
+    fn tui_section_refuses_unknown_fields() {
+        assert!(Config::parse("[tui]\ntheme = \"dark\"\n").is_err());
+        assert!(Config::parse("[tui]\nrefresh_seconds = -1\n").is_err());
+    }
+
+    #[test]
+    fn tui_env_overrides() {
+        let vars: BTreeMap<&str, &str> = [
+            ("GIG_TUI_LIGHT", "1"),
+            ("GIG_TUI_ICONS", "false"),
+            ("GIG_TUI_REFRESH_SECONDS", "10"),
+        ]
+        .into();
+        let mut tui = Tui::default();
+        tui.apply_overrides(|k| vars.get(k).map(|v| v.to_string()))
+            .unwrap();
+        assert_eq!(
+            tui,
+            Tui {
+                light: true,
+                icons: false,
+                refresh_seconds: 10
+            }
+        );
+
+        // Unset variables leave the values alone.
+        let mut tui = Tui::default();
+        tui.apply_overrides(|_| None).unwrap();
+        assert_eq!(tui, Tui::default());
+
+        let mut tui = Tui::default();
+        let err = tui
+            .apply_overrides(|k| (k == "GIG_TUI_ICONS").then(|| "maybe".to_string()))
+            .unwrap_err();
+        assert_eq!(err.code(), "config");
+        let err = tui
+            .apply_overrides(|k| (k == "GIG_TUI_REFRESH_SECONDS").then(|| "-2".to_string()))
+            .unwrap_err();
+        assert_eq!(err.code(), "config");
+    }
+
+    #[test]
+    fn tui_keys_work_with_config_set() {
+        let mut cfg = Config::default();
+        cfg.set("tui.refresh_seconds", "7").unwrap();
+        cfg.set("tui.light", "true").unwrap();
+        assert_eq!(cfg.tui.refresh_seconds, 7);
+        assert!(cfg.tui.light);
     }
 
     #[test]

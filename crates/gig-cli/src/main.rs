@@ -14,6 +14,14 @@ fn main() {
         clap_complete::generate(c.shell, &mut cmd, "gig", &mut std::io::stdout());
         return;
     }
+    if let cli::Command::Tui(t) = &args.command {
+        // The second raw-output command: a terminal UI, no JSON envelope.
+        if let Err(e) = gig_tui::run(t.opts()) {
+            eprintln!("gig tui: {e}");
+            std::process::exit(1);
+        }
+        return;
+    }
     let command = args.command_name();
     match run::run(args) {
         Ok(output) => {
