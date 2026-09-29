@@ -11,7 +11,7 @@ one JSON document per command. It is driven by the `partjob` skill
 
 ## Install
 
-Rust 1.91 or newer.
+Builds with whatever Rust the system provides (tested on 1.98); no toolchain pin, no rustup needed.
 
 ```bash
 git clone https://github.com/jczhang02/gig.git
