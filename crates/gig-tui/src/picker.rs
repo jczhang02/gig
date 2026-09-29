@@ -4,6 +4,7 @@
 //! whole screen (`ui::draw` draws with `preview()`); Enter keeps it, Esc
 //! restores the one in use.
 
+use crate::mouse::{Hits, Pane, Target};
 use crate::popup::{self, Tone};
 use crate::text;
 use crate::theme::{ColorMode, Theme};
@@ -187,7 +188,7 @@ fn swatches(t: &Theme) -> Vec<Span<'static>> {
     out
 }
 
-pub fn render(frame: &mut Frame, area: Rect, p: &Picker, t: &Theme) {
+pub fn render(frame: &mut Frame, area: Rect, p: &Picker, t: &Theme, hits: &Hits) {
     let width = WIDTH.min(area.width.saturating_sub(4)).max(20);
     // Content width inside the frame and padding; lines start in the
     // padding so the marker sits in its first cell.
@@ -256,7 +257,10 @@ pub fn render(frame: &mut Frame, area: Rect, p: &Picker, t: &Theme) {
         ],
     );
     let want = (body.len() as u16).saturating_add(2);
-    let inner = popup::open(frame, area, width, want, "theme", Tone::Plain, t);
+    let inner = popup::open(frame, area, width, want, "theme", Tone::Plain, t, hits);
+    if let Some(m) = hits.map().modal {
+        hits.pane(m, Pane::Picker);
+    }
     let body_h = usize::from(inner.height.saturating_sub(2));
     // Keep the cursor row in view.
     let mut offset = p.offset.get().min(body.len().saturating_sub(body_h));
@@ -277,6 +281,16 @@ pub fn render(frame: &mut Frame, area: Rect, p: &Picker, t: &Theme) {
         Paragraph::new(body.clone()).scroll((offset as u16, 0)),
         Rect::new(x0, inner.y, inner.width + popup::PAD_X, body_h as u16),
     );
+    // Mouse: every drawn row that holds a theme (broken files are listed,
+    // not chosen).
+    for (k, i) in (offset..p.rows.len()).take(body_h).enumerate() {
+        if p.rows[i].theme.is_some() {
+            hits.add(
+                Rect::new(x0, inner.y + k as u16, full_w, 1),
+                Target::Theme(i),
+            );
+        }
+    }
     let mut footer = footer;
     let hidden = body.len().saturating_sub(body_h);
     if hidden > 0 {
@@ -286,6 +300,7 @@ pub fn render(frame: &mut Frame, area: Rect, p: &Picker, t: &Theme) {
         ));
     }
     if inner.height >= 1 {
+        hits.hints(inner.x, inner.bottom() - 1, &footer, inner.right());
         frame.render_widget(
             Paragraph::new(footer),
             Rect {

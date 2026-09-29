@@ -43,6 +43,9 @@ pub struct Month {
     /// `YYYY-MM`.
     pub label: String,
     pub amount: Amount,
+    /// The orders paid in the month, newest payment first (the Money
+    /// drill-down, TUI-SPEC 8.2).
+    pub order_ids: Vec<i64>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -75,6 +78,7 @@ impl Money {
             .map(|label| Month {
                 label,
                 amount: Amount::default(),
+                order_ids: Vec::new(),
             })
             .collect();
         let mut m = Money::default();
@@ -110,7 +114,21 @@ impl Money {
                 .find(|s| paid.get(..7) == Some(s.label.as_str()))
             {
                 slot.amount.add(o);
+                slot.order_ids.push(o.id);
             }
+        }
+        // Newest payment first; the same day by id, newest first.
+        let paid_on = |id: &i64| {
+            orders
+                .iter()
+                .find(|o| o.id == *id)
+                .and_then(|o| o.paid_at.as_deref())
+                .and_then(day_part)
+                .map(str::to_string)
+        };
+        for slot in &mut by_month {
+            slot.order_ids
+                .sort_by(|a, b| paid_on(b).cmp(&paid_on(a)).then(b.cmp(a)));
         }
         m.owed.sort_by(|a, b| {
             b.days
@@ -245,11 +263,27 @@ mod tests {
         assert_eq!(march.amount.gross, 20000);
         assert_eq!(m.by_month[11].label, "2026-09");
         assert_eq!(m.by_month[11].amount.gross, 100000);
+        // The drill-down: the orders paid in a month, cancelled ones left out.
+        assert_eq!(m.by_month[11].order_ids, vec![3]);
+        assert_eq!(march.order_ids, vec![4]);
+        assert!(m.by_month[1].order_ids.is_empty());
         let total: i64 = m.by_month.iter().map(|x| x.amount.gross).sum();
         assert_eq!(total, 150000);
 
         let owed: Vec<_> = m.owed.iter().map(|o| (o.order_id, o.days)).collect();
         assert_eq!(owed, vec![(2, Some(40)), (1, Some(10))]);
+    }
+
+    #[test]
+    fn month_orders_newest_payment_first() {
+        let mut a = order(1, OrderStatus::Paid, 1000);
+        a.paid_at = Some("2026-09-20".into());
+        let mut b = order(2, OrderStatus::Archived, 1000);
+        b.paid_at = Some("2026-09-02T10:00:00Z".into());
+        let mut c = order(3, OrderStatus::Paid, 1000);
+        c.paid_at = Some("2026-09-25".into());
+        let m = Money::compute(&[a, b, c], "2026-09-29");
+        assert_eq!(m.by_month[11].order_ids, vec![3, 1, 2]);
     }
 
     #[test]

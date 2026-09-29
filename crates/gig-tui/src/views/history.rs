@@ -102,6 +102,11 @@ pub fn render(frame: &mut Frame, area: Rect, cx: &RenderCx) {
         if lines.len() >= usize::from(area.height) {
             break;
         }
+        // Mouse: click selects, double-click opens the detail.
+        cx.state.hits.add(
+            Rect::new(area.x, area.y + lines.len() as u16, area.width, 1),
+            crate::mouse::Target::Order(r.order.id),
+        );
         let line = row_line(cx, r, &c, i == selected);
         lines.push(if i == selected {
             banded(line, area.width, t)

@@ -419,6 +419,25 @@ pub fn popup_key(ui: &mut UiState, key: KeyEvent) -> Effect {
     }
 }
 
+/// A click on form field `i` (a locked field keeps the focus where it
+/// is). Leaving a filled slug field checks it, as Tab does.
+pub fn focus_field(ui: &mut UiState, i: usize) {
+    let Some(Popup::Form(form)) = ui.popup.as_mut() else {
+        return;
+    };
+    if form.fields.get(i).is_none_or(|f| f.locked) || form.focus == i {
+        return;
+    }
+    let from = form.focus;
+    form.focus = i;
+    let is_slug = form.fields.get(from).is_some_and(|f| f.label == "slug");
+    if is_slug && !form.fields[from].value().trim().is_empty() {
+        let mut form = form.clone();
+        validate(ui, &mut form);
+        ui.popup = Some(Popup::Form(form));
+    }
+}
+
 /// Checks that need no database round trip: the slug of a new order or
 /// draft is valid and free. Each problem is set on its field; true when
 /// there is none.

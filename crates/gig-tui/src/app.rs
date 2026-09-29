@@ -3,6 +3,7 @@
 use crate::actions::{self, Action, Effect};
 use crate::data::{JobCache, OrderRow, Snapshot};
 use crate::icons::Icons;
+use crate::mouse::{self, Click, Hits, Pane, Target};
 use crate::picker::{PickCmd, Picker};
 use crate::popup::{Form, Popup, Scroll};
 use crate::settings::{self, Cmd, Settings};
@@ -11,7 +12,10 @@ use crate::theme::{ColorMode, Theme};
 use crate::themes::{Catalog, Stamps};
 use crate::ui::{self, WidthClass};
 use crate::upload::{self, UploadJob};
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::event::{
+    self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent,
+    MouseEventKind,
+};
 use gig_core::config::{Config, Tui};
 use gig_core::delivery::configured_uploader;
 use gig_core::models::Draft;
@@ -173,6 +177,13 @@ pub struct UiState {
     pub settings: Option<Settings>,
     /// `T` or the theme row: the theme picker, previewing as it moves.
     pub picker: Option<Picker>,
+    /// Money: the chart month whose paid orders are listed under the chart
+    /// (a bar click), by index into `data.money.by_month`.
+    pub money_month: Option<usize>,
+    /// What the last frame drew where, for mouse events (TUI-SPEC 8.2).
+    pub hits: Hits,
+    /// The last click, to spot a double-click.
+    pub last_click: Option<Click>,
 }
 
 impl Default for UiState {
@@ -195,6 +206,9 @@ impl Default for UiState {
             last_form: None,
             settings: None,
             picker: None,
+            money_month: None,
+            hits: Hits::default(),
+            last_click: None,
         }
     }
 }
@@ -223,6 +237,8 @@ pub enum Outcome {
     },
     /// `c` in the picker: copy a built-in theme to a file and edit it.
     CopyTheme(String),
+    /// `M`: mouse capture on or off for this session (native selection).
+    ToggleMouse,
     /// Not a key of this app state: the current view may use it.
     Unhandled(KeyEvent),
 }
@@ -460,6 +476,12 @@ impl UiState {
             }
             return Outcome::None;
         }
+        // `M` everywhere but while typing (TUI-SPEC 8.2).
+        let typing =
+            self.filter().editing || self.settings.as_ref().is_some_and(|s| s.edit.is_some());
+        if key.code == KeyCode::Char('M') && !typing && !ctrl {
+            return Outcome::ToggleMouse;
+        }
         if let Some(s) = &mut self.settings {
             return match s.key(key) {
                 Cmd::None => Outcome::None,
@@ -543,6 +565,8 @@ impl UiState {
                     self.detail_scroll.offset = 0;
                 } else if self.notes_pane.is_some() {
                     self.notes_pane = None;
+                } else if self.view == View::Money && self.money_month.is_some() {
+                    self.money_month = None;
                 } else {
                     *self.filter_mut() = Filter::default();
                 }
@@ -597,6 +621,196 @@ impl UiState {
                 None => Outcome::Unhandled(key),
             },
         }
+    }
+
+    /// A plain key press, as a hint button or a double-click sends it.
+    fn press(&mut self, code: KeyCode, width: u16) -> Outcome {
+        self.handle_key(KeyEvent::new(code, KeyModifiers::NONE), width)
+    }
+
+    /// Route one mouse event (TUI-SPEC 8.2) against what the last frame
+    /// recorded in `hits`. `now` is the event time, passed in so that
+    /// double-clicks can be tested. Moves, drags, releases and the other
+    /// buttons do nothing.
+    pub fn handle_mouse(&mut self, ev: MouseEvent, now: Instant, width: u16) -> Outcome {
+        let map = self.hits.map();
+        let (x, y) = (ev.column, ev.row);
+        match ev.kind {
+            MouseEventKind::ScrollUp => self.wheel(map.pane_at(x, y), -1),
+            MouseEventKind::ScrollDown => self.wheel(map.pane_at(x, y), 1),
+            MouseEventKind::Down(MouseButton::Left) => {
+                // A click is a key for the toast: it clears it.
+                self.toast = None;
+                if map.outside_modal(x, y) {
+                    // Outside a popup: exactly what Esc does there.
+                    self.last_click = None;
+                    return self.press(KeyCode::Esc, width);
+                }
+                let Some(target) = map.target_at(x, y).cloned() else {
+                    self.last_click = None;
+                    return Outcome::None;
+                };
+                let double = mouse::is_double(self.last_click.as_ref(), &target, now);
+                // The second click of a double-click does not start another.
+                self.last_click = (!double).then(|| Click {
+                    at: now,
+                    target: target.clone(),
+                });
+                self.click(target, double, width)
+            }
+            _ => Outcome::None,
+        }
+    }
+
+    fn click(&mut self, target: Target, double: bool, width: u16) -> Outcome {
+        match target {
+            Target::Tab(v) => {
+                // A tab leaves Settings and the full-screen detail as well.
+                self.settings = None;
+                self.switch(v);
+            }
+            Target::Key(key) => return self.handle_key(key, width),
+            Target::Order(id) => {
+                if self.selected != Some(id) {
+                    self.selected = Some(id);
+                    self.detail_scroll.offset = 0;
+                }
+                if double {
+                    self.detail_open = true;
+                    self.detail_scroll.offset = 0;
+                }
+            }
+            Target::Draft(id) => {
+                self.selected_draft = Some(id);
+                if double && self.notes_pane.is_none() {
+                    actions::draft_notes(self, WidthClass::of(width) != WidthClass::Narrow);
+                } else if self.notes_pane.is_some() {
+                    // The notes pane follows the selection.
+                    actions::draft_notes(self, true);
+                }
+            }
+            Target::Owed(id) | Target::Paid(id) => self.jump(id),
+            Target::Month(i) => {
+                self.money_month = if self.money_month == Some(i) {
+                    None
+                } else {
+                    Some(i)
+                };
+            }
+            Target::Link(url) => return Outcome::Act(Effect::Copy(url)),
+            Target::Setting(i) => {
+                if let Some(s) = &mut self.settings {
+                    if s.cursor != i {
+                        if s.edit.is_some() {
+                            // Leaving a row being typed cancels, as Esc.
+                            s.key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+                        }
+                        s.cursor = i;
+                    }
+                }
+                if double {
+                    return self.press(KeyCode::Enter, width);
+                }
+            }
+            Target::Theme(i) => {
+                if let Some(p) = &mut self.picker {
+                    if p.rows.get(i).is_some_and(|r| r.theme.is_some()) {
+                        p.cursor = i;
+                    }
+                }
+                if double {
+                    return self.press(KeyCode::Enter, width);
+                }
+            }
+            Target::Field(i) => {
+                let focused = match &self.popup {
+                    Some(Popup::Form(f)) => f.focus == i,
+                    _ => return Outcome::None,
+                };
+                if !focused {
+                    actions::focus_field(self, i);
+                    return Outcome::None;
+                }
+                // A click on the focused field works it: a toggle flips, a
+                // select moves on, an $EDITOR field opens the editor.
+                let code = match &self.popup {
+                    Some(Popup::Form(f)) => match f.fields.get(i).map(|f| &f.kind) {
+                        Some(crate::popup::FieldKind::Toggle(_))
+                        | Some(crate::popup::FieldKind::Select { .. }) => KeyCode::Char(' '),
+                        Some(crate::popup::FieldKind::Editor(_)) => KeyCode::Enter,
+                        _ => return Outcome::None,
+                    },
+                    _ => return Outcome::None,
+                };
+                return self.press(code, width);
+            }
+            Target::Item(i) => {
+                if let Some(Popup::Pick(p)) = &mut self.popup {
+                    if i < p.items.len() {
+                        p.selected = i;
+                    }
+                }
+                if double {
+                    return self.press(KeyCode::Enter, width);
+                }
+            }
+        }
+        Outcome::None
+    }
+
+    /// The wheel over `pane`: lists move their selection (a list has no
+    /// scroll of its own; its window follows the selection), bodies scroll.
+    fn wheel(&mut self, pane: Option<Pane>, delta: isize) -> Outcome {
+        let code = if delta < 0 {
+            KeyCode::Up
+        } else {
+            KeyCode::Down
+        };
+        let rows = delta as i32 * i32::from(mouse::WHEEL_ROWS);
+        let key = KeyEvent::new(code, KeyModifiers::NONE);
+        match pane {
+            Some(Pane::List) => self.move_selection(delta),
+            Some(Pane::Detail) => self.detail_scroll.by(rows),
+            Some(Pane::Help) => self.help_scroll.by(rows),
+            Some(Pane::Settings) => {
+                if let Some(s) = self.settings.as_mut().filter(|s| s.edit.is_none()) {
+                    s.key(key);
+                }
+            }
+            Some(Pane::Picker) => {
+                if let Some(p) = &mut self.picker {
+                    p.key(key);
+                }
+            }
+            Some(Pane::Popup) => match &mut self.popup {
+                Some(Popup::Confirm { scroll, .. } | Popup::Message { scroll, .. }) => {
+                    scroll.by(rows)
+                }
+                Some(p @ Popup::Pick(_)) => {
+                    p.handle_key(key);
+                }
+                _ => {}
+            },
+            None => {}
+        }
+        Outcome::None
+    }
+
+    /// Show order `id` where it lives: Orders, or History once it is closed
+    /// (an outstanding row or a drill-down row was clicked). A filter that
+    /// would hide it is cleared.
+    fn jump(&mut self, id: i64) {
+        let open = self
+            .data
+            .active_orders(false)
+            .iter()
+            .any(|r| r.order.id == id);
+        self.switch(if open { View::Orders } else { View::History });
+        if !self.order_list().iter().any(|r| r.order.id == id) {
+            *self.filter_mut() = Filter::default();
+        }
+        self.selected = Some(id);
+        self.detail_scroll.offset = 0;
     }
 }
 
@@ -676,6 +890,16 @@ impl App {
         }
     }
 
+    /// Mouse capture on or off for the running dashboard. A terminal that
+    /// refuses is reported on the message row.
+    pub fn set_mouse(&mut self, on: bool) {
+        self.running.mouse = on;
+        self.ui.last_click = None;
+        if let Err(e) = terminal::set_mouse(on) {
+            self.ui.toast = Some(Toast::error(format!("mouse: {e}")));
+        }
+    }
+
     /// `,`: read config.toml and open the overlay.
     pub fn open_settings(&mut self) {
         let path = self.ctx.paths.config_file.clone();
@@ -720,7 +944,7 @@ impl App {
                 self.running.refresh_seconds = file.tui.refresh_seconds;
                 self.set_refresh(file.tui.refresh_seconds);
             }
-            "tui.mouse" => self.running.mouse = file.tui.mouse,
+            "tui.mouse" => self.set_mouse(file.tui.mouse),
             _ => {
                 // `general.*`: the services read ctx.config, so new orders
                 // pick the value up at once.
@@ -834,8 +1058,12 @@ impl App {
     }
 
     pub fn run_loop(&mut self, term: &mut Term) -> Result<()> {
+        let mut redraw = true;
         loop {
-            self.draw(term)?;
+            if redraw {
+                self.draw(term)?;
+            }
+            redraw = true;
 
             let toast_until = self.ui.toast.as_ref().and_then(|t| t.until);
             let wake = match (self.next_tick, toast_until) {
@@ -856,17 +1084,38 @@ impl App {
                         }
                     }
                     Event::Paste(text) => self.ui.handle_paste(&text),
+                    // Pointer motion arrives often and changes nothing:
+                    // no redraw for it.
+                    Event::Mouse(m)
+                        if !matches!(
+                            m.kind,
+                            MouseEventKind::Down(MouseButton::Left)
+                                | MouseEventKind::ScrollUp
+                                | MouseEventKind::ScrollDown
+                        ) =>
+                    {
+                        redraw = false;
+                    }
+                    Event::Mouse(m) => {
+                        let width = term.size()?.width;
+                        let outcome = self.ui.handle_mouse(m, Instant::now(), width);
+                        if self.outcome(outcome, term)? {
+                            return Ok(());
+                        }
+                    }
                     _ => {}
                 }
                 // Resize and other events just redraw.
             }
             if toast_until.is_some_and(|t| Instant::now() >= t) {
                 self.ui.toast = None;
+                redraw = true;
             }
             if let (Some(t), Some(every)) = (self.next_tick, self.refresh_every) {
                 if Instant::now() >= t {
                     self.tick();
                     self.next_tick = Instant::now().checked_add(every);
+                    redraw = true;
                 }
             }
         }
@@ -883,6 +1132,17 @@ impl App {
             Outcome::OpenSettings => self.open_settings(),
             Outcome::OpenPicker => self.open_picker(),
             Outcome::WriteSetting { key, raw } => self.write_setting(key, &raw),
+            Outcome::ToggleMouse => {
+                let on = !self.running.mouse;
+                self.set_mouse(on);
+                if self.ui.toast.is_none() {
+                    self.ui.toast = Some(Toast::info(if on {
+                        "mouse on"
+                    } else {
+                        "mouse off, the terminal selects text; M turns it on"
+                    }));
+                }
+            }
             Outcome::None | Outcome::Unhandled(_) => {}
             other => return Some(other),
         }
@@ -1067,6 +1327,16 @@ impl App {
     }
 
     fn draw(&self, term: &mut Term) -> Result<()> {
+        self.draw_on(term)?;
+        Ok(())
+    }
+
+    /// Draw one frame on any backend (the tests use `TestBackend`); this
+    /// also records the mouse regions of the frame.
+    pub fn draw_on<B: ratatui::backend::Backend>(
+        &self,
+        term: &mut ratatui::Terminal<B>,
+    ) -> std::result::Result<(), B::Error> {
         term.draw(|frame| {
             let cx = ui::RenderCx {
                 state: &self.ui,

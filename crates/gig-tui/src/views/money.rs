@@ -5,6 +5,8 @@
 use super::orders::{GAP, PRICE, SLUG};
 use super::{banded, cell, cell_right, empty_right, gap, marker, price_cell, DOT};
 use crate::data::money::{Amount, Month};
+use crate::data::{day_part, Group};
+use crate::mouse::Target;
 use crate::text;
 use crate::theme::OVERDUE_DAYS;
 use crate::ui::{RenderCx, WidthClass, MIN_TITLE};
@@ -88,6 +90,23 @@ pub fn render(frame: &mut Frame, area: Rect, cx: &RenderCx) {
         (None, None)
     };
     take(1);
+    // A clicked month lists its payments between the chart and the
+    // outstanding table (section 11.4): as many rows as fit while the table
+    // keeps its heading, header and one row.
+    let drill = cx
+        .state
+        .money_month
+        .filter(|_| chart_r.is_some())
+        .and_then(|i| cx.state.data.money.by_month.get(i));
+    let drill_r = drill.and_then(|m| {
+        let want = 2 + m.order_ids.len().max(1) as u16;
+        let room = take(0).map_or(0, |r| area.bottom().saturating_sub(r.y));
+        let keep = 1 + 3;
+        let rows = want.min(room.saturating_sub(keep).max(3)).min(room);
+        let r = take(rows);
+        take(1);
+        r
+    });
     let table_r = take(0).map(|r| Rect {
         height: area.bottom().saturating_sub(r.y),
         ..r
@@ -100,6 +119,9 @@ pub fn render(frame: &mut Frame, area: Rect, cx: &RenderCx) {
     }
     if let Some(r) = chart_r {
         chart(frame, r, cx, h, term.width);
+    }
+    if let (Some(r), Some(m)) = (drill_r, drill) {
+        month_orders(frame, r, cx, class, m);
     }
     if let Some(r) = table_r {
         outstanding(frame, r, cx, class);
@@ -280,10 +302,16 @@ fn chart(frame: &mut Frame, area: Rect, cx: &RenderCx, h: u16, term_width: u16) 
             Style::new().fg(t.border),
         );
     }
+    let picked = cx.state.money_month;
     for (i, mo) in months.iter().enumerate() {
         let now = i == last;
         let x0 = area.x + i as u16 * s;
         let bx = x0 + off;
+        // Mouse: the whole slot (label, bar, month and year) picks the
+        // month for the drill-down.
+        cx.state
+            .hits
+            .add(Rect::new(x0, area.y, s, area.height), Target::Month(i));
         let value = whole(mo.amount.gross);
         if value == 0 {
             let style = Style::new().fg(if now { t.bar_now } else { t.dim });
@@ -334,7 +362,20 @@ fn chart(frame: &mut Frame, area: Rect, cx: &RenderCx, h: u16, term_width: u16) 
         if let Some((year, m)) = year_month(&mo.label) {
             let name = MONTHS[m];
             let lx = centred(bx, b, 3).clamp(x0, x0 + s.saturating_sub(3));
-            let style = if now { t.title() } else { t.muted() };
+            let style = if picked == Some(i) {
+                // The picked month reads like the active tab: bold, with an
+                // accent underline (section 11.4).
+                let style = t.title().add_modifier(Modifier::UNDERLINED);
+                if t.no_color() {
+                    style
+                } else {
+                    style.underline_color(t.accent)
+                }
+            } else if now {
+                t.title()
+            } else {
+                t.muted()
+            };
             set_str(buf, lx, base_y + 1, name, style);
             if i == 0 || m == 0 {
                 set_str(buf, lx, base_y + 2, year, t.muted());
@@ -417,6 +458,11 @@ fn outstanding(frame: &mut Frame, area: Rect, cx: &RenderCx, class: WidthClass) 
     };
     let start = if at >= shown { at + 1 - shown } else { 0 };
     for (i, o) in owed.iter().enumerate().skip(start).take(shown) {
+        // Mouse: a click jumps to the order in Orders.
+        cx.state.hits.add(
+            Rect::new(area.x, area.y + lines.len() as u16, area.width, 1),
+            Target::Owed(o.order_id),
+        );
         let row = cx.state.data.order(o.order_id);
         let is_sel = i == at;
         let mut spans: Vec<Span<'static>> = marker(is_sel, t).into();
@@ -462,6 +508,115 @@ fn outstanding(frame: &mut Frame, area: Rect, cx: &RenderCx, class: WidthClass) 
         lines.push(Line::from(Span::styled(
             format!("  \u{2193} {hidden} more"),
             m,
+        )));
+    }
+    frame.render_widget(Paragraph::new(lines), area);
+}
+
+/// Days column of the drill-down: the payment day, `MM-DD`.
+const PAID: usize = 5;
+
+/// The orders paid in the clicked month (section 11.4): a heading with the
+/// count and the total in the price column, a header row, then one row per
+/// order with the day it was paid. No selection: a click on a row jumps to
+/// the order.
+fn month_orders(frame: &mut Frame, area: Rect, cx: &RenderCx, class: WidthClass, m: &Month) {
+    let t = cx.theme;
+    let icon = if cx.icons.enabled { 2 } else { 0 };
+    let price_end = 2 + icon + SLUG + GAP + PRICE;
+    let name =
+        year_month(&m.label).map_or(m.label.clone(), |(y, k)| format!("{} {y}", MONTH_NAMES[k]));
+    let n = m.order_ids.len();
+    let lead_word = format!("Received in {name}");
+    let lead = format!("{lead_word}  {n}");
+    let total_s = text::money(m.amount.gross);
+    let mut lines = vec![Line::from(vec![
+        Span::styled(lead_word, t.title()),
+        Span::styled(format!("  {n}"), t.muted()),
+        gap(price_end
+            .saturating_sub(text::width(&lead) + text::width(&total_s))
+            .max(2)),
+        Span::styled(total_s, t.muted()),
+    ])];
+    if n == 0 {
+        lines.push(Line::from(Span::styled(
+            format!("no payments in {name}"),
+            t.muted(),
+        )));
+        frame.render_widget(Paragraph::new(lines), area);
+        return;
+    }
+    let fixed = price_end + GAP + PAID;
+    let title_w = usize::from(area.width).saturating_sub(fixed + GAP);
+    let title_w = if class == WidthClass::Narrow || title_w < MIN_TITLE {
+        0
+    } else {
+        title_w
+    };
+    let muted = t.muted();
+    let mut head = vec![
+        gap(2 + icon),
+        cell("order", SLUG, muted),
+        gap(GAP),
+        cell_right(cx.state.data.currency(), PRICE, muted),
+        gap(GAP),
+        cell_right("paid", PAID, muted),
+    ];
+    if title_w > 0 {
+        head.push(gap(GAP));
+        head.push(Span::styled("title", muted));
+    }
+    lines.push(Line::from(head));
+    let room = usize::from(area.height).saturating_sub(lines.len());
+    let shown = if n <= room { n } else { room.saturating_sub(1) };
+    for id in m.order_ids.iter().take(shown) {
+        let Some(row) = cx.state.data.order(*id) else {
+            continue;
+        };
+        cx.state.hits.add(
+            Rect::new(area.x, area.y + lines.len() as u16, area.width, 1),
+            Target::Paid(*id),
+        );
+        let o = &row.order;
+        let closed = row.group == Group::Closed;
+        let ink = if closed {
+            t.text().fg(t.archived)
+        } else {
+            t.text()
+        };
+        let mut spans = vec![gap(2)];
+        if icon > 0 {
+            let style = if closed { ink } else { muted };
+            spans.push(Span::styled(
+                cx.icons.project_type(o.project_type).to_string(),
+                style,
+            ));
+            spans.push(Span::raw(" "));
+        }
+        spans.push(cell(&o.slug, SLUG, ink));
+        spans.push(gap(GAP));
+        spans.push(price_cell(o.price_minor, PRICE, ink, t));
+        spans.push(gap(GAP));
+        let day = o
+            .paid_at
+            .as_deref()
+            .and_then(day_part)
+            .and_then(|d| d.get(5..));
+        spans.push(match day {
+            Some(d) => cell_right(d, PAID, if closed { ink } else { muted }),
+            None => empty_right(PAID, t),
+        });
+        if title_w > 0 {
+            spans.push(gap(GAP));
+            spans.push(cell(&o.title, title_w, ink));
+        }
+        lines.push(Line::from(spans));
+    }
+    let hidden = n - shown;
+    if hidden > 0 {
+        lines.push(Line::from(Span::styled(
+            format!("  \u{2193} {hidden} more"),
+            muted,
         )));
     }
     frame.render_widget(Paragraph::new(lines), area);

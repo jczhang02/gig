@@ -29,6 +29,7 @@ const GLOBAL_KEYS: &[Entry] = &[
     ("Esc", "close, clear", ""),
     ("T", "theme picker", ""),
     (",", "settings", ""),
+    ("M", "mouse on/off", ""),
     ("\u{2191}\u{2193}", "select", ""),
     ("Enter", "open", ""),
     ("PgDn", "scroll detail", ""),
@@ -59,7 +60,11 @@ const DRAFTS_KEYS: &[Entry] = &[
     ("P", "promote to an order", ""),
 ];
 
-const MONEY_KEYS: &[Entry] = &[("Enter", "open order", ""), ("y", "copy link", "")];
+const MONEY_KEYS: &[Entry] = &[
+    ("Enter", "open order", ""),
+    ("y", "copy link", ""),
+    ("Esc", "close the month", "after a bar click"),
+];
 
 const HISTORY_KEYS: &[Entry] = &[("Enter", "detail", "order keys work there")];
 
@@ -192,11 +197,15 @@ pub fn footer_groups(state: &UiState, class: WidthClass) -> (Vec<Pair>, Vec<Pair
             )
         }
         View::Money => {
-            let g1 = if state.selected_owed().is_some() {
+            let mut g1 = if state.selected_owed().is_some() {
                 vec![("Enter", "open order"), ("y", "copy link")]
             } else {
                 Vec::new()
             };
+            // A bar was clicked: its month is listed under the chart.
+            if state.money_month.is_some() {
+                g1.push(("Esc", "close month"));
+            }
             (
                 g1,
                 vec![
@@ -351,7 +360,20 @@ pub fn render(frame: &mut Frame, area: Rect, cx: &RenderCx) {
     ]);
     let rows = left.len().max(right.len());
     let width = 72.min(area.width.saturating_sub(4));
-    let inner = popup::open(frame, area, width, rows as u16 + 2, "keys", Tone::Plain, t);
+    let hits = &cx.state.hits;
+    let inner = popup::open(
+        frame,
+        area,
+        width,
+        rows as u16 + 2,
+        "keys",
+        Tone::Plain,
+        t,
+        hits,
+    );
+    if let Some(m) = hits.map().modal {
+        hits.pane(m, crate::mouse::Pane::Help);
+    }
     let body = Rect {
         height: inner.height.saturating_sub(2),
         ..inner

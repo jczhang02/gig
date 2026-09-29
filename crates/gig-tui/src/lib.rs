@@ -9,6 +9,7 @@ pub mod data;
 pub mod editor;
 pub mod help;
 pub mod icons;
+pub mod mouse;
 pub mod picker;
 pub mod popup;
 pub mod settings;
@@ -134,6 +135,8 @@ pub fn run(opts: Opts) -> Result<()> {
     }
     let mut term = terminal::enter()?;
     let _guard = terminal::Guard;
+    // TUI-SPEC 8.2: capture the mouse when `tui.mouse` says so.
+    app.set_mouse(settings.mouse);
     app.run_loop(&mut term)
 }
 

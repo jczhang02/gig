@@ -97,6 +97,10 @@ pub fn render(frame: &mut Frame, area: Rect, cx: &RenderCx) {
         if lines.len() >= usize::from(area.height) {
             break;
         }
+        cx.state.hits.add(
+            Rect::new(area.x, area.y + lines.len() as u16, area.width, 1),
+            crate::mouse::Target::Draft(dr.id),
+        );
         let is_sel = i == selected;
         let mut spans: Vec<Span<'static>> = marker(is_sel, t).into();
         let slug_style = if is_sel {

@@ -4,6 +4,7 @@
 
 use crate::app::{Tone, UiState, View};
 use crate::icons::Icons;
+use crate::mouse::{Pane, Target};
 use crate::theme::Theme;
 use crate::{help, popup, text, views};
 use ratatui::buffer::CellWidth;
@@ -144,6 +145,9 @@ pub fn draw(frame: &mut Frame, cx: &RenderCx) {
 fn draw_frame(frame: &mut Frame, cx: &RenderCx) {
     let area = frame.area();
     let t = cx.theme;
+    // Every frame records its own mouse regions (TUI-SPEC 8.2).
+    let hits = &cx.state.hits;
+    hits.clear();
     if !t.no_color() {
         frame.render_widget(Block::new().style(t.base()), area);
     }
@@ -166,6 +170,19 @@ fn draw_frame(frame: &mut Frame, cx: &RenderCx) {
     let s = shell(area, cx.state);
     draw_banner(frame, s.banner, cx);
     draw_message(frame, s.message, cx);
+    let body_pane = if cx.state.settings.is_some() {
+        Pane::Settings
+    } else if cx.state.detail_open {
+        Pane::Detail
+    } else {
+        Pane::List
+    };
+    hits.pane(s.body, body_pane);
+    if let Some(pane) = s.pane {
+        if cx.state.view != View::Drafts {
+            hits.pane(pane, Pane::Detail);
+        }
+    }
     if let Some(settings) = &cx.state.settings {
         crate::settings::render(frame, s.body, cx, settings);
     } else if cx.state.detail_open {
@@ -184,10 +201,10 @@ fn draw_frame(frame: &mut Frame, cx: &RenderCx) {
         help::render(frame, area, cx);
     }
     if let Some(p) = &cx.state.picker {
-        crate::picker::render(frame, area, p, cx.theme);
+        crate::picker::render(frame, area, p, cx.theme, hits);
     }
     if let Some(p) = &cx.state.popup {
-        popup::render(frame, area, p, cx.theme);
+        popup::render(frame, area, p, cx.theme, hits);
     }
     settle_wide_glyphs(frame.buffer_mut(), t);
 }
@@ -305,13 +322,49 @@ fn draw_banner(frame: &mut Frame, area: Rect, cx: &RenderCx) {
         for (n, currency) in tries {
             let right = cluster(n, currency);
             if left.width() + 3 + right.width() <= width {
+                record_tabs(cx, area, &left);
                 frame.render_widget(Paragraph::new(left), area);
                 frame.render_widget(Paragraph::new(right.right_aligned()), area);
                 return;
             }
         }
     }
-    frame.render_widget(Paragraph::new(tabs(true)), area);
+    let left = tabs(true);
+    record_tabs(cx, area, &left);
+    frame.render_widget(Paragraph::new(left), area);
+}
+
+/// Mouse: each tab (its number and word) switches to its view. The tab
+/// spans follow `gig`: a gap, the number, then the word when drawn.
+fn record_tabs(cx: &RenderCx, area: Rect, line: &Line) {
+    let mut x = area.x;
+    let mut view = 0usize;
+    let mut open: Option<(u16, View)> = None;
+    let close = |open: &mut Option<(u16, View)>, end: u16| {
+        if let Some((start, v)) = open.take() {
+            let w = end.min(area.right()).saturating_sub(start);
+            cx.state
+                .hits
+                .add(Rect::new(start, area.y, w, 1), Target::Tab(v));
+        }
+    };
+    for span in &line.spans {
+        let w = span.width() as u16;
+        let c = span.content.trim();
+        if c.len() == 1 && c.chars().all(|ch| ch.is_ascii_digit()) {
+            close(&mut open, x);
+            if let Some(&v) = View::ALL.get(view) {
+                open = Some((x, v));
+            }
+            view += 1;
+        } else if c.is_empty() && w >= 2 {
+            // The gap before the next tab ends this one (the space between
+            // a number and its word is one cell).
+            close(&mut open, x);
+        }
+        x = x.saturating_add(w);
+    }
+    close(&mut open, x);
 }
 
 /// Row 1: the filter on the left, one toast (or the refresh error) on the
@@ -377,6 +430,8 @@ fn draw_footer(frame: &mut Frame, area: Rect, cx: &RenderCx) {
             let (g1, g2) = help::fit_footer(g1, g2, usize::from(area.width.saturating_sub(2)));
             let mut line = help::footer_line(cx, &g1, &g2);
             line.spans.insert(0, Span::raw(" "));
+            // Mouse: each pair is a button for its key.
+            cx.state.hits.hints(area.x, area.y, &line, area.right());
             line
         }
     };
@@ -638,24 +693,24 @@ mod tests {
         for s in [
             "\u{2502}  global                orders",
             "\u{2502}     ?  keys               s  start      when queued or delivered",
-            "\u{2502} Enter  open               U  upload artifact",
+            "\u{2502} Enter  open               e  edit JOB.md",
         ] {
             assert!(text.contains(s), "{s}\n{text}");
         }
         // Too short for every key: both columns scroll, with markers.
         let mut state = state;
         let text = all(&render(60, 16, &state, true));
-        assert!(text.contains("\u{2193} 6 more"), "{text}");
+        assert!(text.contains("\u{2193} 7 more"), "{text}");
         assert!(!text.contains("above"), "{text}");
         state.help_scroll.offset = 99;
         let text = all(&render(60, 16, &state, true));
         assert!(text.contains("\u{2191} 9 above"), "{text}");
         assert!(text.contains("PgDn  scroll detail"), "{text}");
         assert!(!text.contains("more"), "{text}");
-        // Money has 3 rows of keys: its column says 3, not 9.
+        // Money has 4 rows of keys: its column says 4, not 9.
         state.view = View::Money;
         let text = all(&render(60, 16, &state, true));
-        assert!(text.contains("\u{2191} 3 above"), "{text}");
+        assert!(text.contains("\u{2191} 4 above"), "{text}");
     }
 
     #[test]
@@ -1223,6 +1278,7 @@ mod tests {
                         gross,
                         take_home: gross * 6 / 10,
                     },
+                    order_ids: Vec::new(),
                 }
             })
             .collect();

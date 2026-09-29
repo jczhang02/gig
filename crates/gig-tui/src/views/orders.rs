@@ -7,6 +7,7 @@ use super::{
     status_style, window_start, DOT,
 };
 use crate::data::{day_part, Group, OrderRow};
+use crate::mouse::{span_x, Target};
 use crate::text;
 use crate::ui::{RenderCx, WidthClass, MIN_TITLE};
 use gig_core::models::OrderStatus;
@@ -156,9 +157,25 @@ pub fn render(frame: &mut Frame, area: Rect, cx: &RenderCx) {
         }
     }
     let width = area.width;
+    let hits = &cx.state.hits;
     for item in items.iter().skip(start) {
         if lines.len() >= usize::from(area.height) {
             break;
+        }
+        // Mouse: both lines of a row select its order; the link copies.
+        let y = area.y + lines.len() as u16;
+        if let Item::Row(r) | Item::Second(r) = item {
+            hits.add(Rect::new(area.x, y, width, 1), Target::Order(r.order.id));
+        }
+        if let Item::Second(r) = item {
+            let line = second_line(cx, &cols, r, width);
+            if let (Some((dx, w)), Some((_, Some(link)))) = (span_x(&line, t.link()), last_sent(r))
+            {
+                hits.add(
+                    Rect::new(area.x + dx, y, w, 1),
+                    Target::Link(link.to_string()),
+                );
+            }
         }
         lines.push(match item {
             Item::Blank => Line::raw(""),

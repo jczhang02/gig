@@ -501,6 +501,10 @@ pub fn render(frame: &mut Frame, area: Rect, cx: &RenderCx, s: &Settings) {
     for (k, d) in lines.into_iter().skip(offset).take(body_h).enumerate() {
         let y = area.y + 1 + k as u16;
         let rect = Rect::new(area.x, y, area.width, 1);
+        // Mouse: every line of a row (label, help, error) is that row.
+        if let Some(i) = d.row {
+            cx.state.hits.add(rect, crate::mouse::Target::Setting(i));
+        }
         let mut line = d.line;
         if sel_band && d.row == Some(s.cursor) {
             line = line.style(t.selected());

@@ -3,6 +3,7 @@
 //! $EDITOR round trip live in `actions` and `app`.
 
 use crate::actions::{Effect, FormKind};
+use crate::mouse::{Hits, Pane, Target};
 use crate::text;
 use crate::theme::Theme;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -281,6 +282,13 @@ impl Scroll {
         .min(max);
         true
     }
+    /// Scroll by `rows` (negative: up), clamped to the last drawn size
+    /// (the mouse wheel).
+    pub(crate) fn by(&mut self, rows: i32) {
+        let max = i32::from(self.max.get());
+        let at = i32::from(self.offset).min(max) + rows;
+        self.offset = at.clamp(0, max) as u16;
+    }
 }
 
 /// What a popup shows.
@@ -539,7 +547,9 @@ pub fn place(area: Rect, width: u16, height: u16) -> Rect {
 }
 
 /// Scrim, clear, frame and fill a popup for `rows` rows of content and
-/// return the padded content area. `width` is the outer width.
+/// return the padded content area. `width` is the outer width. The popup
+/// becomes the mouse's modal layer: a click outside it closes it.
+#[allow(clippy::too_many_arguments)]
 pub fn open(
     frame: &mut Frame,
     area: Rect,
@@ -548,9 +558,11 @@ pub fn open(
     title: &str,
     tone: Tone,
     theme: &Theme,
+    hits: &Hits,
 ) -> Rect {
     scrim(frame, theme);
     let rect = place(area, width, rows.saturating_add(2 + 2 * PAD_Y));
+    hits.modal(rect);
     frame.render_widget(Clear, rect);
     // A wide glyph cut by the popup edge leaves half a character on screen.
     let buf = frame.buffer_mut();
@@ -619,7 +631,7 @@ pub(crate) fn hint_line(t: &Theme, pairs: &[(&str, &str)]) -> Line<'static> {
     Line::from(spans)
 }
 
-pub fn render(frame: &mut Frame, area: Rect, popup: &Popup, theme: &Theme) {
+pub fn render(frame: &mut Frame, area: Rect, popup: &Popup, theme: &Theme, hits: &Hits) {
     let t = theme;
     let (width, tone) = match popup {
         Popup::Form(_) => (FORM_WIDTH, Tone::Plain),
@@ -706,9 +718,43 @@ pub fn render(frame: &mut Frame, area: Rect, popup: &Popup, theme: &Theme) {
     };
     // Body, a blank row, the footer.
     let want = (body.len() as u16).saturating_add(2);
-    let inner = open(frame, area, width, want, &title, tone, t);
+    let inner = open(frame, area, width, want, &title, tone, t, hits);
     let footer_y = inner.bottom().saturating_sub(1);
     let body_h = inner.height.saturating_sub(2);
+    // Mouse: the body scrolls under the wheel; fields and items are
+    // clickable (a form never scrolls: forms fit by design).
+    if let Some(m) = hits.map().modal {
+        hits.pane(m, Pane::Popup);
+    }
+    let band_x = inner.x.saturating_sub(PAD_X);
+    let band_w = inner.width + 2 * PAD_X;
+    match popup {
+        Popup::Form(form) => {
+            let mut row = 0u16;
+            for (i, f) in form.fields.iter().enumerate() {
+                let h = 1 + u16::from(f.error.is_some());
+                let top = row.min(body_h);
+                let h = h.min(body_h - top);
+                hits.add(
+                    Rect::new(band_x, inner.y + top, band_w, h),
+                    Target::Field(i),
+                );
+                row += 1 + u16::from(f.error.is_some());
+            }
+        }
+        Popup::Pick(pick) => {
+            for i in 0..pick.items.len().min(usize::from(body_h)) {
+                hits.add(
+                    Rect::new(band_x, inner.y + i as u16, band_w, 1),
+                    Target::Item(i),
+                );
+            }
+        }
+        _ => {}
+    }
+    if inner.height > 0 {
+        hits.hints(inner.x, footer_y, &footer, inner.right());
+    }
     let hidden = (body.len() as u16).saturating_sub(body_h);
     let offset = match scroll {
         Some(s) => {
@@ -1206,14 +1252,15 @@ mod tests {
         for (w, h) in [(80, 24), (30, 8), (200, 50)] {
             for p in &popups {
                 let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
-                term.draw(|f| render(f, f.area(), p, &Theme::DARK)).unwrap();
+                term.draw(|f| render(f, f.area(), p, &Theme::DARK, &Hits::default()))
+                    .unwrap();
                 let buf = term.backend().buffer();
                 let text: String = buf.content().iter().map(|c| c.symbol()).collect();
                 assert!(text.contains('\u{256d}'), "rounded corner at {w}x{h}");
             }
         }
         let mut term = Terminal::new(TestBackend::new(80, 24)).unwrap();
-        term.draw(|f| render(f, f.area(), &popups[0], &Theme::DARK))
+        term.draw(|f| render(f, f.area(), &popups[0], &Theme::DARK, &Hits::default()))
             .unwrap();
         let text: String = term
             .backend()
@@ -1244,7 +1291,7 @@ mod tests {
             vec!["created files:".into(), long.clone(), long],
         );
         let mut term = Terminal::new(TestBackend::new(80, 24)).unwrap();
-        term.draw(|f| render(f, f.area(), &p, &Theme::DARK))
+        term.draw(|f| render(f, f.area(), &p, &Theme::DARK, &Hits::default()))
             .unwrap();
         let text: String = term
             .backend()
@@ -1260,7 +1307,8 @@ mod tests {
         use ratatui::backend::TestBackend;
         use ratatui::Terminal;
         let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
-        term.draw(|f| render(f, f.area(), p, &Theme::DARK)).unwrap();
+        term.draw(|f| render(f, f.area(), p, &Theme::DARK, &Hits::default()))
+            .unwrap();
         term.backend()
             .buffer()
             .content()
@@ -1345,7 +1393,8 @@ mod tests {
         }
         let draw = |p: &Popup| {
             let mut term = Terminal::new(TestBackend::new(80, 24)).unwrap();
-            term.draw(|f| render(f, f.area(), p, &Theme::DARK)).unwrap();
+            term.draw(|f| render(f, f.area(), p, &Theme::DARK, &Hits::default()))
+                .unwrap();
             term.backend()
                 .buffer()
                 .content()
@@ -1372,7 +1421,8 @@ mod tests {
         use ratatui::Terminal;
         let title_fg = |p: &Popup| {
             let mut term = Terminal::new(TestBackend::new(80, 24)).unwrap();
-            term.draw(|f| render(f, f.area(), p, &Theme::DARK)).unwrap();
+            term.draw(|f| render(f, f.area(), p, &Theme::DARK, &Hits::default()))
+                .unwrap();
             let buf = term.backend().buffer().clone();
             // The title is the only capital T on screen.
             let (x, y) = (0..24u16)

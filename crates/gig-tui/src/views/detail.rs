@@ -36,6 +36,9 @@ const NUMBER: usize = 7;
 struct Row {
     line: Line<'static>,
     heading: bool,
+    /// The full URL of the short link drawn on this row (mouse: a click
+    /// copies it).
+    link: Option<String>,
 }
 
 /// Rows of the detail at `width` cells; `full` shows every line of every
@@ -52,6 +55,7 @@ impl<'a> Builder<'a> {
         self.rows.push(Row {
             line,
             heading: false,
+            link: None,
         });
     }
 
@@ -87,6 +91,7 @@ impl<'a> Builder<'a> {
         self.rows.push(Row {
             line: Line::from(spans),
             heading: true,
+            link: None,
         });
     }
 
@@ -213,8 +218,22 @@ pub fn render(frame: &mut Frame, area: Rect, cx: &RenderCx, full: bool) {
     let rows = rows(cx, row, width, full);
     let height = usize::from(area.height);
     let scroll = &cx.state.detail_scroll;
+    // Mouse: a drawn link copies its full URL.
+    let link_style = cx.theme.link();
+    let record = |r: &Row, y: u16| {
+        if let (Some(url), Some((dx, w))) = (&r.link, crate::mouse::span_x(&r.line, link_style)) {
+            let w = w.min(area.right().saturating_sub(area.x + dx));
+            cx.state.hits.add(
+                Rect::new(area.x + dx, y, w, 1),
+                crate::mouse::Target::Link(url.clone()),
+            );
+        }
+    };
     if rows.len() <= height {
         scroll.max.set(0);
+        for (k, r) in rows.iter().enumerate() {
+            record(r, area.y + k as u16);
+        }
         let lines: Vec<Line> = rows.into_iter().map(|r| r.line).collect();
         frame.render_widget(Paragraph::new(lines), area);
         return;
@@ -238,6 +257,9 @@ pub fn render(frame: &mut Frame, area: Rect, cx: &RenderCx, full: bool) {
     let mut lines = Vec::new();
     if top > 0 {
         lines.push(marker(format!("\u{2191} {offset} above  PgUp")));
+    }
+    for (k, r) in rows.iter().skip(offset).take(shown).enumerate() {
+        record(r, area.y + (top + k) as u16);
     }
     lines.extend(rows.into_iter().skip(offset).take(shown).map(|r| r.line));
     if below > 0 {
@@ -420,11 +442,8 @@ fn rows(cx: &RenderCx, r: &OrderRow, width: usize, full: bool) -> Vec<Row> {
             let mut line = vec![Span::raw(" ".repeat(BODY))];
             line.extend(parts);
             let used: usize = line.iter().map(|s| text::width(&s.content)).sum();
-            let link = p
-                .short_url
-                .as_deref()
-                .or(p.remote_url.as_deref())
-                .map(|l| text::strip_scheme(l).to_string());
+            let full_link = p.short_url.as_deref().or(p.remote_url.as_deref());
+            let link = full_link.map(|l| text::strip_scheme(l).to_string());
             match link {
                 Some(l) if used + 2 + text::width(&l) <= width => {
                     line.push(Span::raw("  "));
@@ -439,6 +458,9 @@ fn rows(cx: &RenderCx, r: &OrderRow, width: usize, full: bool) -> Vec<Row> {
                     ]));
                 }
                 None => b.push(Line::from(line)),
+            }
+            if let (Some(full), Some(last)) = (full_link, b.rows.last_mut()) {
+                last.link = Some(full.to_string());
             }
         }
     }
