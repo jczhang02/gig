@@ -315,6 +315,10 @@ impl UiState {
                 self.detail_open = true;
                 Outcome::None
             }
+            KeyCode::Enter if self.view == View::Drafts => {
+                actions::draft_notes(self);
+                Outcome::None
+            }
             KeyCode::Up => {
                 self.move_selection(-1);
                 Outcome::None

@@ -193,10 +193,20 @@ mod tests {
         term.backend().buffer().clone()
     }
 
+    /// Row `y` as text; the cell after a wide character is skipped.
     fn row(buf: &Buffer, y: u16) -> String {
-        (0..buf.area.width)
-            .map(|x| buf[(x, y)].symbol().to_string())
-            .collect()
+        span_text(buf, y, 0..buf.area.width)
+    }
+
+    fn span_text(buf: &Buffer, y: u16, xs: std::ops::Range<u16>) -> String {
+        let mut out = String::new();
+        let mut x = xs.start;
+        while x < xs.end {
+            let sym = buf[(x, y)].symbol();
+            out.push_str(sym);
+            x += (crate::text::width(sym) as u16).max(1);
+        }
+        out
     }
 
     fn all(buf: &Buffer) -> String {
@@ -217,8 +227,8 @@ mod tests {
         }
         assert!(row(&buf, 23).contains("q quit"));
         let text = all(&buf);
-        assert!(text.contains("Orders"));
-        assert!(!text.contains("Detail"));
+        assert!(text.contains("no active orders"), "{text}");
+        assert!(!text.contains("no order selected"), "no detail pane");
         assert!(shell(buf.area, &state).detail.is_none());
     }
 
@@ -233,7 +243,7 @@ mod tests {
         let s = shell(buf.area, &state);
         let detail = s.detail.expect("detail pane at 200 columns");
         assert!(detail.x > s.body.x + s.body.width);
-        assert!(all(&buf).contains("Detail"));
+        assert!(all(&buf).contains("no order selected"));
         // Pane layout stays inside the frame.
         assert!(detail.right() <= 200 && s.hint.bottom() <= 50);
     }
@@ -252,14 +262,18 @@ mod tests {
 
     #[test]
     fn other_views_are_full_width() {
-        for v in [View::Drafts, View::Money, View::History] {
+        for (v, head) in [
+            (View::Drafts, "material"),
+            (View::Money, "outstanding"),
+            (View::History, "warranty"),
+        ] {
             let state = UiState {
                 view: v,
                 ..UiState::default()
             };
             let buf = render(200, 50, &state, true);
             assert!(shell(buf.area, &state).detail.is_none());
-            assert!(row(&buf, 2).contains(v.title()));
+            assert!(row(&buf, 2).contains(head), "{v:?}: {}", row(&buf, 2));
         }
     }
 
@@ -270,7 +284,7 @@ mod tests {
             ..UiState::default()
         };
         let buf = render(80, 24, &state, false);
-        assert!(row(&buf, 2).contains("Detail"));
+        assert!(row(&buf, 2).contains("no order selected"));
         assert!(row(&buf, 23).contains("Esc back"));
     }
 
@@ -306,5 +320,205 @@ mod tests {
         };
         let buf = render(80, 24, &state, false);
         assert!(row(&buf, 23).contains("db: locked"));
+    }
+
+    /// Sample orders with a long Chinese title, a JOB.md status on the
+    /// selected row, a package, a note and a scorecard.
+    fn sample() -> UiState {
+        use crate::data::tests::sample_snapshot;
+        use crate::data::JobMd;
+        let mut data = sample_snapshot("2026-09-29");
+        for r in &mut data.orders {
+            if r.order.id == 7 {
+                r.order.title =
+                    "图像去噪与超分辨率批处理工具开发及交付, 含批量脚本, 使用说明和演示视频".into();
+                r.order.slug = "tk-denoise".into();
+                r.job = JobMd::parse("## Status\n\n- 2026-09-20: 预览已发送, 等客户确认.\n");
+                r.notes = crate::data::parse_notes("[2026-09-21T10:00:00Z] client paid half\n");
+                r.scorecard = Some(gig_core::models::Scorecard {
+                    order_id: 7,
+                    decisions: Some(3),
+                    repeat_questions: Some(0),
+                    days_to_preview: None,
+                    cleanups: Some(1),
+                    check_rejections: None,
+                    report_reworks: Some(0),
+                    score: Some(4),
+                    note: None,
+                    created_at: "2026-09-22T00:00:00Z".into(),
+                });
+            }
+        }
+        UiState {
+            data,
+            selected: Some(7),
+            ..UiState::default()
+        }
+    }
+
+    fn line_of<'a>(text: &'a str, needle: &str) -> Option<(usize, &'a str)> {
+        text.lines().enumerate().find(|(_, l)| l.contains(needle))
+    }
+
+    #[test]
+    fn orders_rows_at_80x24_and_200x50() {
+        let state = sample();
+        for (w, h, icons) in [(80, 24, false), (200, 50, true), (80, 24, true)] {
+            let buf = render(w, h, &state, icons);
+            let text = all(&buf);
+            // The selected row: slug, status chip, next action, days, price
+            // on one line, and the JOB.md status on the next.
+            let (y, row7) = line_of(&text, "tk-denoise").expect("selected row");
+            for part in ["delivered", "collect", "59d", "1"] {
+                assert!(row7.contains(part), "{w}x{h}: {part:?} in {row7:?}");
+            }
+            let below = text.lines().nth(y + 1).unwrap();
+            assert!(below.contains("预览已发送"), "{w}x{h}: {below:?}");
+            // Sorted: unpaid first, queued last.
+            let (y6, _) = line_of(&text, " o6 ").unwrap();
+            let (y1, _) = line_of(&text, " o1 ").unwrap();
+            assert!(y < y6 && y6 < y1, "{w}x{h} order");
+            // Archived orders are hidden until `a`.
+            assert!(line_of(&text, " o8 ").is_none());
+            // The selection band covers the row, not reverse video.
+            let slug_x = row7.find("tk-denoise").unwrap();
+            let x = crate::text::width(&row7[..slug_x]) as u16;
+            let c = &buf[(x, y as u16)];
+            assert_eq!(c.bg, Theme::DARK.selection_bg);
+            assert!(!c.modifier.contains(Modifier::REVERSED));
+            // Status colour: unpaid red.
+            let chip_x = crate::text::width(&row7[..row7.find("delivered").unwrap()]) as u16;
+            assert_eq!(buf[(chip_x, y as u16)].fg, Theme::DARK.unpaid);
+        }
+    }
+
+    #[test]
+    fn chinese_titles_are_cut_by_width() {
+        let state = sample();
+        // At 200 columns the list is 55% wide and the detail is beside it.
+        let buf = render(200, 50, &state, true);
+        let body = shell(buf.area, &state).body;
+        let text = all(&buf);
+        let (y, _) = line_of(&text, "tk-denoise").unwrap();
+        let list_part = span_text(&buf, y as u16, body.x..body.right());
+        assert!(list_part.contains("图像去噪"), "{list_part}");
+        assert!(
+            list_part.contains('\u{2026}'),
+            "cut with an ellipsis: {list_part}"
+        );
+        // Nothing of the list row spills into the gutter.
+        for x in body.right()..body.right() + 2 {
+            assert_eq!(buf[(x, y as u16)].symbol(), " ", "gutter at {x}");
+        }
+        // The full title is in the detail pane header.
+        assert!(text.contains("图像去噪与超分辨率批处理工具开发及交付, 含批量脚本"));
+    }
+
+    #[test]
+    fn detail_sections_are_drawn() {
+        let state = sample();
+        let text = all(&render(200, 50, &state, true));
+        for s in [
+            "Next action",
+            "collect payment",
+            "Packages",
+            "Latest status",
+            "预览已发送",
+            "Client questions",
+            "Requirement changes",
+            "Notes",
+            "client paid half",
+            "Scorecard",
+            "score 4",
+            "cut 60%",
+        ] {
+            assert!(text.contains(s), "{s}");
+        }
+        // Narrow: Enter shows the same detail full screen.
+        let narrow = UiState {
+            detail_open: true,
+            ..sample()
+        };
+        let text = all(&render(80, 24, &narrow, false));
+        assert!(text.contains("tk-denoise") && text.contains("Next action"));
+    }
+
+    #[test]
+    fn toggle_and_filter_change_the_rows() {
+        let mut state = sample();
+        state.show_closed = true;
+        let text = all(&render(80, 24, &state, false));
+        assert!(line_of(&text, " o8 ").is_some(), "archived shown with a");
+        state.filters[0].text = "denoise".into();
+        let text = all(&render(80, 24, &state, false));
+        assert!(line_of(&text, "tk-denoise").is_some());
+        assert!(line_of(&text, " o6 ").is_none());
+        state.filters[0].text = "nothing-matches".into();
+        let text = all(&render(80, 24, &state, false));
+        assert!(text.contains("no order matches the filter"));
+    }
+
+    #[test]
+    fn selection_stays_visible_in_a_short_terminal() {
+        let mut state = sample();
+        state.selected = Some(2); // last row (queued, newest)
+        let buf = render(80, 8, &state, false);
+        let text = all(&buf);
+        assert!(line_of(&text, " o2 ").is_some(), "{text}");
+    }
+
+    #[test]
+    fn history_money_and_drafts_render() {
+        let mut state = sample();
+        state.view = View::History;
+        let text = all(&render(200, 50, &state, true));
+        assert!(text.contains("4/5"), "scorecard score");
+        assert!(line_of(&text, " o8 ").is_some(), "archived in history");
+
+        state.view = View::Money;
+        state.data.money.owed.push(crate::data::money::Owed {
+            order_id: 7,
+            slug: "tk-denoise".into(),
+            price_minor: Some(80000),
+            currency: "CNY".into(),
+            days: Some(59),
+        });
+        state.data.money.outstanding.gross = 80000;
+        state.data.money.outstanding.take_home = 48000;
+        if let Some(m) = state.data.money.by_month.last_mut() {
+            m.amount.gross = 120000;
+        }
+        for (w, h) in [(80, 24), (200, 50)] {
+            let text = all(&render(w, h, &state, true));
+            for s in [
+                "outstanding",
+                "take-home 480",
+                "received per month",
+                "1200",
+                "09",
+            ] {
+                assert!(text.contains(s), "{w}x{h}: {s}");
+            }
+            assert!(line_of(&text, "tk-denoise").is_some_and(|(_, l)| l.contains("59d")));
+        }
+
+        state.view = View::Drafts;
+        state.data.drafts.push(gig_core::models::Draft {
+            id: 1,
+            slug: "dr-ocr".into(),
+            title: Some("发票识别".into()),
+            material_path: Some("/mnt/m/ocr".into()),
+            project_type: None,
+            notes_dir: "/nonexistent".into(),
+            status: gig_core::models::DraftStatus::Open,
+            drop_reason: None,
+            notes_snapshot: None,
+            promoted_order_id: None,
+            created_at: "2026-09-19T00:00:00Z".into(),
+            closed_at: None,
+        });
+        let text = all(&render(80, 24, &state, false));
+        let (_, l) = line_of(&text, "dr-ocr").unwrap();
+        assert!(l.contains("10d") && l.contains("发票识别") && l.contains("/mnt/m/ocr"));
     }
 }

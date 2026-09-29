@@ -244,6 +244,33 @@ fn drafts_key(ui: &mut UiState, c: char) -> Option<Effect> {
     }
 }
 
+/// Lines of NOTES.md shown by `Enter` in Drafts.
+pub const NOTES_TAIL: usize = 30;
+
+/// `Enter` in Drafts: the tail of the selected draft's NOTES.md (read only).
+pub fn draft_notes(ui: &mut UiState) {
+    let Some(d) = ui.selected_draft() else {
+        return;
+    };
+    let title = format!("notes {}", d.slug);
+    ui.popup = Some(match drafts::read_notes(d) {
+        Some(text) => {
+            let all: Vec<&str> = text.lines().collect();
+            let skip = all.len().saturating_sub(NOTES_TAIL);
+            let mut lines = Vec::new();
+            if skip > 0 {
+                lines.push(format!("({skip} earlier lines)"));
+            }
+            lines.extend(all[skip..].iter().map(|l| l.to_string()));
+            if lines.is_empty() {
+                lines.push("(NOTES.md is empty)".into());
+            }
+            Popup::message(title, lines)
+        }
+        None => Popup::error_text(title, format!("no NOTES.md in {}", d.notes_dir)),
+    });
+}
+
 fn open(ui: &mut UiState, form: Form) -> Effect {
     ui.popup = Some(Popup::Form(form));
     Effect::None

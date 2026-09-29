@@ -331,6 +331,19 @@ fn drafts_new_and_promote() {
     assert!(h.popup_text().contains("created draft tk-draft"));
     h.key(KeyCode::Enter);
 
+    // Enter shows the tail of NOTES.md, read only.
+    let d = h.ui.selected_draft().unwrap().clone();
+    let notes = Path::new(&d.notes_dir).join("NOTES.md");
+    let body: String = (1..=50).map(|i| format!("line {i}\n")).collect();
+    std::fs::write(&notes, &body).unwrap();
+    h.key(KeyCode::Enter);
+    let text = h.popup_text();
+    assert!(text.starts_with("notes tk-draft"), "{text}");
+    assert!(text.contains("(20 earlier lines)") && text.contains("line 50"));
+    assert!(!text.contains("line 20\n"));
+    h.key(KeyCode::Esc);
+    assert_eq!(std::fs::read_to_string(&notes).unwrap(), body);
+
     h.key(KeyCode::Char('P'));
     match &h.ui.popup {
         Some(Popup::Form(f)) => {
