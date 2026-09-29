@@ -8,6 +8,7 @@
 //! over the alternate screen (`take_worker_panic`).
 
 use crossterm::cursor::Show;
+use crossterm::event::{DisableBracketedPaste, EnableBracketedPaste};
 use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
@@ -25,14 +26,21 @@ static PANIC_HOOK: Once = Once::new();
 /// The thread that entered the terminal (the UI thread).
 static UI_THREAD: OnceLock<ThreadId> = OnceLock::new();
 
-/// Last panic message of a thread other than the UI thread.
+/// Name of the upload worker thread, the only thread whose panics are
+/// recorded (arboard runs its own threads, whose panics must not be
+/// reported as an upload failure).
+pub const WORKER_THREAD: &str = "gig-upload";
+
+/// Last panic message of the upload worker.
 static WORKER_PANIC: Mutex<Option<String>> = Mutex::new(None);
 
 /// Raw mode plus alternate screen. Installs the panic hook on first use.
 pub fn enter() -> io::Result<Term> {
     install_panic_hook();
     enable_raw_mode()?;
-    if let Err(e) = execute!(io::stdout(), EnterAlternateScreen) {
+    // Bracketed paste: a paste arrives as one event, not as keystrokes that
+    // would run actions (`s`, `x`) or submit a form on a newline.
+    if let Err(e) = execute!(io::stdout(), EnterAlternateScreen, EnableBracketedPaste) {
         let _ = disable_raw_mode();
         return Err(e);
     }
@@ -44,7 +52,12 @@ pub fn enter() -> io::Result<Term> {
 /// Undo `enter`. Safe to call more than once.
 pub fn leave() -> io::Result<()> {
     disable_raw_mode()?;
-    execute!(io::stdout(), LeaveAlternateScreen, Show)
+    execute!(
+        io::stdout(),
+        DisableBracketedPaste,
+        LeaveAlternateScreen,
+        Show
+    )
 }
 
 /// Hand the terminal to a child process ($EDITOR) and take it back.
@@ -52,7 +65,7 @@ pub fn suspend_while<T>(term: &mut Term, f: impl FnOnce() -> T) -> io::Result<T>
     leave()?;
     let out = f();
     enable_raw_mode()?;
-    execute!(io::stdout(), EnterAlternateScreen)?;
+    execute!(io::stdout(), EnterAlternateScreen, EnableBracketedPaste)?;
     term.clear()?;
     Ok(out)
 }
@@ -66,7 +79,7 @@ impl Drop for Guard {
     }
 }
 
-/// The message of the last panic on a non-UI thread, if any, cleared.
+/// The message of the last upload worker panic, if any, cleared.
 pub fn take_worker_panic() -> Option<String> {
     WORKER_PANIC.lock().ok()?.take()
 }
@@ -80,8 +93,10 @@ fn install_panic_hook() {
             if on_ui_thread {
                 let _ = leave();
                 previous(info);
-            } else if let Ok(mut slot) = WORKER_PANIC.lock() {
-                *slot = Some(info.to_string());
+            } else if thread::current().name() == Some(WORKER_THREAD) {
+                if let Ok(mut slot) = WORKER_PANIC.lock() {
+                    *slot = Some(info.to_string());
+                }
             }
         }));
     });

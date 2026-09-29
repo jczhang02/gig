@@ -3,7 +3,7 @@
 use crate::actions::{self, Action, Effect};
 use crate::data::{JobCache, OrderRow, Snapshot};
 use crate::icons::Icons;
-use crate::popup::{Popup, Scroll};
+use crate::popup::{Form, Popup, Scroll};
 use crate::terminal::{self, Term};
 use crate::theme::Theme;
 use crate::ui;
@@ -101,6 +101,9 @@ pub struct UiState {
     /// Scroll of the order detail (pane or full screen): PgUp/PgDn/Home/End.
     /// Back to the top whenever the selection or the view changes.
     pub detail_scroll: Scroll,
+    /// The last submitted form while its call is pending or was refused:
+    /// closing the refusal brings it back with everything typed.
+    pub last_form: Option<Form>,
 }
 
 impl Default for UiState {
@@ -117,6 +120,7 @@ impl Default for UiState {
             selected_draft: None,
             show_closed: false,
             detail_scroll: Scroll::default(),
+            last_form: None,
         }
     }
 }
@@ -132,6 +136,8 @@ pub enum Outcome {
     Refresh,
     /// An action key or popup key: carry out the effect (`App::apply`).
     Act(Effect),
+    /// Ctrl+L: clear the terminal and draw everything again.
+    Redraw,
     /// Not a key of this app state: the current view may use it.
     Unhandled(KeyEvent),
 }
@@ -216,6 +222,29 @@ impl UiState {
         }
     }
 
+    /// New snapshot. When the selected order left the list (cancelled,
+    /// archived), the selection moves to its nearest neighbour that is
+    /// still there instead of jumping to the first row.
+    pub fn replace_data(&mut self, data: Snapshot) {
+        let before: Vec<i64> = self.order_list().iter().map(|r| r.order.id).collect();
+        let at = self
+            .selected
+            .and_then(|id| before.iter().position(|&x| x == id));
+        self.data = data;
+        let Some(at) = at else { return };
+        let now: Vec<i64> = self.order_list().iter().map(|r| r.order.id).collect();
+        if now.contains(&before[at]) {
+            return;
+        }
+        let next = before[at + 1..]
+            .iter()
+            .chain(before[..at].iter().rev())
+            .find(|id| now.contains(id));
+        if let Some(&id) = next {
+            self.selected = Some(id);
+        }
+    }
+
     /// True when the order detail is on screen: full screen, or the right
     /// pane of Orders at `width` columns.
     pub fn detail_shown(&self, width: u16) -> bool {
@@ -247,6 +276,28 @@ impl UiState {
         }
     }
 
+    /// A bracketed paste: typed into the focused text field of a form or
+    /// into the filter being edited, with newlines as spaces so it can
+    /// never submit anything. Dropped everywhere else, so pasted text cannot
+    /// run action keys.
+    pub fn handle_paste(&mut self, text: &str) {
+        let clean: String = text
+            .trim_end_matches(['\r', '\n'])
+            .chars()
+            .map(|c| if c.is_control() { ' ' } else { c })
+            .collect();
+        match &mut self.popup {
+            Some(Popup::Form(form)) => form.paste(&clean),
+            Some(_) => {}
+            None if self.help_open => {}
+            None => {
+                if self.filter().editing {
+                    self.filter_mut().text.push_str(&clean);
+                }
+            }
+        }
+    }
+
     /// Route one key press. Precedence: action popup, help popup, filter
     /// input, global keys, list and action keys.
     /// `width` is the terminal width, for the adaptive `Enter`.
@@ -254,8 +305,12 @@ impl UiState {
         if key.kind != KeyEventKind::Press {
             return Outcome::None;
         }
-        if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        if ctrl && key.code == KeyCode::Char('c') {
             return Outcome::Quit;
+        }
+        if ctrl && key.code == KeyCode::Char('l') {
+            return Outcome::Redraw;
         }
         if self.popup.is_some() {
             return Outcome::Act(actions::popup_key(self, key));
@@ -270,12 +325,23 @@ impl UiState {
         }
         if self.filter().editing {
             let f = self.filter_mut();
+            let chord = key
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT);
             match key.code {
                 KeyCode::Esc => *f = Filter::default(),
                 KeyCode::Enter => f.editing = false,
                 KeyCode::Backspace => {
                     f.text.pop();
                 }
+                // Readline habits: Ctrl+U clears, Ctrl+W drops a word.
+                KeyCode::Char('u') if ctrl => f.text.clear(),
+                KeyCode::Char('w') if ctrl => {
+                    let kept = f.text.trim_end().rfind(' ').map_or(0, |i| i + 1);
+                    f.text.truncate(kept);
+                }
+                // Other chords (Ctrl+H on some terminals, Alt+x) type nothing.
+                KeyCode::Char(_) if chord => {}
                 KeyCode::Char(c) => f.text.push(c),
                 _ => {}
             }
@@ -392,6 +458,7 @@ impl App {
             icons: Icons::new(settings.icons),
             refresh_every: (settings.refresh_seconds > 0)
                 .then(|| Duration::from_secs(settings.refresh_seconds)),
+            // (An absurd interval simply never fires; see `run_loop`.)
             clipboard: None,
             jobs: JobCache::default(),
         }
@@ -401,7 +468,7 @@ impl App {
     pub fn refresh(&mut self) {
         match Snapshot::load_cached(&self.ctx, &gig_core::clock::today(), &mut self.jobs) {
             Ok(data) => {
-                self.ui.data = data;
+                self.ui.replace_data(data);
                 self.ui.error = None;
             }
             Err(e) => self.ui.error = Some(format!("{}: {e}", e.code())),
@@ -409,7 +476,11 @@ impl App {
     }
 
     pub fn run_loop(&mut self, term: &mut Term) -> Result<()> {
-        let mut next_tick = self.refresh_every.map(|d| Instant::now() + d);
+        // `checked_add`: an absurd interval (`--refresh` of centuries) means
+        // no timer rather than an overflow panic.
+        let mut next_tick = self
+            .refresh_every
+            .and_then(|d| Instant::now().checked_add(d));
         loop {
             self.draw(term)?;
 
@@ -418,21 +489,26 @@ impl App {
                 None => IDLE_POLL,
             };
             if event::poll(timeout)? {
-                if let Event::Key(key) = event::read()? {
-                    let width = term.size()?.width;
-                    match self.ui.handle_key(key, width) {
-                        Outcome::Quit => return Ok(()),
-                        Outcome::Refresh => self.refresh(),
-                        Outcome::Act(effect) => self.apply(effect, term)?,
-                        Outcome::None | Outcome::Unhandled(_) => {}
+                match event::read()? {
+                    Event::Key(key) => {
+                        let width = term.size()?.width;
+                        match self.ui.handle_key(key, width) {
+                            Outcome::Quit => return Ok(()),
+                            Outcome::Refresh => self.refresh(),
+                            Outcome::Redraw => term.clear()?,
+                            Outcome::Act(effect) => self.apply(effect, term)?,
+                            Outcome::None | Outcome::Unhandled(_) => {}
+                        }
                     }
+                    Event::Paste(text) => self.ui.handle_paste(&text),
+                    _ => {}
                 }
                 // Resize and other events just redraw.
             }
             if let (Some(t), Some(every)) = (next_tick, self.refresh_every) {
                 if Instant::now() >= t {
                     self.refresh();
-                    next_tick = Some(Instant::now() + every);
+                    next_tick = Instant::now().checked_add(every);
                 }
             }
         }
@@ -448,11 +524,18 @@ impl App {
             Effect::EditField(index) => {
                 let initial = actions::field_text(&self.ui, index);
                 // A failed editor (`:cq`) leaves the field as it was and
-                // keeps the half-filled form.
-                if let Ok(text) =
-                    terminal::suspend_while(term, || crate::editor::edit_text(&initial))?
-                {
-                    actions::set_edited_field(&mut self.ui, index, text);
+                // keeps the half-filled form. An editor that cannot be
+                // started is reported; closing the message brings the form
+                // back.
+                match terminal::suspend_while(term, || crate::editor::edit_text(&initial))? {
+                    Ok(text) => actions::set_edited_field(&mut self.ui, index, text),
+                    Err(e) if crate::editor::is_exit_failure(&e) => {}
+                    Err(e) => {
+                        if let Some(Popup::Form(form)) = self.ui.popup.take() {
+                            self.ui.last_form = Some(form);
+                        }
+                        self.editor_failed(e);
+                    }
                 }
             }
             Effect::EditNote { slug } => {
@@ -543,10 +626,13 @@ impl App {
             Err(e) => self.ui.popup = Some(Popup::error(&e)),
         }
         self.refresh();
-        match draw_error {
-            Some(e) => Err(e.into()),
-            None => Ok(()),
+        // The upload and its database update succeeded or failed on their
+        // own; a draw error must not hide the result popup. The next draw
+        // fails too if the terminal is really gone.
+        if let Some(e) = draw_error {
+            self.ui.error = Some(format!("draw: {e}"));
         }
+        Ok(())
     }
 
     /// Run a gig-core call, then refresh. Slow calls first draw a busy
@@ -741,6 +827,34 @@ mod tests {
         assert_eq!(s.selected_order().unwrap().order.id, 8);
         s.preselect(999);
         assert_eq!(s.selected, Some(8));
+    }
+
+    #[test]
+    fn selection_moves_to_a_neighbour_when_its_order_leaves() {
+        let mut s = with_orders();
+        let ids: Vec<i64> = s.order_list().iter().map(|r| r.order.id).collect();
+        assert!(ids.len() >= 3);
+        s.selected = Some(ids[1]);
+        let mut data = s.data.clone();
+        data.orders.retain(|r| r.order.id != ids[1]);
+        s.replace_data(data);
+        assert_eq!(s.selected, Some(ids[2]), "the next row, not the first");
+        // The last row falls back to the one above it.
+        let last = *s
+            .order_list()
+            .iter()
+            .map(|r| r.order.id)
+            .collect::<Vec<_>>()
+            .last()
+            .unwrap();
+        s.selected = Some(last);
+        let before: Vec<i64> = s.order_list().iter().map(|r| r.order.id).collect();
+        let mut data = s.data.clone();
+        data.orders.retain(|r| r.order.id != last);
+        s.replace_data(data);
+        assert_eq!(s.selected, Some(before[before.len() - 2]));
+        let ctrl_l = KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL);
+        assert_eq!(s.handle_key(ctrl_l, 80), Outcome::Redraw);
     }
 
     #[test]

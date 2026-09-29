@@ -29,10 +29,12 @@ enum Section {
 }
 
 impl JobMd {
-    /// Read and parse `path`; a missing or unreadable file gives the default.
+    /// Read and parse `path`; a missing or unreadable file gives the
+    /// default. Invalid UTF-8 is read lossily: the file exists and its
+    /// sections are still worth showing.
     pub fn load(path: &Path) -> Self {
-        match std::fs::read_to_string(path) {
-            Ok(text) => Self::parse(&text),
+        match std::fs::read(path) {
+            Ok(bytes) => Self::parse(&String::from_utf8_lossy(&bytes)),
             Err(_) => Self::default(),
         }
     }

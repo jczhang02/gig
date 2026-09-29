@@ -338,7 +338,14 @@ pub fn popup_key(ui: &mut UiState, key: KeyEvent) -> Effect {
     match popup.handle_key(key) {
         PopupKey::None => Effect::None,
         PopupKey::Close => {
+            // Closing a refusal brings back the form that was refused, with
+            // everything typed; closing anything else forgets it.
+            let refused = matches!(ui.popup, Some(Popup::Message { error: true, .. }));
             ui.popup = None;
+            let form = ui.last_form.take();
+            if refused {
+                ui.popup = form.map(Popup::Form);
+            }
             Effect::None
         }
         PopupKey::EditField(i) => Effect::EditField(i),
@@ -347,7 +354,13 @@ pub fn popup_key(ui: &mut UiState, key: KeyEvent) -> Effect {
             _ => Effect::None,
         },
         PopupKey::Submit => match ui.popup.take() {
-            Some(Popup::Form(form)) => submit(ui, form),
+            Some(Popup::Form(form)) => {
+                let kept = form.clone();
+                let effect = submit(ui, form);
+                // Kept until the call succeeds (see `perform`).
+                ui.last_form = Some(kept);
+                effect
+            }
             Some(Popup::Pick(pick)) => picked(ui, pick),
             other => {
                 ui.popup = other;
@@ -453,8 +466,12 @@ pub fn field_text(ui: &UiState, index: usize) -> String {
 /// verbatim. The caller refreshes the snapshot afterwards either way.
 pub fn perform(ctx: &Ctx, ui: &mut UiState, action: &Action) {
     match run(ctx, action) {
-        Ok(Some(p)) => ui.popup = Some(p),
-        Ok(None) => {}
+        Ok(Some(p)) => {
+            ui.popup = Some(p);
+            ui.last_form = None;
+        }
+        Ok(None) => ui.last_form = None,
+        // `last_form` stays: closing the refusal reopens the form.
         Err(e) => ui.popup = Some(Popup::error(&e)),
     }
 }

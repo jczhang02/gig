@@ -219,7 +219,9 @@ fn refusals_are_shown_verbatim_and_change_nothing() {
         "{text}"
     );
     assert_eq!(h.order("tk-queued").status, OrderStatus::Queued);
-    // Any key closes the message; then the app is usable again.
+    // Closing the refusal brings the refused form back; Esc closes it.
+    h.key(KeyCode::Esc);
+    assert!(matches!(h.ui.popup, Some(Popup::Form(_))));
     h.key(KeyCode::Esc);
     assert_eq!(h.ui.popup, None);
     h.key(KeyCode::Char('s'));
@@ -771,4 +773,71 @@ fn upload_artifact_from_a_typed_path() {
     h.chars("/nonexistent/file.pdf");
     h.key(KeyCode::Enter);
     assert!(h.popup_text().contains("refused"));
+}
+
+#[test]
+fn a_refused_form_keeps_what_was_typed() {
+    let mut h = Harness::new();
+    let id = h.register("tk-typo", Some(1000));
+    h.deliver(id);
+    h.key(KeyCode::Char('p'));
+    h.backspaces(10);
+    h.chars("2026-09-02");
+    h.key(KeyCode::Tab);
+    h.backspaces(5);
+    h.chars("12x");
+    h.key(KeyCode::Enter);
+    let text = h.popup_text();
+    assert!(text.contains("12x"), "{text}");
+    assert_eq!(h.order("tk-typo").status, OrderStatus::Delivered);
+    h.key(KeyCode::Enter);
+    match &h.ui.popup {
+        Some(Popup::Form(f)) => {
+            assert_eq!(f.get("date"), "2026-09-02");
+            assert_eq!(f.get("amount"), "12x");
+        }
+        other => panic!("form expected, got {other:?}"),
+    }
+    // Fixed, it goes through and is not reopened.
+    h.key(KeyCode::Backspace);
+    h.key(KeyCode::Enter);
+    h.ack("paid tk-typo");
+    assert_eq!(h.order("tk-typo").price_minor, Some(1200));
+}
+
+#[test]
+fn pastes_type_text_and_never_run_keys() {
+    let mut h = Harness::new();
+    let id = h.register("tk-paste", Some(1000));
+    h.deliver(id);
+    // In the list a paste does nothing: no `s`, `x` or `a` runs.
+    h.ui.handle_paste("start x archive\ny");
+    assert_eq!(h.ui.popup, None);
+    assert!(!h.ui.show_closed);
+    assert_eq!(h.order("tk-paste").status, OrderStatus::Delivered);
+    // Into the cancel form: the newline does not submit, `y` is text.
+    h.key(KeyCode::Char('x'));
+    h.ui.handle_paste("client left\ny\n");
+    match &h.ui.popup {
+        Some(Popup::Form(f)) => assert_eq!(f.get("reason"), "client left y"),
+        other => panic!("form expected, got {other:?}"),
+    }
+    assert_eq!(h.order("tk-paste").status, OrderStatus::Delivered);
+    h.key(KeyCode::Esc);
+    // Into the filter.
+    h.key(KeyCode::Char('/'));
+    h.ui.handle_paste("tk-pa\n");
+    assert_eq!(h.ui.filter().text, "tk-pa");
+    // Chords type nothing into the filter; Ctrl+U clears it.
+    h.ui.handle_key(
+        KeyEvent::new(KeyCode::Char('h'), KeyModifiers::CONTROL),
+        200,
+    );
+    h.ui.handle_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::ALT), 200);
+    assert_eq!(h.ui.filter().text, "tk-pa");
+    h.ui.handle_key(
+        KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL),
+        200,
+    );
+    assert_eq!(h.ui.filter().text, "");
 }

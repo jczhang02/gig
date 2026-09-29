@@ -138,6 +138,15 @@ impl Form {
         }
     }
 
+    /// Pasted text (newlines already removed) into the focused text field.
+    pub fn paste(&mut self, text: &str) {
+        if let Some(f) = self.fields.get_mut(self.focus) {
+            if let (false, FieldKind::Text(s)) = (f.locked, &mut f.kind) {
+                s.push_str(text);
+            }
+        }
+    }
+
     /// Move to the next (or previous) unlocked field, wrapping.
     fn move_focus(&mut self, delta: isize) {
         let n = self.fields.len();
@@ -172,7 +181,9 @@ impl Form {
                 }
                 match (&mut f.kind, code) {
                     (FieldKind::Text(s), KeyCode::Char(c))
-                        if !key.modifiers.contains(KeyModifiers::CONTROL) =>
+                        if !key
+                            .modifiers
+                            .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
                     {
                         s.push(c)
                     }

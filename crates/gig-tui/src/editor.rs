@@ -23,8 +23,29 @@ pub fn edit_file(path: &Path) -> io::Result<()> {
     if status.success() {
         Ok(())
     } else {
-        Err(io::Error::other(format!("{} exited with {status}", cmd[0])))
+        Err(io::Error::other(ExitFailure(format!(
+            "{} exited with {status}",
+            cmd[0]
+        ))))
     }
+}
+
+/// The editor ran and exited non-zero (`:cq`): "changed my mind", unlike an
+/// editor that could not be started.
+#[derive(Debug)]
+struct ExitFailure(String);
+
+impl std::fmt::Display for ExitFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for ExitFailure {}
+
+/// True when `e` is a non-zero editor exit rather than a failure to run it.
+pub fn is_exit_failure(e: &io::Error) -> bool {
+    e.get_ref().is_some_and(|inner| inner.is::<ExitFailure>())
 }
 
 /// Edit `initial` in a temporary Markdown file and return the new text with

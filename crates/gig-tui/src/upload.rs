@@ -246,8 +246,13 @@ pub fn run_on_worker(
 ) -> Result<Uploaded> {
     let meter = Arc::new(Meter::default());
     let progress = meter.callback();
+    // A message left by an earlier worker must not be reported for this one.
+    let _ = crate::terminal::take_worker_panic();
     thread::scope(|s| {
-        let worker = s.spawn(move || run_job(ctx, job, uploader, Some(progress)));
+        let worker = thread::Builder::new()
+            .name(crate::terminal::WORKER_THREAD.into())
+            .spawn_scoped(s, move || run_job(ctx, job, uploader, Some(progress)))
+            .map_err(|e| Error::Upload(format!("cannot start the upload worker: {e}")))?;
         while !worker.is_finished() {
             let (sent, total) = meter.get();
             tick(sent, total);
