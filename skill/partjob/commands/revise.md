@@ -1,21 +1,21 @@
 # revise
 
-客户看了预览或收到包之后有反馈. 先分类, 再动手.
+The client responded to the preview or the package. Classify first, then act.
 
-## 步骤
+## Steps
 
-1. 把客户反馈原话记进 JOB.md "状态" (带日期, 注明是预览反馈还是交付后反馈).
-2. 对照 "已确认决策" 和 QUOTE.md 逐条判断:
-   - 漏做了承诺的项, 或做得不对: 返工. 不改价.
-   - 客户要的东西不在决策和报价范围里: 范围变更. 由 JC 决定是免费做, 加价, 还是拒绝.
-   - 分不清的: 列出差异, 让 JC 判.
-3. 返工:
-   - 订单是 `delivered`: `gig start --order <slug>` 回到 in_progress.
-   - 订单是 `paid` (售后期): 不改状态, 直接改.
-   - 反馈里的新要求用 `/partjob decide` 写成新决策 (取代旧条目的写明).
-   - 完成后新版本号 `/partjob pack` 或 `/partjob preview`, 再 `/partjob send`.
-4. 范围变更 (JC 决定后): `gig change --desc "<变更>" [--price-delta <差价>]`. 价格变了, QUOTE.md 的价格行由 JC 改, 或 JC 明确说了新价后 agent 改并注明日期.
+1. Record the client's feedback verbatim in JOB.md "Status" (dated; say whether it is preview feedback or post-delivery feedback).
+2. Compare each point against "Confirmed decisions" and QUOTE.md:
+   - A promised item missing or wrong: rework. No price change.
+   - Something outside the decisions and the quote: scope change. JC decides whether to do it free, charge, or decline.
+   - Unclear: list the difference and let JC judge.
+3. Rework:
+   - Order is `delivered`: `gig start --order <slug>` returns it to in_progress.
+   - Order is `paid` (warranty): no state change; just fix it.
+   - New requirements from the feedback become decisions via `/partjob decide` (state what they supersede).
+   - When done, a new version through `/partjob pack` or `/partjob preview`, then `/partjob send`.
+4. Scope change (after JC decides): `gig change --desc "<change>" [--price-delta <difference>]`. If the price changed, the QUOTE.md price line is edited by JC, or by the agent after JC states the new price, with the date noted.
 
-## 回复
+## Reply
 
-分类结果 (逐条: 返工 / 范围变更 / 待 JC 判), 打算怎么做, 需要 JC 决定的点.
+The classification per point (rework / scope change / for JC to judge), the plan, and what JC has to decide.

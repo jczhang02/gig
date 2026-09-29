@@ -1,31 +1,31 @@
 # {{ title }}
 
-- 项目标识: {{ slug }}. 项目类型: {{ project_type }}.{% if platform %} 来源平台: {{ platform }}.{% endif %}
-{% if material_path %}- 原件位于 {{ material_path }}, 只读. 需要的样本复制到 data/ (不入库).
-{% else %}- 原件路径: (待填). 原件只读, 需要的样本复制到 data/ (不入库).
-{% endif %}- 报价与付款以 .gig/QUOTE.md 为准.
+- Slug: {{ slug }}. Project type: {{ project_type }}.{% if platform %} Platform: {{ platform }}.{% endif %}
+{% if material_path %}- Original materials: {{ material_path }}, read-only. Samples needed for work are copied to data/ (not committed).
+{% else %}- Original materials: (to fill). Read-only; samples needed for work are copied to data/ (not committed).
+{% endif %}- Price and payment facts: .gig/QUOTE.md.
 
-## 客户原始需求
+## Client request
 
 {% if client_words %}> {{ client_words }}
-{% else %}(待填: 客户原话, 注明来源文件和编码)
+{% else %}(to fill: the client's words verbatim, with source file and encoding)
 {% endif %}{% if draft_notes %}
-## 接单前笔记
+## Pre-order notes
 
 {{ draft_notes }}
 {% endif %}
-## 素材事实
+## Material facts
 
-(客观观察: 文件格式, 尺寸, 数量, 编码, 异常. 不掺判断.)
+(Objective observations: file formats, sizes, counts, encodings, anomalies. No judgements.)
 
-## 已确认决策
+## Confirmed decisions
 
-1. ({{ today }}, 立项) 交付形式和范围以本节后续条目为准; 未写入本节的要求不算已确认.
+1. ({{ today }}, kickoff) The deliverable form and scope are whatever later items in this section say; a requirement not written here is not confirmed.
 
-## 待客户确认
+## Client questions
 
-(无)
+(none)
 
-## 状态
+## Status
 
-- {{ today }}: 立项, 建立目录与基本文件. 尚未对外发送.
+- {{ today }}: project created with its directory and base files. Not sent out yet.

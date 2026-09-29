@@ -1,25 +1,25 @@
 # start <slug>
 
-客户下单, 这一单正式开始. 登记订单, 建正式目录, 配 agent 规范, 然后进入 grill.
+The client placed the order; the job officially begins. Register the order, create the project directory, set up agent rules, then go to grill.
 
-## 前置
+## Preconditions
 
-- 从 JC 那里拿到: 成交价 (主单位, 如 800), 用户原话 (客户或 JC 说成交的那句话, 原样), 项目类型 (`tool` 工具类, `cv_ml`, `data_processing`, `research_writing`, `custom`), 材料路径 (draft 里有就不用再问).
-- 有同名 draft 就用 `--from-draft`, 笔记会进 JOB.md 的 "接单前笔记".
-- 目录已经存在 (比如之前手工建的项目): 用 `--adopt --status in_progress`, 不动任何文件, 之后手工补 `.gig/JOB.md` 和 `.gig/QUOTE.md` 缺的部分.
+- From JC: the agreed price (major units, e.g. 800), the client's or JC's words confirming the deal (verbatim), the project type (`tool`, `cv_ml`, `data_processing`, `research_writing`, `custom`), the material path (not needed again if the draft has it).
+- A draft with the same slug exists: use `--from-draft`; its notes land in JOB.md under "Pre-order notes".
+- The directory already exists (a project set up by hand earlier): use `--adopt --status in_progress`, which touches no file; fill in whatever `.gig/JOB.md` and `.gig/QUOTE.md` lack afterwards.
 
-## 步骤
+## Steps
 
-1. 把用户原话写到 `.scratch` 之外的临时文件不合适; 直接用 `--client-words "<原话>"`, 太长就先写到 `/tmp` 下一个文件再 `--client-words @文件`.
-2. `gig new <slug> --title "<标题>" --price <价> --type <类型> --material <路径> [--platform <平台>] --client-words ... [--from-draft]`.
-   返回 `created_files` 和 `warnings` (git 不可用会在这里). 目录在 `~/dev/partjobs/<slug>/`, 已有 `.gig/JOB.md`, `.gig/QUOTE.md`, `AGENTS.md`, `README.md`, `.gitignore`, `data/`, `references/`.
-3. 读一遍生成的 `.gig/JOB.md` 和 `.gig/QUOTE.md`, 把 "(待填)" 的地方补上已知事实. QUOTE.md 的价格和原话必须和 JC 说的一致.
-4. 在项目目录里运行 `setup-matt-pocock-skills` skill (issue tracker, triage labels, domain docs 的配置). 它会在 AGENTS.md 追加 "Agent skills" 一节; 保留模板里已有的内容.
-5. 按项目类型把 AGENTS.md "项目专属" 里的 "(待填)" 补上: 只读路径, 是否允许训练和在哪跑, 本地工具链, 是否授权连续工作, git 授权范围. 不确定的先留着, 在 grill 里问.
-6. `gig start --order <slug>`. 状态变 `in_progress`.
-7. 提示 JC 下一步用 `grill-me` (小单) 或 `grill-with-docs` (需要 CONTEXT.md 和 ADR 的单) 确定路线. grill 的结论用 `/partjob decide` 逐条写进 JOB.md.
-8. 首次 commit: 骨架文件. 不推送.
+1. Pass the client's words with `--client-words "<words>"`; if long, write them to a file under `/tmp` first and pass `--client-words @file`.
+2. `gig new <slug> --title "<title>" --price <amount> --type <type> --material <path> [--platform <platform>] --client-words ... [--from-draft]`.
+   The result lists `created_files` and `warnings` (git being unavailable shows here). The directory is `~/dev/partjobs/<slug>/` with `.gig/JOB.md`, `.gig/QUOTE.md`, `AGENTS.md`, `README.md`, `.gitignore`, `data/`, `references/`.
+3. Read the generated `.gig/JOB.md` and `.gig/QUOTE.md` and fill every "(to fill)" with known facts. The price and words in QUOTE.md must match what JC said.
+4. In the project directory run the `setup-matt-pocock-skills` skill (issue tracker, triage labels, domain docs). It appends an "Agent skills" section to AGENTS.md; keep the template content.
+5. Fill the "Project-specific" section of AGENTS.md for this project type: read-only paths, whether training is allowed and where, local toolchain, whether continuous work is authorised, git authorisation. Leave what is unknown and ask in the grill.
+6. `gig start --order <slug>`. Status becomes `in_progress`.
+7. Tell JC the next step is `grill-me` (small job) or `grill-with-docs` (a job that needs CONTEXT.md and ADRs) to settle the route. Grill conclusions go into JOB.md one by one via `/partjob decide`.
+8. First commit: the skeleton files. No push.
 
-## 回复
+## Reply
 
-建了哪些文件, QUOTE.md 里记的价格和日期, AGENTS.md 里还有哪些 "(待填)", 下一步是 grill.
+Which files were created, the price and date in QUOTE.md, which "(to fill)" items remain in AGENTS.md, and that the next step is grill.

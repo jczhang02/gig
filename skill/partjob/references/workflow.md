@@ -1,308 +1,304 @@
-# partjobs 工作流 v2 (第 1 层: 知识与规则)
+# partjobs workflow v2 (layer 1: knowledge and rules)
 
-草稿 2026-09-29, 第 2 版, 按 JC 口述的实际流程重排. 这份文档是整套系统的源头: 新 skill 的正文由它生成, gig v2 只存这里要求记住的东西, 项目模板只生成这里要求存在的文件.
+Written 2026-09-29 from JC's own description of the process; English edition. This document is the source of the whole system: the skill's text is generated from it, gig v2 stores only what it requires, and the project templates create only the files it names.
 
-标注:
-- [实践] 现有项目 (tk-dtf-compact, bllc-reproduction, sers-colitis-analysis, patent-value-identification) 和 gig.db 里已经在这么做的.
-- [JC] JC 口述的做法, 直接采纳.
-- [提案] 我的建议, 需要 JC 确认.
-- [定] 2026-09-29 已确定的.
+Tags:
+- [Practice] Already done this way in the existing projects (tk-dtf-compact, bllc-reproduction, sers-colitis-analysis, patent-value-identification) and in the v1 gig database.
+- [JC] JC's own description, adopted as is.
+- [Decided] Settled on 2026-09-29.
 
-## 0. 定位
+## 0. Purpose
 
-[JC] 这套流程覆盖接兼职订单的方方面面: 从收到需求到售后期结束. JC 不直接操作 gig, agent 读写 gig. 客户沟通和报价由 JC 在平台上自己做, 流程只记录结果和提供材料.
+[JC] This workflow covers every part of taking freelance orders: from the first request to the end of the warranty. JC does not operate gig; agents read and write it. Client communication and pricing are JC's, done on the platform; the workflow records outcomes and supplies material.
 
-[提案] 优先级: (1) 项目在多次会话和多个 agent 之间不丢记忆; (2) 交付物安全, 不泄漏客户材料和内部文件; (3) 钱收回来, 售后期过完, 归档; (4) agent 不越权做不可逆或对外的动作.
+[Decided] Priorities: (1) a project keeps its memory across sessions and agents; (2) deliverables are safe: no client materials or internal files leak; (3) the money comes in, the warranty runs out, the project is archived; (4) agents never take irreversible or outward actions on their own.
 
-## 1. 流程
+## 1. Process
 
-分四段, 段与段之间不是硬性门禁, 只是记录点.
+Four phases. The boundaries between them are recording points, not gates.
 
-### 1.1 接单前
-
-[JC]
-- 接到订单, 拿到客户的初步简短需求 -> 建立临时的, 不可见的工作目录.
-- 和客户交流, 确定具体需求.
-- 报价, 谈价. 一般根据客户预算报价, 希望先拿到预算.
-- 客户同意并下单 -> 这一单正式开始, 临时目录升级为正式目录 `~/dev/partjobs/<slug>/`. 客户不同意 -> 删除临时目录.
-
-[提案]
-- 临时目录放 `~/dev/partjobs/.drafts/<slug>/` (隐藏, 不在 partjobs 顶层露出). 里面只允许 `NOTES.md` (客户原话, 材料位置, 疑问, 预算, 报价过程) 和从原件复制的少量样本. 不建 git, 不建 `.gig/`.
-- gig 在这一段记一条 `draft`: slug, 材料路径, 创建日期. 升级时这条变成 order; 删除时 `NOTES.md` 导出到 gig 的备注后目录删掉, 留一条 dropped 记录和原因, 以后同类需求可查.
-- agent 在这一段能做的: 看材料, 摸底可行性, 整理疑问清单给 JC 去问客户, 估工作量给 JC 参考. 不写代码, 不建正式项目.
-
-### 1.2 开工
+### 1.1 Before the order
 
 [JC]
-- 在正式目录里建立 agent 规范, 用 `setup-matt-pocock-skills`.
-- 用 `grill-me` 或 `grill-with-docs` 确定具体路线和目标.
-- agent 和 JC 正式干活.
-- 中途可能有问题要客户确认.
+- An order comes in with a short first request from the client. Create a temporary, hidden working directory.
+- Talk with the client until the requirements are concrete.
+- Quote and negotiate. JC usually prices from the client's budget and prefers to learn the budget first.
+- The client agrees and places the order: the job officially starts and the temporary directory becomes the formal one at `~/dev/partjobs/<slug>/`. The client declines: delete the temporary directory.
 
-[实践] 正式目录的共同做法:
-- 独立 git 仓库, 分支 main. 原件留在原路径只读 (一般 `/mnt/virtiofs/<编号>/`), 样本复制到 `data/` 或 `references/`.
-- 客户样本, 含订单号 / 个人信息的图, 交付目录, 构建产物不入库, `.gitignore` 每条注明原因.
-- `.gig/JOB.md` 和 `.gig/QUOTE.md` 是仅有的两个流程文件 (第 2 节). 根目录 `AGENTS.md` 写项目专属 agent 规则.
-- grilling 的结论写进 JOB.md "已确认决策", 带日期和 "grilling 确认" 字样.
+[Decided]
+- The temporary directory is `~/dev/partjobs/.drafts/<slug>/` (hidden, not visible at the top of partjobs). It holds only `NOTES.md` (the client's words, material locations, questions, budget, pricing notes) and a few samples copied from the originals. No git, no `.gig/`.
+- gig records a `draft` for this phase: slug, material path, creation date. Promotion turns it into an order; dropping snapshots `NOTES.md` into gig, removes the directory and keeps a dropped record with the reason, so similar requests can be looked up later.
+- What the agent may do here: inspect the materials, assess feasibility, prepare a question list for JC to relay to the client, estimate the effort for JC's reference. No code, no formal project.
 
-[提案] 升级为正式目录时的第 0 天骨架:
+### 1.2 Kickoff
+
+[JC]
+- In the formal directory, set up agent rules with `setup-matt-pocock-skills`.
+- Settle the concrete route and goals with `grill-me` or `grill-with-docs`.
+- The agent and JC do the work.
+- Questions for the client may come up midway.
+
+[Practice] What the existing projects share:
+- A separate git repository, branch main. Originals stay at their path, read-only (usually `/mnt/virtiofs/<id>/`); samples are copied into `data/` or `references/`.
+- Client samples, images carrying order numbers or personal information, the delivery directory and build outputs are not committed; every `.gitignore` line carries its reason.
+- `.gig/JOB.md` and `.gig/QUOTE.md` are the only workflow files (section 2). The project's `AGENTS.md` holds project-specific agent rules.
+- Grill conclusions go into JOB.md "Confirmed decisions", dated and marked "confirmed by grilling".
+
+[Decided] The day-zero skeleton when the draft is promoted:
 
 ```
 <slug>/
   .git/  .gitignore  .python-version
   .gig/JOB.md  .gig/QUOTE.md
-  AGENTS.md            # setup-matt-pocock-skills 生成后, 再补第 4 节的项目专属规则
-  CONTEXT.md  docs/adr/   # grill-with-docs 产出, 用 grill-me 时不建
+  AGENTS.md            # generated, then extended with the project-specific rules of section 4
+  CONTEXT.md  docs/adr/   # produced by grill-with-docs; absent with grill-me
   README.md
-  data/  references/   # gitignore 其中的客户样本
-  src/  tests/         # 按项目类型
+  data/  references/   # client samples inside are gitignored
+  src/  tests/         # by project type
 ```
 
-不再生成: INDEX.html, PLAN.md/PLAN.html, ACCEPTANCE.md, MEASURE.md, progress-log.md, delivery 元数据. 计划和验收记录进 JOB.md.
+No longer generated: INDEX.html, PLAN.md/PLAN.html, ACCEPTANCE.md, MEASURE.md, progress-log.md, any delivery metadata. Plans and acceptance records go into JOB.md.
 
-中途要问客户的问题: agent 整理成一段可直接转发的中文, 放 JOB.md "待客户确认" 小节; JC 问完后把答复记成新决策.
+Questions for the client midway: the agent writes them as a forwardable message under "Client questions" in JOB.md; when JC brings the answer it becomes a new decision.
 
-### 1.3 交付
+### 1.3 Delivery
 
 [JC]
-- JC 自己检查满意后, 先发一部分能证明工作完成的好产出的预览给客户看. (定义见 5.1)
-- 客户满意就收货 -> 发送完整交付内容. (清单见 5.2; JC 的底线: 源码 + 交付报告含安装和使用说明)
-- 客户不满意 -> 继续工作.
+- Once JC is satisfied, a preview of good output goes to the client first, as proof the work is done.
+- If the client is satisfied they accept, and the full delivery follows.
+- If not, work continues.
 
-[实践] 过去的交付内容:
-- tk-dtf-compact (工具类): 程序 (Windows exe + Linux 可执行), 使用说明.pdf (Kami, 带截图), 源代码.zip (git archive, 不含 .gig), 本批处理结果. 另有一个 `对比-v1.1.0/` 目录放 19 张前后对比图, 这实际上就是预览.
-- bllc-reproduction (复现类): 程序 + 配置, 四份 Kami PDF (最终交付报告, 未复现内容与阻塞分析, 程序差异分析, 代码详细解读), results.
-- sers (数据分析类): 改版后的图和分析结果.
+[Practice] Past deliveries:
+- tk-dtf-compact (tool): programs (Windows exe and Linux binary), a manual PDF (Kami, with screenshots), source zip (git archive without .gig), this batch's processed results. A separate comparison directory with 19 before/after images was effectively the preview.
+- bllc-reproduction (reproduction): programs and configurations, four Kami PDFs (delivery report, unreproduced items and blockers, program differences, code walkthrough), results.
+- sers (data analysis): restyled figures and analysis results.
 
-[提案] 预览 (见第 5 节讨论) 和完整包的规则:
+[Decided] Preview and full package (see section 5):
 
 ```
-delivery/                          # 整个目录 gitignore
-  <package-id>/                    # 只放给客户的文件. package-id 默认 <slug>-vX.Y.Z
-    <文件...>
-  <package-id>.manifest.toml       # 包外, 不进 zip. version=1, package_id, files=[...] 相对 <package-id>/
-  <package-id>.zip                 # 条目与 manifest 一一对应
-  preview-<package-id>/            # 预览, 同样有 manifest 和校验, 见第 5 节
+delivery/                          # the whole directory is gitignored
+  <package-id>/                    # client files only. package-id defaults to <slug>-vX.Y.Z
+    <files...>
+  <package-id>.manifest.toml       # outside the package, not in the zip. version=1, package_id, kind, files=[...] relative to <package-id>/
+  <package-id>.zip                 # entries equal the manifest
+  <slug>-vX.Y.Z-preview/           # previews follow the same rules with kind=preview
 ```
 
-- `gig package check` 校验 manifest 和 zip: 每项存在且是普通文件, 无绝对路径, 无 `..`, 无软链接, 无隐藏文件, 不含 `.gig/ .git/ .scratch/ data/` 等, zip 条目 == manifest 条目. 规则沿用旧 file-contracts.md 的安全清单.
-- 发送渠道 [JC]: 一般用 `gig upload` (上传 OSS, 生成短链); 也可能用 gsconnect 发到手机, JC 再手动转发给客户. 批准由 JC 给, 动作可以由 agent 做: 批准后 agent 跑 upload 或 gsconnect, 把短链或送达结果报给 JC.
-- `gig upload` 先重新 check, 再上传 OSS, 生成短链, 记录到 gig. 预览和完整包都走这一套, 类型不同 (preview / full). gsconnect 渠道同样先 check, 发送后在 gig 记一条 channel=phone, 没有远程 URL.
-- 上传或发到手机需要 JC 明确批准, 每次单独批. 批准后 agent 执行, 不必等 JC 亲自跑命令.
-- 客户不满意回到 1.2, 新决策记入 JOB.md, 完成后用新版本号重新交付.
+- Sending channels [JC]: usually `gig upload` (object storage, short link); sometimes gsconnect to the phone, with JC forwarding to the client. JC approves; the agent may act: after approval the agent runs the upload or gsconnect and reports the short link or delivery.
+- `gig package upload` re-checks, uploads, shortens the link and records it. Preview and full packages both go this way, distinguished by kind. The phone channel also re-checks and records channel=phone without a remote URL.
+- Uploading or sending to the phone needs JC's explicit approval, once per send. After approval the agent executes; JC need not run anything.
+- When the client is not satisfied the job returns to 1.2, new decisions go into JOB.md, and a new version is delivered.
 
-### 1.4 售后与收款
+### 1.4 Warranty and payment
 
 [JC]
-- 客户收到后可能提问题, 自己使用. JC 解答.
-- 客户满意 -> JC 收到钱, 这一单完成. 之后还有 15 天售后期.
-- 客户不满意 -> 继续修改直到满意.
+- After receiving the delivery the client may ask questions while using it. JC answers.
+- Client satisfied: JC is paid and the order is complete, followed by a 15-day warranty.
+- Client not satisfied: JC keeps revising until they are.
 
-[提案]
-- 收款: `gig paid <slug>` 记日期, 同步 QUOTE.md 付款状态. 售后期 = 付款日 + 15 天, gig 算出来, `gig ls` 列出仍在售后期的单.
-- 售后期内的修改: 记进 JOB.md 决策, 状态回 in_progress, 重新交付. 售后期内不新开单.
-- 售后期结束: `gig archive <slug>`. 先报告未提交改动, 大文件, 未发送的包; JC 批准后移到 archive_root. 项目内大文件是否清理, 按 bllc 2026-09-27 先例: 列出删除清单, 明确批准, git 历史保留.
-- 状态线 (2026-09-29 定):
+[Decided]
+- Payment: `gig paid <slug>` records the date and updates the payment line in QUOTE.md. The warranty ends on the payment date plus 15 days; gig computes it and `gig ls` lists orders still in warranty.
+- Changes during the warranty: recorded as decisions in JOB.md; the order stays `paid` and a new package is delivered. No new order is opened during the warranty.
+- After the warranty: `gig archive <slug>`. It first reports uncommitted changes, large files and unsent packages; after JC's approval the project moves to archive_root. Whether large files (checkpoints, data) are removed follows the bllc precedent of 2026-09-27: an explicit deletion list, explicit approval, git history kept.
+- States:
 
 ```
 draft -> queued -> in_progress -> delivered -> paid -> archived
   |         |           ^             |
-  +-dropped +-cancelled +-------------+ (返工或售后修改)
+  +-dropped +-cancelled +-------------+ (rework or warranty work)
 ```
 
-  `cancelled` 可以从 `queued` 或 `in_progress` 进入 (delivered 之后不再取消, 走返工). `draft` 接单前; `queued` 成交已登记未开工; `in_progress` 干活中; `delivered` 完整包已发; `paid` 已收款, 售后期内 (warranty_until = paid_at + 15 天); `archived` 归档. 发预览不改状态, 只在 package 表记一条 kind=preview.
+  `cancelled` is reachable from `queued` or `in_progress` (after delivery there is no cancellation, only rework). `draft` before the order; `queued` registered but not started; `in_progress` work under way; `delivered` full package sent; `paid` paid and in warranty (warranty_until = paid_at + 15 days); `archived` archived. Sending a preview changes no state; it is only a package record with kind=preview.
 
-## 2. JOB.md 和 QUOTE.md
+## 2. JOB.md and QUOTE.md
 
-[实践] tk 和 bllc 的 JOB.md 是范本:
+[Practice] The JOB.md files of tk and bllc are the model:
 
 ```
-# <标题>
-- 项目标识, 材料编号, 原件路径, 项目内副本位置
-- 客户原始需求 (原话, 注明来源文件和编码)
-- 报价与付款以 QUOTE.md 为准
+# <title>
+- slug, material id, path of the originals, location of the project copy
+- the client's request (verbatim, with source file and encoding)
+- price and payment facts: QUOTE.md
 
-## 素材事实            客观观察, 不掺判断
-## 已确认决策 (日期, 确认方式)   编号列表, 每条是可执行约束. 推翻的不删, 记新决策覆盖
-## 待客户确认          agent 写, JC 转发, 答复后转成决策
-## 状态                按日期的日志: 做了什么, 验证数字, 交付目录, CI run / commit, 还没做的
+## Material facts         objective observations, no judgements
+## Confirmed decisions    numbered; each is an executable constraint, dated, with how it was confirmed; overturned ones stay, a new item supersedes them
+## Client questions       written by the agent, forwarded by JC, turned into decisions when answered
+## Status                 dated log: what was done, verification figures, delivery directory, CI run / commit, what remains
 ```
 
-QUOTE.md: 项目, 材料编号, 接受日期, 币种及总价, 商务状态, 付款状态, 用户原话引用, 未约定事项 (交付日期, 支付节点, 售后期).
+QUOTE.md: project, material id, acceptance date, currency and total, commercial status, payment status, the client's words quoted, what was not agreed (delivery date, payment milestones, warranty).
 
-[提案]
-- JOB.md 是项目记忆. agent 每次开工先读, 每阶段结束必须追加状态. "已确认决策" 只能由 JC 新增覆盖, agent 不改.
-- QUOTE.md 是商务快照, 只有 JC 改. 付款状态变化同时跑 `gig paid`.
-- 需要 JC 明确批准, 沉默或 "继续" 不算的动作: 对外发送; 推送远程仓库; 删除, 清理, 归档; 使用付费远程资源; 超出已确认决策的范围变更; 改 QUOTE.md.
+[Decided]
+- JOB.md is the project's memory. Agents read it before working and append a status entry at the end of every phase. "Confirmed decisions" is only ever extended by JC; agents do not edit it.
+- QUOTE.md is the commercial snapshot; only JC changes it. A payment change runs `gig paid` at the same time.
+- Actions that need JC's explicit approval, where silence or "continue" never counts: sending anything out; pushing to a remote; deleting, cleaning up, archiving; paid remote resources; scope changes beyond the confirmed decisions; changes to QUOTE.md.
 
-## 3. 整体要求
+## 3. General requirements
 
 [JC]
-- 所有报告用 Kami 或 LaTeX, 不保留中间产物. 必须 non ai-slop, 经 sepia 或 humanizer 润色.
-- 工作目录和文件名全英文.
-- 目录尽可能干净, 无多余文件.
+- All reports use Kami or LaTeX and keep no intermediates. They must not read as machine-written; they pass through sepia or humanizer.
+- Working directories and file names are all English.
+- Directories stay as clean as possible; no stray files.
 
-[实践] 与此冲突的现状, 新单要改掉:
-- bllc 的 `reports/` 里留了 content.json, html, md, -visual 目录, build 脚本, 与 "不保留中间产物" 相反. 应只留 PDF, 生成脚本和源放 `.scratch/` 或不入库.
-- tk 的交付文件名是中文 (使用说明.pdf, 源代码.zip, 程序/). 工作目录内全英文没有异议; 给客户的包内文件名也改英文 (5.3).
-- sers 的 `.gig/` 有 194MB checkpoint 和日志. `.gig/` 只放两个 md.
+[Practice] Current state that conflicts with this, to be changed for new orders:
+- bllc's `reports/` keeps content.json, html, md, -visual directories and build scripts, against "no intermediates". Only PDFs belong there; generators and sources go to `.scratch/` or stay uncommitted.
+- tk's delivered file names were Chinese. English inside the client package as well (decided, see 5.3).
+- sers's `.gig/` holds 194 MB of checkpoints and logs. `.gig/` holds two markdown files and nothing else.
 
-[提案] "目录干净" 落成可检查的规则:
-- 项目内允许的顶层项由模板固定, 多出来的目录要在 README 或 AGENTS.md 里说明用途.
-- `.scratch/` 是唯一的临时区, gitignore. 阶段结束时清空或归档.
-- 报告流程: 源 (Kami content / LaTeX) 在 `.scratch/reports/<name>/` 生成, 经 sepia 润色, 只有最终 PDF 进 `reports/` 或交付包.
+[Decided] "Clean directory" as checkable rules:
+- The allowed top-level entries are fixed by the template; anything beyond them is explained in README or AGENTS.md.
+- `.scratch/` is the only scratch area, gitignored, emptied or archived at the end of a phase.
+- Report pipeline: sources (Kami content / LaTeX) are generated under `.scratch/reports/<name>/`, polished with sepia, and only the final PDF goes into `reports/` or the package.
 
-## 4. 技术栈与 agent 规范
+## 4. Tech stack and agent rules
 
-[实践] 技术栈, 四个项目反复出现的选择:
+[Practice] Choices that recur across the four projects:
 - Python: uv, pyproject.toml, ruff, pytest, `.python-version`.
-- 配置: Hydra + YAML (研究型) 或 ini + 命令行 (给非技术客户的工具). 所有配置项都能被命令行覆盖 (JC 硬性要求).
-- 跨平台: Linux 开发验证, 客户多用 Windows. 不用 Windows 专属技术. 交付程序用 PyInstaller onefile, GitHub Actions (windows-latest + ubuntu-latest) 在私有仓库构建, 记 run id 和 commit.
-- 文档: 客户文档中文, Kami PDF 带截图; 开发者 README 另写.
-- 无本地 Python 的项目用 Node/shell 做本地处理, Python 在远端跑.
-- 训练和大计算在远端 GPU 服务器, 环境和缓存放数据盘 (shanhe-computing-server).
-- 任务跟踪: 小项目 JOB.md 状态; 大项目 beads 或 setup-matt-pocock-skills 配的 issue tracker.
+- Configuration: Hydra with YAML (research) or ini plus command line (tools for non-technical clients). Every configuration item can be overridden on the command line (JC's hard requirement).
+- Cross-platform: develop and verify on Linux; clients mostly use Windows. No Windows-only technology. Deliverable programs are PyInstaller onefile builds from GitHub Actions (windows-latest and ubuntu-latest) in a private repository, with the run id and commit recorded.
+- Documents: client documents in Chinese, Kami PDFs with screenshots; a separate developer README.
+- Projects without a local Python use Node/shell locally and run Python remotely.
+- Training and heavy computation on the remote GPU server, environments and caches on the data disk (shanhe-computing-server skill).
+- Task tracking: JOB.md status for small projects; beads or the issue tracker configured by setup-matt-pocock-skills for large ones.
 
-[JC] 还有一些技术栈和工具倾向要补充 (JC 提到但未展开).
+[Decided] This is the skill's default tech stack, given per project type, overridable by JOB.md decisions. JC adds preferences with `/partjob rule`.
 
-[实践] agent 规范, 从 bllc 和 patent 的 AGENTS.md 和 tk 的 JOB.md 提炼:
+[Practice] Agent rules distilled from the AGENTS.md files of bllc and patent and from tk's JOB.md:
 
-通用 (进 skill):
-- 开工先读 `.gig/JOB.md`; 价格和付款只信 `.gig/QUOTE.md`.
-- 原件只读. 新结果写新目录, 不覆盖; 失败和不可用状态保持可见.
-- 不为接近论文或客户期望调数值. 报告数字来自保存的结果, 说明划分, 配置和聚合方式.
-- 每阶段结束在 JOB.md 状态里记命令, 验证结果, 剩余工作.
-- 交付物可复现: 用交付的程序重跑, 与源码运行逐字节比对, 记入 JOB.md.
-- 验证过的工作单元及时 commit; 长实验前先提交代码, 配置, 评测协议. 检查 staged diff, 保留用户并行修改.
-- 临时文件, 恢复副本放 `.scratch/`, 不放上级目录.
-- 只用现有材料; 要问客户的写进 "待客户确认", 不自行假设.
-- 中文正文 ASCII 标点. 具体名称解释概念, 不用未定义缩写.
-- 子 agent 交接: 当前状态, 项目绝对路径, 要读的文件, 允许写的范围, 完成标准, 最近的验证命令. 子 agent 不能批准, 发送, 改范围, 删除, 归档.
+Generic (in the skill):
+- Read `.gig/JOB.md` first; trust only `.gig/QUOTE.md` for price and payment.
+- Originals are read-only. New results go to new directories; failures and unusable states stay visible.
+- Never tune numbers toward a paper or the client's expectations. Report figures come from saved results, with split, configuration and aggregation stated.
+- At the end of each phase record commands, verification results and remaining work in JOB.md "Status".
+- Deliverables reproduce: rerun the delivered program and compare byte for byte with the source run; record it in JOB.md.
+- Commit verified units of work promptly; before a long experiment commit the code, configuration and evaluation protocol. Check the staged diff; keep the user's concurrent edits.
+- Temporary files and recovery copies stay in `.scratch/`, never in the parent directory.
+- Use only existing materials; questions for the client go into "Client questions"; do not assume.
+- ASCII punctuation in Chinese prose. Concrete names for concepts, no undefined abbreviations.
+- Sub-agent handoff: current state, absolute project path, files to read, writable scope, completion criteria, the latest verification command. Sub-agents cannot approve, send, change scope, delete or archive.
 
-项目专属 (进项目 AGENTS.md, 按类型生成初稿再补):
-- 只读路径和快照目录; 是否允许训练, 在哪跑; 本地工具链; 是否授权连续工作不停顿; 是否授权 git 提交 / 推送.
+Project-specific (in the project's AGENTS.md, drafted per type and then completed):
+- Read-only paths and snapshot directories; whether training is allowed and where; local toolchain; whether continuous work is authorised; git commit and push authorisation.
 
-## 5. 预览与完整包 (2026-09-29 按提案定)
+## 5. Preview and full package
 
-### 5.1 预览
+### 5.1 Preview
 
-[定] 预览的目的是让客户确信活干完了, 同时客户拿到预览也用不了. 所以:
-- 包含: 结果的可视证据 (前后对比图, 截图, 指标表, 报告的前几页或摘要), 客户自己样本的少量处理结果 (tk 的 19 张对比图就是), 短视频或 GIF 演示程序运行.
-- 不包含: 源码, 可执行程序, 完整批次的处理结果, 完整报告, 可复制的数据文件.
-- 形式: 一个 `preview-<package-id>/` 目录, 同样走 manifest 校验和 OSS 短链, 客户在浏览器看. 图片可加水印 (JC 定).
-- 按项目类型的默认预览: 工具类 = 对比图 + 演示 GIF; 复现 / 分析类 = 关键图表 + 报告摘要页; 写作类 = 目录 + 一节正文.
+[Decided] A preview convinces the client the work is done while being useless on its own:
+- Included: visual evidence of results (before/after comparisons, screenshots, metrics tables, the report's summary pages), a few processed results from the client's own samples (tk's 19 comparison images are the example), a short video or GIF of the program running.
+- Excluded: source code, executables, the full batch of results, the full report, copyable data files.
+- Form: a `<slug>-vX.Y.Z-preview/` package with the same manifest check and OSS short link; the client views it in a browser. Watermarking is JC's call.
+- Defaults by type: tool = comparison images and a demo GIF; reproduction / analysis = key figures and summary pages; writing = table of contents and one section.
 
-### 5.2 完整交付内容
+### 5.2 Full delivery
 
-[定] 按项目类型的默认清单, 具体每单在 JOB.md 里确认:
-- 通用: 交付报告 PDF (安装, 使用, 结果, 已知限制, 售后期说明), 源码 (git archive, 不含 .gig / .scratch / 客户样本), README.
-- 工具类: 加可执行程序 (Windows + Linux), 本批处理结果, 配置文件样例.
-- 复现 / 分析类: 加配置, 结果数据, 图表, 阻塞或差异说明.
-- 写作类: 加 PDF 和源文件 (tex / docx).
-- 一律不含: 客户原件的副本, 中间产物, 内部审计文件, 测试数据以外的数据.
+[Decided] Defaults by type, confirmed per order in JOB.md:
+- Any job: delivery report PDF (installation, usage, results, known limitations, warranty terms), source code (git archive without .gig / .scratch / client samples), README.
+- Tool jobs add: Windows and Linux executables, this batch's results, sample configuration.
+- Reproduction / analysis jobs add: configurations, result data, figures, the differences or blockers report.
+- Writing jobs add: PDF and sources (tex / docx).
+- Never: copies of the client's originals, intermediates, internal audit files, data beyond test data.
 
-### 5.3 其他已定 (2026-09-29, 均按提案)
-- 状态线见 1.4.
-- 交付包内文件名也用英文 (报告内容仍是中文). 理由: 与工作目录规则一致, 且避免 zip 里中文文件名在 Windows 上的编码问题 (tk 的原件 zip 就是 GBK 条目).
-- 临时目录 `~/dev/partjobs/.drafts/<slug>/`.
-- `delivery/` 放项目根目录, gitignore; package-id 默认 `<slug>-vX.Y.Z`.
-- 项目 `AGENTS.md` 由模板按类型生成初稿, 再补项目专属规则.
-- 旧库未 promote 的 quote draft 迁为 dropped draft.
-- `gig new` 兼做登记和建骨架 (由 `start` 子命令调用).
-- skill 改名 `partjob`, 子命令见第 6 节.
-- 技术栈: 以第 4 节整理的为准, JC 有补充时用 `/partjob rule` 加.
+### 5.3 Other settled points (2026-09-29)
+- States as in 1.4.
+- English file names inside client packages as well (the content stays in the client's language). Reason: consistent with the working-directory rule, and it avoids the encoding problems of Chinese names in zips on Windows (tk's original zip had GBK entries).
+- Temporary directory `~/dev/partjobs/.drafts/<slug>/`.
+- `delivery/` at the project root, gitignored; package-id defaults to `<slug>-vX.Y.Z`.
+- The project's `AGENTS.md` is drafted from a template per type and then completed with project-specific rules.
+- Unpromoted v1 quote drafts migrate as dropped drafts.
+- `gig new` both registers the order and scaffolds the directory (called by the `start` subcommand).
+- The skill is named `partjob`; subcommands in section 6.
+- Tech stack: section 4 as written; JC adds to it with `/partjob rule`.
 
-## 6. skill 子命令
+## 6. Skill subcommands
 
-[JC] 这不只是一份流程, 也是一个 skill, 要有真正的子命令; 其中一个子命令是在干活过程中修改这个 workflow skill 本身.
+[JC] This is not only a process but a skill with real subcommands, one of which changes the workflow skill itself during work.
 
-[提案] skill 改名为 `partjob`, 调用形式 `/partjob <子命令> [参数]` (Pi 里是 `/skill:partjob ...`). 参数由 SKILL.md 开头的路由表分发, 每个子命令一个 `commands/<name>.md`, 只在被调用时读. 无参数时等于 `status`.
+[Decided] Invocation `/partjob <subcommand> [args]` (`/skill:partjob ...` in Pi). The router table at the top of SKILL.md dispatches; each subcommand has a `commands/<name>.md` read only when invoked. No arguments means `status`. Plain-language arguments are routed to the closest subcommand.
 
-按流程段:
-
-| 子命令 | 段 | 做什么 |
+| Subcommand | Phase | Does |
 |---|---|---|
-| `status` | 任意 | 读 gig + JOB.md, 报告当前在哪, 下一步, 待 JC 决定的事; 顺带列出未收款和售后期内的单. 会话开始时用 |
-| `draft <slug>` | 接单前 | 建 `.drafts/<slug>/NOTES.md`, gig 记 draft. 之后 agent 摸底材料, 整理疑问和工作量估计 |
-| `drop <slug> [原因]` | 接单前 | NOTES 存进 gig, 删目录, 记 dropped |
-| `start <slug>` | 开工 | draft 升级为 order, 建骨架, 写 JOB.md / QUOTE.md 初稿, 跑 setup-matt-pocock-skills, 提示接下来 grill |
-| `decide <内容>` | 开工 | 把 JC 的一条决定写进 "已确认决策", 带日期 |
-| `ask` | 开工 | 把待问客户的问题整理成可直接转发的中文, 写进 "待客户确认" |
-| `log` | 开工 | 阶段结束, 追加一条状态 (命令, 数字, commit, 剩余) |
-| `preview` | 交付 | 按类型默认清单建 `preview-<id>/`, 生成 manifest, `gig package check` |
-| `pack [id]` | 交付 | 建完整包, manifest, check. 复现验证 (交付程序重跑比对) 在这里做 |
-| `send <id> [--via oss\|phone]` | 交付 | 经 JC 批准后 `gig upload` 或 gsconnect. 报告短链或手机送达 |
-| `revise` | 交付 / 售后 | 拿客户反馈对照决策: 返工还是范围变更; 返工记新决策, 范围变更走 `gig change` |
-| `paid [日期]` | 售后 | `gig paid`, 更新 QUOTE.md, 算出售后截止日 |
-| `archive` | 售后 | 售后期过后, 报告脏状态和删除清单, 批准后 `gig archive` |
-| `handoff` | 任意 | 调 handoff skill, 附上 partjob 交接必备项 (状态, 路径, 可写范围, 验证命令) |
-| `rule` | 任意 | 修改 skill 本身, 见下 |
+| `status` | any | Reads gig and JOB.md; reports where things stand, the next step, what waits on JC; lists unpaid and in-warranty orders. For the start of a session |
+| `draft <slug>` | pre-order | Creates `.drafts/<slug>/NOTES.md` and the gig draft; the agent surveys the materials, lists questions and effort |
+| `drop <slug> [reason]` | pre-order | Notes into gig, directory removed, dropped record |
+| `start <slug>` | kickoff | Promotes the draft, scaffolds, drafts JOB.md / QUOTE.md, runs setup-matt-pocock-skills, points to grill |
+| `decide <text>` | kickoff | Appends one of JC's decisions, dated, to "Confirmed decisions" |
+| `ask` | kickoff | Turns open questions into a forwardable message under "Client questions" |
+| `log` | kickoff | Appends a status entry at the end of a phase (commands, figures, commit, remaining) |
+| `preview` | delivery | Builds `<slug>-vX.Y.Z-preview/` from the type's default list, writes the manifest, runs `gig package check` |
+| `pack [id]` | delivery | Builds the full package with manifest and check; the reproduction check happens here |
+| `send <id> [--via oss\|phone]` | delivery | After JC's approval, `gig package upload` or gsconnect; reports the short link or delivery |
+| `revise` | delivery / warranty | Compares client feedback with the decisions: rework or scope change; rework adds decisions, scope changes run `gig change` |
+| `paid [date]` | warranty | `gig paid`, updates QUOTE.md, computes the warranty end |
+| `archive` | warranty | After the warranty: reports the dirty state and deletion list, then `gig archive` after approval |
+| `handoff` | any | The handoff skill with the partjob items (state, path, writable scope, verification command) |
+| `rule` | any | Changes the skill itself, see below |
 
-`rule` 子命令的机制:
-- 用法: `/partjob rule <一句话>`, 例如 `/partjob rule 交付包里的报告只放 PDF`. 也可以无参数, 让 agent 从当前会话里提炼这次踩的坑.
-- agent 先判断这条是通用规则 (进 skill) 还是项目专属 (进项目 AGENTS.md), 说明理由; JC 可以改判.
-- 通用规则: 定位到 skill 里应放的位置 (SKILL.md 某节或 `references/*.md`), 给出精确 diff, JC 批准后写入, 在 `CHANGELOG.md` 记一行 (日期, 来源项目, 一句话), 跑 skill 自带的契约测试.
-- 冲突: 新规则与现有规则矛盾时, 列出矛盾条目, 让 JC 选覆盖还是收窄.
-- skill 文件在 dotfiles 管理下, 写入后提示 JC 提交 dotfiles. 改动下次调用生效.
-- 只改 skill 的文字和 references, 不改 gig 代码; 需要 gig 改动的记成 `TODO-gig.md` 里的一条.
+The `rule` mechanism:
+- `/partjob rule <one sentence>`, for example `/partjob rule reports in packages are PDF only`. Without arguments the agent distils this session's lesson.
+- The agent first classifies the rule as generic (skill) or project-specific (the project's AGENTS.md), with its reason; JC may overrule.
+- Generic rule: locate its place (a SKILL.md section or `references/*.md`), show the exact diff, write it after JC approves, add a `CHANGELOG.md` line (date, source project, one sentence), run the skill's contract tests.
+- Conflicts: when the new rule contradicts an existing one, list the conflict and let JC choose to override or narrow.
+- The skill lives in the gig repository; after writing, remind JC to commit. Changes take effect at the next invocation.
+- Only the skill's text and references are edited, never gig code; gig changes are recorded in `TODO-gig.md`.
 
-## 附录 A. gig v2 需要记住的东西
+## Appendix A. What gig v2 remembers
 
-- draft: slug, 材料路径, 创建日期, 结果 (promoted / dropped), 放弃原因, NOTES 快照.
-- order: slug, title, material_path, platform, external_id (可空), project_type, status, currency, price, cut_ratio, dev_path, archive_path, notes, 用户原话, 各状态时间戳, paid_at, warranty_until (= paid_at + 15 天).
-- requirement_change: order, 描述, 价格增量, 日期.
-- package: order, package_id, kind (preview / full), 校验时间和结果, 发送时间, channel (oss / phone), 远程 URL, 短链, 过期时间.
-- artifact (包之外单发的文件): 沿用旧 delivery_artifacts.
-- 不再需要: quote_drafts 的定价字段, order_workflow, clients, sources, tags, templates.
+- draft: slug, material path, creation date, outcome (promoted / dropped), drop reason, NOTES snapshot.
+- order: slug, title, material_path, platform, external_id (optional), project_type, status, currency, price, cut_ratio, dev_path, archive_path, notes, client words, state timestamps, paid_at, warranty_until (= paid_at + 15 days).
+- requirement_change: order, description, price delta, date.
+- package: order, package_id, kind (preview / full), check time and result, send time, channel (oss / phone), remote URL, short link, expiry.
+- artifact (single files sent outside a package): as in the v1 delivery_artifacts table.
+- No longer needed: quote draft pricing fields, order_workflow, clients, sources, tags, templates.
 
-配置: dev_root, archive_root, drafts_dir, 默认分成, 默认币种, 售后天数, OSS 连接信息. 密钥不进 config.toml, 走环境变量或 keyring.
+Configuration: dev_root, archive_root, drafts_dir, default cut ratio, default currency, warranty days, OSS connection. Secrets stay out of config.toml, in the environment or a keyring-like secrets file.
 
-## 附录 B. 迁移清单
+## Appendix B. Migration inventory
 
-旧库 `~/.local/share/gig/gig.db`:
+The v1 database `~/.local/share/gig/gig.db`:
 
-| 表 | 行数 | 处理 |
+| Table | Rows | Handling |
 |---|---|---|
-| orders | 22 | 全部迁移, 每列都有去处: source_org -> platform, notes -> notes, external_id -> external_id, quoted_price/final_price -> price (final 优先, quoted 落到 price_history), client_id/source_id 丢弃 (对应表为空). 时间戳是 epoch 秒字符串, 金额是分, 需转换. #27 的 dev_path 指向已改名的目录, 迁移时修正为 patent-value-identification. |
-| price_history | 13 | 迁为 order 备注或独立表 |
-| requirement_changes | 5 | 迁移 |
-| delivery_packages | 38 | 迁移为 kind=full, 标记本地文件是否仍存在 (sers 的两条已丢失) |
-| delivery_artifacts | 40 | 迁移 |
-| quote_drafts | 8 | 已 promote 的挂到对应 order 作备注; 未 promote 的迁为 draft (dropped) |
-| order_workflow | 9 | 丢弃 |
-| clients, sources, tags, order_tags | 0/0/5/4 | 丢弃 |
+| orders | 22 | All migrated, every column with a destination: source_org -> platform, notes -> notes, external_id -> external_id, quoted_price/final_price -> price (final wins, quoted goes to price_history), client_id/source_id dropped (their tables are empty). Timestamps are epoch-second strings, amounts are cents; both converted. #27's dev_path pointed at a renamed directory and was rewritten to patent-value-identification. |
+| price_history | 13 | Migrated |
+| requirement_changes | 5 | Migrated |
+| delivery_packages | 38 | Migrated as kind=full; rows naming the same zip merged; missing local files flagged (sers's were gone) |
+| delivery_artifacts | 40 | Migrated |
+| quote_drafts | 8 | Promoted ones become a note on their order; unpromoted ones become dropped drafts (all 8 were promoted) |
+| order_workflow | 9 | Dropped (its gig_dir supplied dev_path for orders that had none) |
+| clients, sources, tags, order_tags | 0/0/5/4 | Dropped (tags became a note line) |
 
-`~/.config/gig/config.toml` 里的 OSS access key / secret 和短链 token 迁移时改成环境变量, 原文件删除或脱敏.
+The OSS access key, secret and short-link token from `~/.config/gig/config.toml` moved to `secrets.toml`; the old file was deleted.
 
-迁移只涉及数据库和配置. v2 的项目规则只对新单生效, 现有四个项目目录不回改.
+Migration touched only the database and configuration. v2's project rules apply to new orders; the existing four project directories were not retrofitted.
 
-## 附录 C. 验收标准 (2026-09-29 与 JC 确定)
+## Appendix C. Acceptance criteria (agreed with JC 2026-09-29)
 
-### 交付前 (agent 做, JC 看结果)
+### Before handover (done by the agent, results shown to JC)
 
-1. 回放测试: 用 tk-dtf-compact 的原始客户需求和材料, 从 `/partjob draft` 走到 `/partjob pack`. 对照真实 JOB.md 历史: 不问 JC 已答过的问题; 生成的文件只有模板规定的; 交付包内容与当时实际交付一致.
-2. 冷启动测试: 在 bllc-reproduction 和 tk-dtf-compact 各开新会话, 只跑 `/partjob status`, agent 说出当前在哪和下一步, JC 无需补充背景即可确认. 这两个项目目前不在 gig 里, 交接时先用 `gig new --adopt` 按各自 QUOTE.md 登记 (tk: CNY 800, 2026-09-28; bllc: 按其 QUOTE.md), 不改动项目文件.
-3. 压力用例进自动测试: 包里埋软链接, `.gig/` 文件, 密钥文件, 中文文件名, `..` 路径, 全部被 check 拒绝; 无批准 "继续" 不发送; agent 试图改 QUOTE.md 必须停.
-4. 迁移对账: `gig migrate --dry-run` 逐条与旧库 `gig ls --all` 一致, 22 单不少, 金额日期正确.
+1. Replay: from tk-dtf-compact's original request and materials, run `/partjob draft` through `/partjob pack`. Compared with the real JOB.md history: no question JC had already answered is asked; only template files are generated; the package content matches what was actually delivered.
+2. Cold start: open a fresh session in bllc-reproduction and tk-dtf-compact, run only `/partjob status`; the agent states where things stand and what comes next, and JC can confirm it without adding context. Both projects were registered first with `gig new --adopt` from their QUOTE.md facts, touching no project file.
+3. Pressure cases as automated tests: a package with a planted symlink, a `.gig/` file, a key file, a non-ASCII file name, a `..` path is rejected by the check; "continue" without approval sends nothing; an agent trying to change QUOTE.md stops.
+4. Migration reconciliation: `gig migrate --dry-run` matches the v1 database row by row: 22 orders, correct amounts and dates.
 
-四条都过才交付.
+All four had to pass before handover.
 
-演练记录 (2026-09-29, 全部在 scratch 的 GIG_HOME 里做, 没有碰真实数据库和项目文件):
-1. 回放: tk-dtf-compact 从 `gig draft new` 到 `gig archive --yes` 走通. 输入只有 QUOTE.md 里已有的四项 (价格, 原话, 类型, 材料路径), 没有重复提问. 生成的 JOB.md 骨架比真实 tk 的多 "客户原始需求", "接单前笔记", "待客户确认" 三节, 其余一致. 真实交付内容 (158 MB, 含中文命名的批处理结果) 用 `--client-named results/` 一次通过校验, 21 个豁免文件全部列为 warning.
-2. 冷启动: tk-dtf-compact, bllc-reproduction, 以及 `~/dev/partjobs` 根目录各开一个新会话跑 `/partjob status`, 三次都准确说出状态, 下一步, 未收款 (sers 33 天) 和待归档的单, 并指出了 bllc 的 JOB.md 不是模板结构.
-3. 压力用例: 在 gig 的单元测试和端到端测试里 (软链接, 隐藏文件, `..`, 反斜杠, 密钥文件名, 非 ASCII 文件名, 未列入 manifest 的文件, zip 与 manifest 不一致, 改包后未重新 check). 全部拒绝.
-4. 迁移对账: 22 单 id, slug, 状态映射, 价格, 平台, 币种逐条一致, 结果在 `~/dev/partjobs-workflow/migration/reconcile.txt`.
+Rehearsal record (2026-09-29, all in a scratch GIG_HOME; the real database and project files were untouched):
+1. Replay: tk-dtf-compact went from `gig draft new` to `gig archive --yes`. The only inputs were the four facts already in QUOTE.md (price, words, type, material path); nothing was asked twice. The generated JOB.md skeleton has three sections more than the real tk one ("Client request", "Pre-order notes", "Client questions"); the rest matches. The real delivery content (158 MB, with batch results carrying Chinese names) passed the check at once with `--client-named results/`, all 21 exempted files listed as warnings.
+2. Cold start: new sessions in tk-dtf-compact, bllc-reproduction and the `~/dev/partjobs` root each ran `/partjob status`; all three reported the state, the next step, the unpaid order (sers, 33 days) and the order due for archiving correctly, and pointed out that bllc's JOB.md is not in template form.
+3. Pressure cases: in gig's unit and end-to-end tests (symlink, hidden file, `..`, backslash, key-like names, non-ASCII names, unlisted files, zip differing from the manifest, package changed after its check). All rejected.
+4. Reconciliation: 22 orders matched on id, slug, mapped status, price, platform and currency; the result is in `~/dev/partjobs-workflow/migration/reconcile.txt`.
 
-### 交付后 (每单归档时的记分卡, 存进 gig)
+### After handover (the per-order scorecard, stored in gig at archive time)
 
-| 指标 | 好的方向 |
+| Metric | Good direction |
 |---|---|
-| JC 做了几次决定 | 少, 无重复 |
-| agent 问了几个 JC 之前答过的问题 | 0 |
-| 成交到第一版预览的天数 | 对比历史 |
-| JC 手动清理文件的次数 | 0 |
-| 交付包被 check 拒绝的次数与原因 | 拒的都该拒 |
-| 报告返工次数 | 趋近 0 |
-| JC 主观评分 1-5 | 上升 |
+| Decisions JC had to make | few, none repeated |
+| Questions the agent asked that JC had already answered | 0 |
+| Days from kickoff to the first preview | compared with history |
+| Times JC cleaned up files by hand | 0 |
+| Package check rejections and why | only the ones that should be rejected |
+| Report reworks | toward 0 |
+| JC's score, 1 to 5 | rising |
 
-`/partjob archive` 提示填写; `/partjob rule` 的改动进 CHANGELOG, 可以看出流程是在变好还是变复杂.
+`/partjob archive` prompts for it; `/partjob rule` changes go into CHANGELOG, which shows whether the process is getting better or merely more complicated.

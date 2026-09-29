@@ -1,17 +1,17 @@
-# gig 速查 (v2)
+# gig cheat sheet (v2)
 
-完整规格在 gig 仓库 `docs/v2/SPEC.md`. 这里只列 agent 每天要用的.
+The full spec is `docs/v2/SPEC.md` in the gig repository. This lists what an agent needs day to day.
 
-## 约定
+## Conventions
 
-- 每条命令 stdout 只有一个 JSON: `{"ok": true, "command": "...", "data": {...}, "warnings": [...]}` 或 `{"ok": false, "command": "...", "error": {"code": "...", "message": "..."}}`. 退出码 0 成功, 1 业务错误, 2 用法错误. 只有 `gig completion` 输出原文.
-- 指定订单: 任何命令都接受 `--order <slug>`; 在项目目录内运行可以省略.
-- 不可逆或对外的命令必须带 `--yes`, 否则只是预演 (`"dry_run": true`): `draft drop`, `package upload`, `package sent`, `artifact upload`, `archive`, `cancel`, `delete`.
-- 金额用主单位小数, 最多两位 (`800`, `800.50`). 日期 `YYYY-MM-DD`.
-- 错误码: `not_found`, `invalid_state`, `invalid_input`, `unsafe_package`, `needs_check`, `needs_yes`, `config`, `secrets`, `upload`, `legacy_db`, `io`, `db`.
-- 状态线: `queued -> in_progress -> delivered -> paid -> archived`, 另有 `cancelled`. 预览不改状态. 售后期内 (`paid`) 仍可发包.
+- Every command prints exactly one JSON document on stdout: `{"ok": true, "command": "...", "data": {...}, "warnings": [...]}` or `{"ok": false, "command": "...", "error": {"code": "...", "message": "..."}}`. Exit 0 on success, 1 on a domain error, 2 on a usage error. Only `gig completion` prints raw text.
+- Naming the order: every command accepts `--order <slug>`; inside a project directory it can be omitted.
+- Irreversible or outward commands need `--yes`; without it they only rehearse (`"dry_run": true`): `draft drop`, `package upload`, `package sent`, `artifact upload`, `archive`, `cancel`, `delete`.
+- Money is a decimal in major units, at most two fractional digits (`800`, `800.50`). Dates are `YYYY-MM-DD`.
+- Error codes: `not_found`, `invalid_state`, `invalid_input`, `unsafe_package`, `needs_check`, `needs_yes`, `config`, `secrets`, `upload`, `legacy_db`, `io`, `db`.
+- States: `queued -> in_progress -> delivered -> paid -> archived`, plus `cancelled`. A preview changes no state. Packages may still be sent during the warranty (`paid`).
 
-## 命令
+## Commands
 
 ```
 gig draft new <slug> [--title T] [--material PATH] [--type tool|cv_ml|data_processing|research_writing|custom]
@@ -41,7 +41,7 @@ gig package ls [--order <slug>]
 gig artifact upload <FILE> [--order <slug>] [--yes]
 gig artifact ls [--order <slug>]
 
-gig delete <slug> --yes                      只删记录, 不动文件, 只用于登记错了
+gig delete <slug> --yes                      removes the row only, never files; for registration mistakes
 
 gig doctor [--fix]
 gig config get KEY
@@ -50,18 +50,18 @@ gig config path
 gig config split-secrets [--yes]
 gig migrate --from OLD.db [--to NEW.db] [--dry-run] [--fix-path OLD=NEW]
 gig backup
-gig completion zsh                           唯一输出原文的命令
+gig completion zsh                           the only raw-text command
 gig version
 ```
 
-## 交付包布局
+## Package layout
 
 ```
-<项目>/delivery/<package-id>/              只放给客户的文件
-<项目>/delivery/<package-id>.manifest.toml  白名单, 在包外
-<项目>/delivery/<package-id>.zip            条目与 manifest 完全一致
+<project>/delivery/<package-id>/              client files only
+<project>/delivery/<package-id>.manifest.toml  the allowlist, outside the zip
+<project>/delivery/<package-id>.zip            entries equal the manifest exactly
 ```
 
-`package-id` 默认 `<slug>-vX.Y.Z`, 预览用 `<slug>-vX.Y.Z-preview`. 文件名规则: ASCII 字母数字 `. _ - /`, 不能有隐藏文件, `..`, 软链接, 密钥类文件, `.gig/ .git/ .scratch/ internal/ prompts/`. 客户自己命名的文件 (批处理结果) 可在 manifest 里用 `client_named = ["results/"]` 豁免命名规则, check 会把每个豁免列成 warning.
+`package-id` defaults to `<slug>-vX.Y.Z`; previews use `<slug>-vX.Y.Z-preview`. File name rule: ASCII letters, digits, `. _ - /`; no hidden files, `..`, symlinks, key or credential files, or `.gig/ .git/ .scratch/ internal/ prompts/`. Files named by the client (batch outputs) may be exempted from the naming convention with `client_named = ["results/"]` in the manifest; `check` reports every exemption as a warning.
 
-`build --write-manifest` 从目录生成 manifest 并打 zip; 客户命名的文件所在目录用 `--client-named results/` 一起给, 会写进 manifest. 之后改了包内容要重新 `build` 或 `check`, 否则 `upload` / `sent` 报 `needs_check`.
+`build --write-manifest` derives the manifest from the directory and writes the zip; pass `--client-named results/` at the same time for client-named subdirectories, and it goes into the manifest. After any change to the package contents run `build` or `check` again, or `upload` / `sent` fail with `needs_check`.

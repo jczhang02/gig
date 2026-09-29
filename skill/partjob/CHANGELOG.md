@@ -1,6 +1,7 @@
 # CHANGELOG
 
-`/partjob rule` 的每次改动记一行: 日期 (来源), 一句话.
+One line per change made through `/partjob rule`: date (source), one sentence.
 
-- 2026-09-29 (对话): 路由接受自然语言参数, 按意图选子命令并说明; send 的确认问句带渠道选项.
-- 2026-09-29 (重写): partjob v2 初版. 流程见 references/workflow.md, gig v2 见 references/gig.md.
+- 2026-09-29 (chat): skill, templates and workflow document rewritten in English at JC's request.
+- 2026-09-29 (chat): routing accepts plain-language arguments and names the chosen subcommand; send asks which channel.
+- 2026-09-29 (rewrite): partjob v2 initial version. Workflow in references/workflow.md, gig v2 in references/gig.md.

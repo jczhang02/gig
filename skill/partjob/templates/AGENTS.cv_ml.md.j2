@@ -1,27 +1,27 @@
 # Project instructions
 
-- 开工先读 `.gig/JOB.md`. 价格和付款只信 `.gig/QUOTE.md`; 旧报告里的报价作废.
-- 原件只读{% if material_path %}: `{{ material_path }}`{% endif %}. 需要的样本复制到 `data/`, 客户数据不入库.
-- 新结果写新目录, 不覆盖旧结果; 失败和不可用状态保持可见.
-- 不为接近客户期望或论文调数值. 报告里的数字来自保存的结果, 说明数据划分, 配置, 种子和聚合方式.
-- 每个阶段结束在 `.gig/JOB.md` 的 "状态" 追加: 命令, 验证数字, commit, 剩余工作, 是否已对外发送.
-- 临时文件和恢复副本放 `.scratch/`, 阶段结束清空. 不在上级目录建任何东西.
-- 需要 JC 明确批准的动作: 对外发送, 推送远程, 删除或归档, 付费远程资源, 超出已确认决策的范围变更, 修改 `.gig/QUOTE.md`.
-- 正文用 ASCII 标点. 目录和文件名全英文. 用具体名称解释概念, 不用未定义缩写.
-- 报告用 Kami 或 LaTeX, 只保留最终 PDF; 源放 `.scratch/reports/`, 成文经 sepia 润色.
-- 验证过的工作单元及时本地 commit; 长实验前先提交代码, 配置和评测协议, run manifest 绑定 commit. 推送需要单独授权.
+- Read `.gig/JOB.md` before working. Price and payment facts come only from `.gig/QUOTE.md`; quotes in old reports are void.
+- Original materials are read-only{% if material_path %}: `{{ material_path }}`{% endif %}. Copy needed samples to `data/`; client data is never committed.
+- New results go to new directories, never overwriting old ones; failures and unusable states stay visible.
+- Never tune numbers toward the client's expectations or a paper. Reported figures come from saved results, with the data split, configuration, seeds and aggregation stated.
+- At the end of every phase append to "Status" in `.gig/JOB.md`: commands, verification figures, commit, remaining work, whether anything was sent out.
+- Temporary files and recovery copies go in `.scratch/`, cleared at the end of a phase. Create nothing in the parent directory.
+- Actions that need JC's explicit approval: sending anything out, pushing to a remote, deleting or archiving, paid remote resources, scope changes beyond the confirmed decisions, edits to `.gig/QUOTE.md`.
+- ASCII punctuation in prose. English directory and file names. Explain concepts with concrete names, no undefined abbreviations.
+- Reports use Kami or LaTeX; keep only the final PDF; sources in `.scratch/reports/`, prose through sepia.
+- Commit each verified unit of work locally; before a long experiment commit the code, configuration and evaluation protocol, and bind the run manifest to that commit. Pushing needs separate authorisation.
 
-## CV / ML 项目
+## CV / ML projects
 
-- 训练和大计算在远端 GPU 服务器, 环境和缓存放数据盘 (见 shanhe-computing-server skill). 只有当前请求明确包含实验时才跑训练; 改报告不等于授权训练.
-- 保留原始运行, 检查点, 预测和实验摘要; 报告数字从保存的结果推导. 本地只留薄副本.
-- 评测集和验收标准先写进 JOB.md 已确认决策 (指标, 阈值, 样本数), 再做实验. 结果放 `results/evaluation/`, 不放 `.gig/`.
-- 主观或图像类验收: 保留人工抽样, 失败样例和已知测量缺口.
-- 配置用 Hydra + YAML, 参数完整列出, 不漏项回落默认值. 所有配置项能被命令行覆盖.
+- Training and heavy computation run on the remote GPU server, with environments and caches on the data disk (see the shanhe-computing-server skill). Run training only when the current request explicitly includes experiments; editing a report does not authorise training.
+- Keep raw runs, checkpoints, predictions and experiment summaries; derive reported numbers from saved results. Keep only thin copies locally.
+- Write the evaluation set and acceptance criteria (metrics, thresholds, sample counts) into JOB.md "Confirmed decisions" before experimenting. Results go under `results/evaluation/`, never under `.gig/`.
+- Subjective or image-based acceptance keeps manual samples, failure examples and known measurement gaps.
+- Configuration through Hydra and YAML, every parameter listed, nothing silently falling back to defaults. Every configuration item can be overridden on the command line.
 
-## 项目专属
+## Project-specific
 
-- 远端环境和数据盘路径: (待填)
-- 本地工具链: (待填)
-- 是否授权连续工作不停顿: 否, 直到 JC 明确授权.
-- git: 本地提交已授权; 推送需要单独授权.
+- Remote environment and data disk paths: (to fill)
+- Local toolchain: (to fill)
+- Continuous work without check-ins authorised: no, until JC says so.
+- git: local commits authorised; pushing needs separate authorisation.

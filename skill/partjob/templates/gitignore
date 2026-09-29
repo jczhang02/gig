@@ -8,17 +8,17 @@ build/
 dist/
 *.spec
 
-# 客户样本和原始数据含订单号或个人信息, 不进入仓库
+# Client samples and raw data carry order numbers or personal information; never committed
 data/samples/
 data/raw/
 
-# 交付包由 gig package build 生成, 不进入仓库
+# Client packages are built by gig package build; never committed
 delivery/
 
-# 临时区, 阶段结束清空
+# Scratch area, cleared at the end of each phase
 .scratch/
 
-# 报告构建中间产物 (Kami content.json, html, visual 目录), 只保留最终 PDF
+# Report build intermediates (Kami content.json, html, visual directories); only the final PDF is kept
 reports/**/*.content.json
 reports/**/*.html
 reports/**/*-visual/

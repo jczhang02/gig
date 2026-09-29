@@ -1,14 +1,14 @@
-# drop <slug> [原因]
+# drop <slug> [reason]
 
-客户不同意报价, 或单子没谈成. 笔记进 gig, 目录删掉.
+The client declined the quote, or the deal fell through. Notes go into gig; the directory is removed.
 
-## 步骤
+## Steps
 
-1. 没给原因就问一句. 原因会存进 gig, 以后同类需求可查.
-2. `gig draft drop <slug> --reason "<原因>"`. 这是预演, 返回 `would_delete` 列表.
-3. 把要删的文件列给 JC. 这是删除动作, 需要 JC 明确同意.
-4. JC 同意后: `gig draft drop <slug> --reason "<原因>" --yes`. 返回的 `draft.notes_snapshot` 就是保存下来的笔记.
+1. Ask for the reason if none was given. It is stored in gig so similar requests can be looked up later.
+2. `gig draft drop <slug> --reason "<reason>"`. This is a rehearsal; it returns `would_delete`.
+3. List the files that would be deleted for JC. This is a deletion; JC must explicitly agree.
+4. After JC agrees: `gig draft drop <slug> --reason "<reason>" --yes`. The returned `draft.notes_snapshot` is the saved note.
 
-## 回复
+## Reply
 
-删了什么, 笔记已存进 gig (可用 `gig draft ls --all` 找回). 不需要再做别的.
+What was deleted, and that the notes are kept in gig (`gig draft ls --all` finds them). Nothing else to do.

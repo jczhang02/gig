@@ -1,14 +1,14 @@
-# paid [日期] [金额]
+# paid [date] [amount]
 
-JC 说钱到了.
+JC says the money arrived.
 
-## 步骤
+## Steps
 
-1. 订单必须是 `delivered`. 不是的话说明当前状态, 不强改.
-2. `gig paid --order <slug> [--date YYYY-MM-DD] [--amount 800]`. 日期默认今天; 金额只在实收和 QUOTE.md 不一致时给, 会记进 price_history.
-3. 返回的 `warranty_until` 是售后截止日. 把 QUOTE.md "付款状态" 改成 "已收款 YYYY-MM-DD, 售后期至 <warranty_until>" (这是 JC 明确说了收款才能改的商务事实).
-4. JOB.md "状态" 追加一条.
+1. The order must be `delivered`. Otherwise report the current state; do not force it.
+2. `gig paid --order <slug> [--date YYYY-MM-DD] [--amount 800]`. The date defaults to today; give the amount only when what was received differs from QUOTE.md (it goes into price_history).
+3. The returned `warranty_until` is the end of the warranty. Change "Payment" in QUOTE.md to "paid YYYY-MM-DD, warranty until <warranty_until>" (a commercial fact, editable only because JC stated the payment).
+4. Append a JOB.md "Status" entry.
 
-## 回复
+## Reply
 
-收款日期, 金额, 售后截止日. 售后期内客户提问由 JC 解答, 修改走 `/partjob revise`; 售后期过后 `/partjob archive`.
+Payment date, amount, warranty end. During the warranty JC answers client questions; changes go through `/partjob revise`; after the warranty `/partjob archive`.

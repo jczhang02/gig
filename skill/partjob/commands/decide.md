@@ -1,15 +1,15 @@
-# decide <内容>
+# decide <text>
 
-把 JC 的一条决定写进 `.gig/JOB.md` 的 "已确认决策". 只有 JC 能新增决策; agent 不改旧决策.
+Write one of JC's decisions into "Confirmed decisions" in `.gig/JOB.md`. Only JC adds decisions; the agent never edits old ones.
 
-## 步骤
+## Steps
 
-1. 决策必须是可执行的约束, 一句话说清对象和规则. 例: "合并距离 2.5cm, 模糊区 1.5~4cm 提醒". 含糊的先复述一遍让 JC 确认.
-2. 追加到 "已确认决策" 末尾, 编号递增, 带日期和确认方式: `N. (2026-09-29, 对话确认) ...` 或 `(2026-09-29, grilling 确认)`.
-3. 和旧决策矛盾时, 不删旧的. 新条目写明 "取代第 M 条", 并在 "状态" 追加一行说明原因 (比如 "用户指出旧标注不对").
-4. 决策改变了交付物范围或价格: 停下来问 JC 是返工还是范围变更 (见 `revise.md`), 范围变更要跑 `gig change --desc "..." [--price-delta ...]`.
-5. 决策涉及 QUOTE.md 里的商务事实 (价格, 付款节点, 售后期): 那是 JC 的文件, 只在 JC 明确说了新内容时改, 并且同时用 `gig price` 或 `gig change` 记录.
+1. A decision is an executable constraint, one sentence with its object and rule. Example: "merge distance 2.5 cm; flag 1.5 to 4 cm for review". Restate a vague one and let JC confirm first.
+2. Append to the end of "Confirmed decisions" with the next number, the date and how it was confirmed: `N. (2026-09-29, confirmed in chat) ...` or `(2026-09-29, confirmed by grilling)`.
+3. When it contradicts an earlier decision, keep the old one. The new entry says "supersedes item M", and a line in "Status" records why (for example "JC found the old labels wrong").
+4. When the decision changes the deliverable scope or the price: stop and ask JC whether it is rework or a scope change (see `revise.md`); a scope change runs `gig change --desc "..." [--price-delta ...]`.
+5. When it touches commercial facts in QUOTE.md (price, payment terms, warranty): that file is JC's. Change it only when JC states the new content explicitly, and record it with `gig price` or `gig change` at the same time.
 
-## 回复
+## Reply
 
-新决策的编号和原文, 有没有取代旧条目, 有没有触发范围变更.
+The number and text of the new decision, whether it supersedes an old item, whether it triggered a scope change.

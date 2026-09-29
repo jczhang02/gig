@@ -1,26 +1,26 @@
-# draft <slug> [材料路径]
+# draft <slug> [material path]
 
-接单前. 客户刚发来简短需求, 还没成交. 目标是让 JC 带着清楚的疑问清单和工作量估计去和客户谈, 不建正式项目, 不写代码.
+Pre-order. The client has sent a short request; nothing is agreed yet. The goal is to give JC a clear question list and an effort estimate to negotiate with. No formal project, no code.
 
-## 前置
+## Preconditions
 
-- slug: 小写字母, 数字, `-`, `_`, `.`. 由 JC 给或从需求里取一个短的英文名.
-- 材料路径通常是 `/mnt/virtiofs/<编号>/`. 没有就先不填.
+- slug: lowercase letters, digits, `-`, `_`, `.`. Given by JC or derived as a short English name from the request.
+- The material path is usually `/mnt/virtiofs/<id>/`. Leave it empty if unknown.
 
-## 步骤
+## Steps
 
-1. `gig draft new <slug> --material <路径> --title "<一句话标题>"`. 已存在同名 draft 或 order 会报 `invalid_input`, 那就换 slug 或先 `status` 看看.
-2. 打开返回的 `notes_path` (`~/dev/partjobs/.drafts/<slug>/NOTES.md`). 把客户原话原样贴进 "客户原话", 注明来源文件和编码.
-3. 摸底材料, 只读: 文件类型, 数量, 尺寸, 编码, 异常. 写进 "可行性摸底". 需要看样本时复制少量到 `.drafts/<slug>/` 下, 不复制整批.
-4. "疑问清单": 写成可以直接转发给客户的中文, 每条一个问题, 不带内部推理.
-5. "工作量估计": 按阶段列, 给 JC 参考. 不给客户报价, 报价是 JC 的事.
-6. "预算与报价过程": 留给 JC 填. JC 说了预算或报价就记进去.
+1. `gig draft new <slug> --material <path> --title "<one-line title>"`. A draft or order with the same slug fails with `invalid_input`; pick another slug or run `status` first.
+2. Open the returned `notes_path` (`~/dev/partjobs/.drafts/<slug>/NOTES.md`). Paste the client's words verbatim under "Client words", noting the source file and encoding.
+3. Survey the materials, read-only: file types, counts, sizes, encodings, anomalies. Write them under "Feasibility". Copy a few samples under `.drafts/<slug>/` if needed, never the whole batch.
+4. "Questions": written so JC can forward them to the client as is, one question per line, no internal reasoning.
+5. "Effort estimate": by phase, for JC's reference. Never quote the client; pricing is JC's.
+6. "Budget and pricing": left for JC. When JC mentions a budget or price, record it.
 
-## 不做的事
+## Never
 
-- 不建 `~/dev/partjobs/<slug>/`, 不 `git init`, 不写代码, 不跑训练.
-- 不联系客户. 疑问清单交给 JC.
+- Create `~/dev/partjobs/<slug>/`, `git init`, write code, or run training.
+- Contact the client. The question list goes to JC.
 
-## 回复
+## Reply
 
-疑问清单原文 (方便 JC 直接转发), 工作量估计, 摸底里发现的风险. 说明下一步是 JC 谈价; 成交后用 `/partjob start <slug>`, 放弃用 `/partjob drop <slug>`.
+The question list verbatim (so JC can forward it), the effort estimate, risks found in the survey. State that the next step is JC's negotiation; on acceptance `/partjob start <slug>`, on withdrawal `/partjob drop <slug>`.

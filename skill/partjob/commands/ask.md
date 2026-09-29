@@ -1,14 +1,14 @@
 # ask
 
-干活中发现要问客户的事. agent 不联系客户; 把问题整理成 JC 能直接转发的话.
+Something came up that the client has to answer. The agent never contacts the client; it prepares text JC can forward as is.
 
-## 步骤
+## Steps
 
-1. 每个问题一条, 中文, 客户看得懂 (不带内部术语和推理), 给出可选项时列出选项和默认值.
-2. 写进 `.gig/JOB.md` "待客户确认", 每条带日期. 已经在 "已确认决策" 里有答案的不要重复问.
-3. 能在等回复的同时继续的工作, 说明按哪个默认假设继续, 记进 "状态".
-4. JC 拿到答复后, 用 `/partjob decide` 把答案变成决策, 并把 "待客户确认" 里对应的条目标为已答 (保留原文, 加 "已答, 见决策 N").
+1. One question per item, in the client's language (Chinese for JC's clients), readable without internal terms or reasoning. When there are options, list them with the default.
+2. Write them into "Client questions" in `.gig/JOB.md`, each dated. Do not ask what "Confirmed decisions" already answers.
+3. For work that can continue while waiting, state which default assumption it continues under and record that in "Status".
+4. When JC brings the answer, `/partjob decide` turns it into a decision, and the matching "Client questions" item is marked answered (keep the text, add "answered, see decision N").
 
-## 回复
+## Reply
 
-一段可以整段复制转发的问题清单, 加一句在等待期间会按什么假设继续.
+One block JC can copy and forward whole, plus one sentence on what continues under which assumption meanwhile.

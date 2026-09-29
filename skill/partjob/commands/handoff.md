@@ -1,17 +1,17 @@
 # handoff
 
-交接给下一个会话或子 agent. 调用 `handoff` skill, 但交接文档必须包含下面这些, 缺一项下一个 agent 就要重新问 JC.
+Hand over to the next session or a sub-agent. Use the `handoff` skill, but the handoff document must contain the items below; a missing one means the next agent asks JC again.
 
-## 必含项
+## Required items
 
-- 订单 slug, 当前 gig 状态 (`gig show` 的 `order.status` 和 `next_action`).
-- 项目绝对路径, 要先读的文件 (`.gig/JOB.md`, `.gig/QUOTE.md`, `AGENTS.md`, 相关 CONTEXT.md / ADR).
-- 允许写的范围 (哪些目录), 不允许碰的 (原件路径, QUOTE.md, delivery/ 里已校验的包).
-- 完成标准: 引用 JOB.md 已确认决策的编号, 不另写一套.
-- 最近的验证命令和它上次的结果.
-- 未决事项: "待客户确认" 里没答的, 等 JC 批准的动作.
-- 子 agent 的边界: 不能批准, 发送, 改范围, 删除, 归档; 不能改 QUOTE.md 和已确认决策.
+- Order slug, current gig state (`order.status` and `next_action` from `gig show`).
+- Absolute project path, files to read first (`.gig/JOB.md`, `.gig/QUOTE.md`, `AGENTS.md`, relevant CONTEXT.md / ADRs).
+- Where writing is allowed (which directories) and what must not be touched (original materials, QUOTE.md, checked packages under `delivery/`).
+- Completion criteria: cite the numbered "Confirmed decisions" in JOB.md; do not write a second set.
+- The latest verification command and its last result.
+- Open items: unanswered "Client questions", actions waiting on JC's approval.
+- Sub-agent limits: no approving, sending, scope changes, deleting, archiving; no edits to QUOTE.md or confirmed decisions.
 
-## 回复
+## Reply
 
-交接文档路径, 和一句下一个会话应该先跑 `/partjob status`.
+The handoff document path, and one sentence that the next session should start with `/partjob status`.

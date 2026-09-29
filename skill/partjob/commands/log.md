@@ -1,22 +1,22 @@
 # log
 
-一个阶段结束, 或会话要结束时, 在 `.gig/JOB.md` "状态" 追加一条. 这是项目记忆, 写的是事实, 不是感想.
+At the end of a phase, or before a session ends, append one entry to "Status" in `.gig/JOB.md`. This is the project's memory: facts, not impressions.
 
-## 每条包含
+## Each entry has
 
-- 日期 (同一天多条用 "(续)").
-- 做了什么: 一句话.
-- 验证结果: 具体数字 (如 "真实 19/19, 合成 100/100, 静默错误 0"), 评测文件路径.
-- commit 哈希, CI run id (有的话).
-- 产物位置: 结果目录, 交付目录.
-- 还没做的, 没验证的 (如 "Windows 交互未在真实桌面验证").
-- 是否已对外发送 (默认 "尚未对外发送").
+- The date (several entries on one day are marked "(cont.)").
+- What was done, in one sentence.
+- Verification results: concrete numbers (for example "real 19/19, synthetic 100/100, silent errors 0"), evaluation file paths.
+- Commit hash, CI run id when there is one.
+- Where the outputs are: result directories, delivery directory.
+- What is not done or not verified (for example "Windows interaction not tested on a real desktop").
+- Whether anything was sent out (default "not sent out yet").
 
-## 同时
+## Also
 
-- 有值得跨订单记住的事 (比如平台习惯, 某类客户材料的坑) 用 `gig note "<一句话>"` 记到 gig, 以后 `status` 能看见.
-- 阶段内做过的 commit 列出来; 没提交的改动说明原因.
+- Anything worth remembering across orders (a platform habit, a pitfall in a type of client material) goes to gig with `gig note "<one sentence>"`, where `status` will show it later.
+- List the commits made during the phase; explain any uncommitted changes.
 
-## 回复
+## Reply
 
-追加的那条状态原文.
+The status entry as appended.

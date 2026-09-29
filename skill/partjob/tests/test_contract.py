@@ -32,13 +32,14 @@ GIG_COMMANDS = {
 }
 
 ROUTER_ROW = re.compile(r"^\| `([a-z]+)")
+CJK = re.compile(r"[一-鿿]")
 
 
 def router_subcommands():
     names = []
     in_table = False
     for line in SKILL.splitlines():
-        if line.startswith("| 子命令"):
+        if line.startswith("| Subcommand"):
             in_table = True
             continue
         if in_table:
@@ -73,36 +74,49 @@ class SkillShape(unittest.TestCase):
         self.assertGreaterEqual(len(names), 15, names)
         files = {p.stem for p in COMMANDS_DIR.glob("*.md")}
         self.assertEqual(set(names), files)
+        hint = SKILL.split("argument-hint")[1].split("\n")[0]
         for name in names:
-            self.assertIn(name, SKILL.split("argument-hint")[1].split("\n")[0], name)
+            self.assertIn(name, hint, name)
 
     def test_skill_body_is_short(self):
         body = SKILL.split("---", 2)[2]
         self.assertLessEqual(len(body.splitlines()), 160)
 
+    def test_skill_and_commands_are_english(self):
+        for path in [ROOT / "SKILL.md", GIG_REF and ROOT / "references" / "gig.md", *COMMANDS_DIR.glob("*.md"), *TEMPLATES.iterdir()]:
+            text = path.read_text(encoding="utf-8")
+            # Chinese is allowed only inside quoted examples and the note that clients read Chinese.
+            stripped = re.sub(r"`[^`]*`", "", text)
+            stripped = stripped.replace("Chinese", "")
+            self.assertFalse(CJK.search(stripped), f"{path.name} contains Chinese prose")
+
     def test_approval_list_and_generic_rules_present(self):
-        for needle in ("只有 JC 能批准的动作", "对外发送", "推送到远程仓库", "删除文件, 清理项目, 归档",
-                       "付费远程资源", "范围变更", "QUOTE.md", "--yes"):
+        for needle in ("Actions only JC can approve", "Sending anything out", "Pushing to a remote", "Deleting files",
+                       "paid remote resources", "Scope changes", "QUOTE.md", "--yes"):
             self.assertIn(needle, SKILL)
-        for needle in (".gig/JOB.md", "原件只读", "逐字节比对", ".scratch/", "ASCII 标点", "sepia"):
+        for needle in (".gig/JOB.md", "read-only", "byte for byte", ".scratch/", "ASCII punctuation", "sepia"):
             self.assertIn(needle, SKILL)
+
+    def test_plain_language_routing_is_documented(self):
+        self.assertIn("not a subcommand name", SKILL)
+        self.assertIn("closest subcommand", SKILL)
 
     def test_command_files_only_name_real_gig_commands(self):
         for path in sorted(COMMANDS_DIR.glob("*.md")):
             text = path.read_text(encoding="utf-8")
-            used = gig_invocations(text)
-            unknown = used - GIG_COMMANDS
+            unknown = gig_invocations(text) - GIG_COMMANDS
             self.assertFalse(unknown, f"{path.name} names unknown gig commands: {unknown}")
 
     def test_gig_reference_covers_every_command(self):
         for cmd in GIG_COMMANDS:
             self.assertIn(f"gig {cmd}", GIG_REF, cmd)
 
-    def test_yes_gated_commands_are_previewed_first(self):
+    def test_yes_gated_commands_are_rehearsed_first(self):
         send = (COMMANDS_DIR / "send.md").read_text(encoding="utf-8")
-        self.assertIn("gig package upload <包id>`", send)
+        self.assertIn("gig package upload <package-id>`", send)
         self.assertIn("--yes", send)
-        self.assertIn("预演", send)
+        self.assertIn("Rehearse", send)
+        self.assertIn("to the phone", send)
         archive = (COMMANDS_DIR / "archive.md").read_text(encoding="utf-8")
         self.assertIn("gig archive --order <slug>`", archive)
         self.assertIn("--yes", archive)
@@ -111,7 +125,7 @@ class SkillShape(unittest.TestCase):
 
     def test_workflow_doc_has_no_open_items(self):
         self.assertNotIn("[TODO", WORKFLOW)
-        for section in ("## 1. 流程", "## 2. JOB.md 和 QUOTE.md", "## 6. skill 子命令", "## 附录 C. 验收标准"):
+        for section in ("## 1. Process", "## 2. JOB.md and QUOTE.md", "## 6. Skill subcommands", "## Appendix C. Acceptance criteria"):
             self.assertIn(section, WORKFLOW)
 
     def test_templates_exist(self):
@@ -150,10 +164,10 @@ class TemplatesRenderThroughGig(unittest.TestCase):
             draft = self.run_gig(home, "draft", "new", "pdf-tool", "--title", "PDF tool", "--material", "/mnt/virtiofs/000001")
             notes = Path(draft["notes_path"])
             text = notes.read_text(encoding="utf-8")
-            for h in ("## 客户原话", "## 疑问清单", "## 可行性摸底", "## 工作量估计", "## 预算与报价过程"):
+            for h in ("## Client words", "## Questions", "## Feasibility", "## Effort estimate", "## Budget and pricing"):
                 self.assertIn(h, text)
             self.assertIn("/mnt/virtiofs/000001", text)
-            notes.write_text(text + "\n客户预算 800.\n", encoding="utf-8")
+            notes.write_text(text + "\nClient budget 800.\n", encoding="utf-8")
 
             created = self.run_gig(
                 home, "new", "pdf-tool", "--title", "PDF tool", "--price", "800", "--type", "tool",
@@ -162,21 +176,21 @@ class TemplatesRenderThroughGig(unittest.TestCase):
             self.assertEqual(created["order"]["status"], "queued")
             project = dev / "pdf-tool"
             job = (project / ".gig/JOB.md").read_text(encoding="utf-8")
-            for h in ("## 客户原始需求", "## 接单前笔记", "## 素材事实", "## 已确认决策", "## 待客户确认", "## 状态"):
+            for h in ("## Client request", "## Pre-order notes", "## Material facts", "## Confirmed decisions", "## Client questions", "## Status"):
                 self.assertIn(h, job)
             self.assertIn("> 报价 800, 已成交", job)
-            self.assertIn("客户预算 800.", job)
+            self.assertIn("Client budget 800.", job)
             self.assertIn("/mnt/virtiofs/000001", job)
-            self.assertIn("尚未对外发送", job)
+            self.assertIn("Not sent out yet", job)
             quote = (project / ".gig/QUOTE.md").read_text(encoding="utf-8")
             self.assertIn("CNY 800.00", quote)
-            self.assertIn("未收款", quote)
-            self.assertIn("售后期: 收款后 15 天", quote)
-            self.assertIn("未约定事项", quote)
+            self.assertIn("not received", quote)
+            self.assertIn("Warranty: 15 days after payment", quote)
+            self.assertIn("Not agreed", quote)
             agents = (project / "AGENTS.md").read_text(encoding="utf-8")
-            self.assertIn("## 工具类项目", agents)
+            self.assertIn("## Tool projects", agents)
             self.assertIn("/mnt/virtiofs/000001", agents)
-            self.assertIn("## 项目专属", agents)
+            self.assertIn("## Project-specific", agents)
             gitignore = (project / ".gitignore").read_text(encoding="utf-8")
             self.assertIn("delivery/", gitignore)
             self.assertTrue((project / "README.md").is_file())
@@ -198,8 +212,8 @@ class TemplatesRenderThroughGig(unittest.TestCase):
             (home / "config" / "config.toml").write_text(f'[general]\ndev_root = "{dev}"\n', encoding="utf-8")
             self.run_gig(home, "new", "spectra", "--title", "Spectra", "--type", "cv_ml")
             agents = (dev / "spectra" / "AGENTS.md").read_text(encoding="utf-8")
-            self.assertIn("## CV / ML 项目", agents)
-            self.assertIn("远端 GPU", agents)
+            self.assertIn("## CV / ML projects", agents)
+            self.assertIn("remote GPU", agents)
 
 
 if __name__ == "__main__":

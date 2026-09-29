@@ -1,15 +1,15 @@
-# 已接受报价
+# Accepted quote
 
-- 项目: {{ title }} ({{ slug }}){% if material_path %}, 原件 {{ material_path }}{% endif %}.
-- 接受日期: {{ today }}.
-- 币种及总价: {{ currency }} {{ price if price else "(待填)" }}.
-- 分成比例: {{ cut_ratio }}.
-- 商务状态: 客户已下单, 授权正式开工.
-- 付款状态: 未收款.
-- 售后期: 收款后 {{ warranty_days }} 天.
+- Project: {{ title }} ({{ slug }}){% if material_path %}, materials {{ material_path }}{% endif %}.
+- Accepted on: {{ today }}.
+- Currency and total: {{ currency }} {{ price if price else "(to fill)" }}.
+- Cut ratio: {{ cut_ratio }}.
+- Commercial status: order placed by the client; work authorised.
+- Payment: not received.
+- Warranty: {{ warranty_days }} days after payment.
 
-用户原话:
+Client words:
 
-> {{ client_words if client_words else "(待填)" }}
+> {{ client_words if client_words else "(to fill)" }}
 
-未约定事项: 交付日期, 支付节点.
+Not agreed: delivery date, payment milestones.

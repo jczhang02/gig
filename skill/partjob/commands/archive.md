@@ -1,22 +1,22 @@
 # archive
 
-售后期结束 (或取消的单), 记分卡, 然后把项目目录移到归档区.
+After the warranty ends (or for a cancelled order): scorecard, then move the project directory to the archive root.
 
-## 步骤
+## Steps
 
-1. 记分卡. 前四个数从 JOB.md 和本单的会话记忆里数, 数不出来就说 0 并注明; 分数问 JC:
-   - decisions: JC 在这单里做了几次决定 (JOB.md 已确认决策的条数是下限).
-   - repeat_questions: agent 问过几个 JC 之前已经答过的问题.
-   - cleanups: JC 手动清理过几次文件.
-   - report_reworks: 报告返工过几次.
-   - score: JC 给 1~5, 这单顺不顺.
+1. Scorecard. Count the first four from JOB.md and this order's session memory; say 0 with a note when a count is not knowable. Ask JC for the score:
+   - decisions: how many decisions JC made on this order (the number of "Confirmed decisions" entries is the lower bound).
+   - repeat_questions: how many questions the agent asked that JC had already answered.
+   - cleanups: how many times JC cleaned up files by hand.
+   - report_reworks: how many times a report was redone.
+   - score: JC's 1 to 5 for how smoothly the order went.
    `gig scorecard --order <slug> --decisions N --repeat-questions N --cleanups N --report-reworks N --score S [--note "..."]`.
-   `check_rejections` 和 `days_to_preview` 是 gig 自己算的.
-2. 预演: `gig archive --order <slug>`. 看 `blockers` (售后期未到, 缺记分卡, 状态不对), `git_dirty`, `large_files` (>= 50 MB), `unsent_packages`.
-3. 把这些列给 JC. 大文件 (checkpoint, 数据) 是否删除, 由 JC 逐项决定; 删除清单要明确, git 历史保留.
-4. JC 同意后: 先按批准删文件并 commit; 然后 `gig archive --order <slug> --yes` (售后期未到但 JC 要归档: 加 `--before-warranty-end`; 不想填记分卡: `--no-scorecard`; 整个目录不要了: `--purge`).
-5. 归档后目录在 `~/Documents/archive/work/<slug>/` (config 里的 archive_root).
+   `check_rejections` and `days_to_preview` are computed by gig.
+2. Rehearse: `gig archive --order <slug>`. Read `blockers` (warranty not over, missing scorecard, wrong state), `git_dirty`, `large_files` (50 MB and up), `unsent_packages`.
+3. List these for JC. Large files (checkpoints, data) are deleted only item by item on JC's decision; the deletion list is explicit; git history stays.
+4. After JC agrees: delete what was approved and commit; then `gig archive --order <slug> --yes` (warranty not over but JC wants to archive: add `--before-warranty-end`; no scorecard wanted: `--no-scorecard`; directory not wanted at all: `--purge`).
+5. The archived project is at `~/Documents/archive/work/<slug>/` (archive_root in config).
 
-## 回复
+## Reply
 
-记分卡内容, 归档到哪, 删了什么. 记分卡的趋势看 `gig ls --all` 加 `gig show` 里的 scorecard.
+The scorecard, where the project went, what was deleted. Trends are visible through `gig ls --all` plus the scorecard in `gig show`.
