@@ -246,9 +246,12 @@ pub struct Scroll {
 }
 
 impl Scroll {
-    /// Up/Down/PgUp/PgDn/Home/End; true when the key was a scroll key.
-    fn key(&mut self, code: KeyCode) -> bool {
+    /// Up/Down/PgUp/PgDn/Home/End (and j/k); true when the key was a
+    /// scroll key. An offset past the end (set to open at the bottom)
+    /// counts as the end.
+    pub(crate) fn key(&mut self, code: KeyCode) -> bool {
         let max = self.max.get();
+        self.offset = self.offset.min(max);
         let page = 10;
         self.offset = match code {
             KeyCode::Up | KeyCode::Char('k') => self.offset.saturating_sub(1),

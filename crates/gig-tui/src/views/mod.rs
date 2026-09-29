@@ -66,6 +66,17 @@ pub(crate) fn status_chip(cx: &RenderCx, status: OrderStatus) -> String {
     cx.icons.label(cx.icons.status(status), status.as_str())
 }
 
+/// Colour of a row's status chip: the fixed status colour, except that a
+/// paid order whose warranty has ended (next action "archive") is no longer
+/// amber (spec 3: amber means in warranty).
+pub(crate) fn status_style(cx: &RenderCx, row: &crate::data::OrderRow) -> Style {
+    if row.order.status == OrderStatus::Paid && row.next_action == "archive" {
+        cx.theme.text()
+    } else {
+        cx.theme.status(row.order.status)
+    }
+}
+
 /// Cells the status chip column takes: the longest chip.
 pub(crate) fn chip_width(cx: &RenderCx) -> usize {
     OrderStatus::ALL

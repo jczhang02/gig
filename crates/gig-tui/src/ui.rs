@@ -462,6 +462,51 @@ mod tests {
     }
 
     #[test]
+    fn full_screen_detail_scrolls_to_every_section() {
+        let mut state = UiState {
+            detail_open: true,
+            ..sample()
+        };
+        // A long note list and a multi-line change, so it overflows 24 rows.
+        for r in &mut state.data.orders {
+            if r.order.id == 7 {
+                r.notes = crate::data::parse_notes(
+                    &(1..=5)
+                        .map(|i| {
+                            format!("[2026-09-2{i}T10:00:00Z] note number {i} with some words\n")
+                        })
+                        .collect::<String>(),
+                );
+            }
+        }
+        let press = |s: &mut UiState, code| {
+            s.handle_key(
+                crossterm::event::KeyEvent::new(code, crossterm::event::KeyModifiers::NONE),
+                80,
+            )
+        };
+        let text = all(&render(80, 24, &state, false));
+        assert!(text.contains("more lines"), "{text}");
+        assert!(!text.contains("Scorecard"), "{text}");
+        let mut seen = String::new();
+        for _ in 0..5 {
+            press(&mut state, crossterm::event::KeyCode::PageDown);
+            seen.push_str(&all(&render(80, 24, &state, false)));
+        }
+        for s in ["Notes", "note number 5", "Scorecard", "score 4", "PgUp"] {
+            assert!(seen.contains(s), "{s}: {seen}");
+        }
+        // Moving the selection starts the next order at the top.
+        press(&mut state, crossterm::event::KeyCode::Down);
+        assert_eq!(state.detail_scroll.offset, 0);
+        // Continuation rows keep the item indent.
+        let narrow = all(&render(40, 40, &state, false));
+        for l in narrow.lines() {
+            assert!(!l.starts_with(" report"), "{l}");
+        }
+    }
+
+    #[test]
     fn toggle_and_filter_change_the_rows() {
         let mut state = sample();
         state.show_closed = true;

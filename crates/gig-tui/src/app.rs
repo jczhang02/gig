@@ -3,7 +3,7 @@
 use crate::actions::{self, Action, Effect};
 use crate::data::{JobCache, OrderRow, Snapshot};
 use crate::icons::Icons;
-use crate::popup::Popup;
+use crate::popup::{Popup, Scroll};
 use crate::terminal::{self, Term};
 use crate::theme::Theme;
 use crate::ui;
@@ -98,6 +98,9 @@ pub struct UiState {
     pub selected_draft: Option<i64>,
     /// `a` in Orders: include archived and cancelled orders.
     pub show_closed: bool,
+    /// Scroll of the order detail (pane or full screen): PgUp/PgDn/Home/End.
+    /// Back to the top whenever the selection or the view changes.
+    pub detail_scroll: Scroll,
 }
 
 impl Default for UiState {
@@ -113,6 +116,7 @@ impl Default for UiState {
             selected: None,
             selected_draft: None,
             show_closed: false,
+            detail_scroll: Scroll::default(),
         }
     }
 }
@@ -149,6 +153,7 @@ impl UiState {
             self.filter_mut().editing = false;
             self.view = view;
             self.detail_open = false;
+            self.detail_scroll.offset = 0;
         }
     }
 
@@ -207,11 +212,19 @@ impl UiState {
                 self.show_closed = true;
             }
             self.selected = Some(id);
+            self.detail_scroll.offset = 0;
         }
+    }
+
+    /// True when the order detail is on screen: full screen, or the right
+    /// pane of Orders at `width` columns.
+    pub fn detail_shown(&self, width: u16) -> bool {
+        self.detail_open || (self.view == View::Orders && width >= WIDE_COLUMNS)
     }
 
     /// Up/Down in the current list, clamped at both ends.
     fn move_selection(&mut self, delta: isize) {
+        self.detail_scroll.offset = 0;
         fn step(ids: &[i64], current: Option<i64>, delta: isize) -> Option<i64> {
             let at = current
                 .and_then(|id| ids.iter().position(|&x| x == id))
@@ -303,6 +316,7 @@ impl UiState {
             KeyCode::Esc => {
                 if self.detail_open {
                     self.detail_open = false;
+                    self.detail_scroll.offset = 0;
                 } else {
                     *self.filter_mut() = Filter::default();
                 }
@@ -313,6 +327,13 @@ impl UiState {
                     || self.view == View::History =>
             {
                 self.detail_open = true;
+                self.detail_scroll.offset = 0;
+                Outcome::None
+            }
+            KeyCode::PageUp | KeyCode::PageDown | KeyCode::Home | KeyCode::End
+                if self.detail_shown(width) =>
+            {
+                self.detail_scroll.key(key.code);
                 Outcome::None
             }
             KeyCode::Enter if self.view == View::Drafts => {
@@ -329,6 +350,7 @@ impl UiState {
             }
             KeyCode::Char('a') if self.view == View::Orders && !self.detail_open => {
                 self.show_closed = !self.show_closed;
+                self.detail_scroll.offset = 0;
                 Outcome::None
             }
             _ => match actions::view_key(self, key) {

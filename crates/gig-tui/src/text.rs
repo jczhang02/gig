@@ -1,6 +1,7 @@
 //! Display-width helpers. Titles may be Chinese, so columns are measured in
 //! terminal cells (unicode-width), never in bytes or chars (spec section 3).
 
+use std::ops::Range;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
@@ -82,56 +83,82 @@ pub fn fit(s: &str, cells: usize) -> String {
 /// whole; a word longer than the row is cut hard. Control characters become
 /// spaces. An empty `s` is one empty row; a zero width is treated as 1.
 pub fn wrap(s: &str, width: usize) -> Vec<String> {
-    let width = width.max(1);
     let flat = flatten(s);
+    wrap_ranges(&flat, width, width)
+        .into_iter()
+        .map(|r| flat[r].to_string())
+        .collect()
+}
+
+/// Byte ranges of the rows `wrap` makes of `flat` (a string without control
+/// characters), the first row `first` cells wide and the others `rest`
+/// cells wide (a hanging indent is drawn in front of them). Spaces at a
+/// break are left out of both rows.
+pub fn wrap_ranges(flat: &str, first: usize, rest: usize) -> Vec<Range<usize>> {
+    let mut width = first.max(1);
     let mut rows = Vec::new();
-    let mut row = String::new();
+    let mut start = 0;
     let mut used = 0;
-    // Byte offset in `row` just after the last break opportunity, and the
-    // cells used up to it.
+    // Byte offset just after the last break opportunity, and the cells used
+    // up to it. Only set once the row has text, so a leading indent is
+    // never a row of its own.
     let mut brk: Option<(usize, usize)> = None;
-    for g in flat.graphemes(true) {
-        let w = grapheme_width(g);
+    let mut has_text = false;
+    let trimmed = |start: usize, end: usize| start + flat[start..end].trim_end_matches(' ').len();
+    for (i, g) in flat.grapheme_indices(true) {
+        let w = g.width();
         if used + w > width && used > 0 {
             if g == " " {
                 // The space itself is the break; it is not carried over.
-                rows.push(row.trim_end().to_string());
-                row = String::new();
+                rows.push(start..trimmed(start, i));
+                width = rest.max(1);
+                start = i + g.len();
                 used = 0;
                 brk = None;
+                has_text = false;
                 continue;
             }
             match brk {
                 Some((at, cells)) => {
-                    let rest = row.split_off(at);
-                    rows.push(row.trim_end().to_string());
-                    row = rest;
+                    rows.push(start..trimmed(start, at));
+                    start = at;
                     used -= cells;
                 }
                 None => {
-                    rows.push(std::mem::take(&mut row));
+                    rows.push(start..i);
+                    start = i;
                     used = 0;
                 }
             }
+            width = rest.max(1);
             brk = None;
+            has_text = used > 0;
             // The carried-over word may still leave no room.
             if used + w > width && used > 0 {
-                rows.push(std::mem::take(&mut row));
+                rows.push(start..i);
+                start = i;
                 used = 0;
+                has_text = false;
             }
         }
-        row.push_str(g);
         used += w;
-        if g == " " || w > 1 {
-            brk = Some((row.len(), used));
+        if g == " " {
+            if has_text {
+                brk = Some((i + g.len(), used));
+            }
+        } else {
+            has_text = true;
+            if w > 1 {
+                brk = Some((i + g.len(), used));
+            }
         }
     }
-    rows.push(row);
+    rows.push(start..flat.len());
     rows
 }
 
 /// Control characters shown as spaces.
-fn flatten(s: &str) -> String {
+pub fn flatten(s: &str) -> String {
     s.chars()
         .map(|c| if c.is_control() { ' ' } else { c })
         .collect()
@@ -219,6 +246,17 @@ mod tests {
             vec!["cannot start. 订", "单已交付"]
         );
         assert_eq!(wrap("图像 去噪工具", 6), vec!["图像", "去噪工", "具"]);
+    }
+
+    #[test]
+    fn hanging_rows_are_narrower() {
+        let s = "  score 4  decisions 3  repeat qs 0";
+        let rows: Vec<&str> = wrap_ranges(s, 18, 16).into_iter().map(|r| &s[r]).collect();
+        assert_eq!(rows, vec!["  score 4", "decisions 3", "repeat qs 0"]);
+        // A leading indent is not a break opportunity.
+        let s = "    abcdefghij";
+        let rows: Vec<&str> = wrap_ranges(s, 8, 4).into_iter().map(|r| &s[r]).collect();
+        assert_eq!(rows, vec!["    abcd", "efgh", "ij"]);
     }
 
     #[test]
