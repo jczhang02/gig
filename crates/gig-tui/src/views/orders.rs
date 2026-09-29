@@ -1,7 +1,10 @@
 //! Orders view (spec 2.1): the active orders, one line each, the selected
 //! one expanded to two lines with the latest JOB.md status entry.
 
-use super::{banded, cell, cell_right, chip_width, days, empty, price, status_chip, window_start};
+use super::{
+    banded, cell, cell_right, chip_width, days, empty, price, status_chip, status_style,
+    window_start,
+};
 use crate::data::{Group, OrderRow};
 use crate::text;
 use crate::ui::RenderCx;
@@ -163,7 +166,7 @@ fn row_line(cx: &RenderCx, c: &Columns, r: &OrderRow) -> Line<'static> {
     spans.extend([
         cell(&o.slug, c.slug, text.add_modifier(Modifier::BOLD)),
         Span::raw(" "),
-        cell(&status_chip(cx, o.status), c.chip, t.status(o.status)),
+        cell(&status_chip(cx, o.status), c.chip, status_style(cx, r)),
         Span::raw(" "),
         cell(&r.next_action, c.next, text),
         Span::raw(" "),
@@ -182,14 +185,19 @@ fn row_line(cx: &RenderCx, c: &Columns, r: &OrderRow) -> Line<'static> {
 fn status_line(cx: &RenderCx, c: &Columns, r: &OrderRow, width: u16) -> Line<'static> {
     let t = cx.theme;
     let indent = c.indent();
-    let room = usize::from(width).saturating_sub(indent + 1);
+    let lead = "\u{21b3} ";
+    let room = usize::from(width).saturating_sub(indent + text::width(lead) + 1);
+    // Drawn on the selection band, so the status is in the text colour
+    // (dim would be the least legible text on screen).
     let (text_, style) = match r.job.latest_status() {
-        Some(s) => (s.to_string(), t.dim().add_modifier(Modifier::ITALIC)),
+        Some(s) => (s.to_string(), t.text().add_modifier(Modifier::ITALIC)),
+        None if r.order.dev_path.is_none() => ("(no project directory)".to_string(), t.dim()),
         None if !r.job.found => ("(no JOB.md)".to_string(), t.dim()),
         None => ("(no status entry in JOB.md)".to_string(), t.dim()),
     };
     Line::from(vec![
         Span::raw(" ".repeat(indent)),
+        Span::styled(lead, t.dim()),
         Span::styled(text::truncate(&text_, room), style),
     ])
 }

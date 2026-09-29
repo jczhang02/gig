@@ -30,39 +30,42 @@ const fn rgb(hex: u32) -> Color {
     Color::Rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8)
 }
 
+/// Palette contrast (WCAG 2) on `bg`: text at least 4.5:1 (dim and the
+/// status colours included), inactive grey at least 4:1; key hints (teal)
+/// and the warranty amber differ in hue, as do the accent and queued blue.
 impl Theme {
     pub const DARK: Theme = Theme {
         light: false,
         bg: rgb(0x16181d),
         fg: rgb(0xd5d8de),
-        dim: rgb(0x6b7280),
+        dim: rgb(0x8b929e),
         accent: rgb(0x8ab4f8),
-        selection_bg: rgb(0x262a33),
+        selection_bg: rgb(0x2a2f3a),
         border: rgb(0x3a3f4b),
-        key: rgb(0xe0b86a),
+        key: rgb(0x6cc5b0),
         error: rgb(0xf07178),
         ok: rgb(0x8fce8f),
         unpaid: rgb(0xef5350),
         warranty: rgb(0xf0a830),
         queued: rgb(0x5c9ded),
-        inactive: rgb(0x6b7280),
+        inactive: rgb(0x7d8490),
     };
 
     pub const LIGHT: Theme = Theme {
         light: true,
         bg: rgb(0xfafaf7),
         fg: rgb(0x2b2f36),
-        dim: rgb(0x8a8f98),
-        accent: rgb(0x2f6fd0),
-        selection_bg: rgb(0xe8eaee),
+        dim: rgb(0x6a707a),
+        accent: rgb(0x4a4fb8),
+        selection_bg: rgb(0xdde3ec),
         border: rgb(0xc8ccd3),
-        key: rgb(0x9a6a10),
+        key: rgb(0x0f7c80),
         error: rgb(0xc62828),
         ok: rgb(0x2e7d32),
         unpaid: rgb(0xd32f2f),
-        warranty: rgb(0xc77800),
+        warranty: rgb(0xa06000),
         queued: rgb(0x1e6fd9),
-        inactive: rgb(0x9aa0a8),
+        inactive: rgb(0x737983),
     };
 
     pub fn new(light: bool) -> Self {

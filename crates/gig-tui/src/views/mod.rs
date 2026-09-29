@@ -48,6 +48,9 @@ pub(crate) fn window_start(heights: &[u16], selected: usize, rows: u16) -> usize
     }
 }
 
+/// Drawn in the leading cell of the selected row.
+pub(crate) const SELECTED_MARK: &str = "\u{258c}";
+
 /// A cell of exactly `cells` display cells.
 pub(crate) fn cell(s: &str, cells: usize, style: Style) -> Span<'static> {
     Span::styled(text::fit(s, cells), style)
@@ -105,8 +108,17 @@ pub(crate) fn empty(frame: &mut Frame, area: Rect, theme: &Theme, lines: &[&str]
     frame.render_widget(Paragraph::new(lines), area);
 }
 
-/// `line` padded with the selection band to the full `width`.
+/// `line` padded with the selection band to the full `width`, with an
+/// accent bar in its leading margin cell so the cursor is found without
+/// relying on the band colour alone.
 pub(crate) fn banded(mut line: Line<'static>, width: u16, theme: &Theme) -> Line<'static> {
+    if let Some(first) = line.spans.first_mut() {
+        if let Some(rest) = first.content.strip_prefix(' ') {
+            let rest = Span::styled(rest.to_string(), first.style);
+            *first = Span::styled(SELECTED_MARK, Style::new().fg(theme.accent));
+            line.spans.insert(1, rest);
+        }
+    }
     let used = line.width();
     let pad = usize::from(width).saturating_sub(used);
     if pad > 0 {

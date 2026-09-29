@@ -181,8 +181,11 @@ mod tests {
     use ratatui::Terminal;
 
     fn render(width: u16, height: u16, state: &UiState, icons: bool) -> Buffer {
+        render_with(width, height, state, icons, Theme::DARK)
+    }
+
+    fn render_with(width: u16, height: u16, state: &UiState, icons: bool, theme: Theme) -> Buffer {
         let mut term = Terminal::new(TestBackend::new(width, height)).unwrap();
-        let theme = Theme::DARK;
         let icons = Icons::new(icons);
         term.draw(|f| {
             draw(
@@ -507,6 +510,46 @@ mod tests {
     }
 
     #[test]
+    fn light_theme_band_marker_and_status_colours() {
+        let mut state = sample();
+        // o5 is paid with its warranty over: next action "archive".
+        let buf = render_with(80, 24, &state, false, Theme::LIGHT);
+        let text = all(&buf);
+        let (y, row7) = line_of(&text, "tk-denoise").unwrap();
+        let y = y as u16;
+        assert!(row7.starts_with('\u{258c}'), "selection marker: {row7}");
+        assert_eq!(buf[(0, y)].fg, Theme::LIGHT.accent);
+        let x = crate::text::width(&row7[..row7.find("tk-denoise").unwrap()]) as u16;
+        assert_eq!(buf[(x, y)].bg, Theme::LIGHT.selection_bg);
+        let chip_x = crate::text::width(&row7[..row7.find("delivered").unwrap()]) as u16;
+        assert_eq!(buf[(chip_x, y)].fg, Theme::LIGHT.unpaid);
+        // The second line reads as part of the row and is not dim.
+        let below = text.lines().nth(usize::from(y) + 1).unwrap();
+        assert!(below.contains("\u{21b3} 2026-09-20: 预览已发送"), "{below}");
+        let sx = crate::text::width(&below[..below.find("预览").unwrap()]) as u16;
+        assert_eq!(buf[(sx, y + 1)].fg, Theme::LIGHT.fg);
+        // Paid in warranty is amber; paid with the warranty over is not.
+        let mut paid = 0;
+        for r in &state.data.orders {
+            if r.order.status == gig_core::models::OrderStatus::Paid {
+                paid += 1;
+                let (py, l) = line_of(&text, &format!(" {} ", r.order.slug)).unwrap();
+                let px = crate::text::width(&l[..l.find("paid").unwrap()]) as u16;
+                let want = if r.next_action == "archive" {
+                    Theme::LIGHT.fg
+                } else {
+                    Theme::LIGHT.warranty
+                };
+                assert_eq!(buf[(px, py as u16)].fg, want, "{}", r.order.slug);
+            }
+        }
+        assert_eq!(paid, 2, "one in warranty, one to archive");
+        state.view = View::History;
+        let buf = render_with(80, 24, &state, true, Theme::LIGHT);
+        assert!(all(&buf).contains("warranty"));
+    }
+
+    #[test]
     fn toggle_and_filter_change_the_rows() {
         let mut state = sample();
         state.show_closed = true;
@@ -527,7 +570,7 @@ mod tests {
         state.selected = Some(2); // last row (queued, newest)
         let buf = render(80, 8, &state, false);
         let text = all(&buf);
-        assert!(line_of(&text, " o2 ").is_some(), "{text}");
+        assert!(line_of(&text, "o2 ").is_some(), "{text}");
     }
 
     #[test]

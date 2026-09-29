@@ -2,7 +2,9 @@
 //! newest first, with scorecard score and warranty end. `Enter` opens the
 //! detail full screen.
 
-use super::{banded, cell, cell_right, chip_width, empty, price, status_chip, window_start};
+use super::{
+    banded, cell, cell_right, chip_width, empty, price, status_chip, status_style, window_start,
+};
 use crate::data::{day_part, Group, OrderRow};
 use crate::ui::RenderCx;
 use ratatui::layout::Rect;
@@ -114,7 +116,7 @@ fn row_line(
     spans.extend([
         cell(&o.slug, slug, text.add_modifier(Modifier::BOLD)),
         Span::raw(" "),
-        cell(&status_chip(cx, o.status), chip, t.status(o.status)),
+        cell(&status_chip(cx, o.status), chip, status_style(cx, r)),
         Span::raw(" "),
         cell(day_part(&o.created_at).unwrap_or("-"), DATE, t.dim()),
         Span::raw(" "),
