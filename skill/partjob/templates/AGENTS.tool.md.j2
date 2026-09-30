@@ -15,8 +15,8 @@
 - Cross-platform: develop and verify on Linux; clients mostly run Windows. No Windows-only technology. Python with uv and pyproject, ruff, pytest.
 - Every configuration item can be overridden on the command line. Tools for non-technical clients read an ini file next to the program (UTF-8, commented in the client's language) and generate it with defaults when absent.
 - Inputs: files, directories (recursive), zip. Outputs go to a new directory, originals untouched, with a processing report. Anomalies go into the report with a notice; what can be processed still is.
-- Deliverable programs are PyInstaller onefile builds from GitHub Actions (windows-latest and ubuntu-latest) in a private repository; JOB.md records the run id and commit. Pushing to that repository needs JC's authorisation.
-- Before delivery rerun this batch's inputs with the CI-built program and compare byte for byte with the source run. Windows interaction (drag and drop, double click, dialogs) that was only smoke-tested on CI is stated in JOB.md and in the manual's known limitations.
+- When the order's confirmed decisions call for executables, `/partjob build` produces them as PyInstaller onefile builds: GitHub Actions (windows-latest, ubuntu-latest, macos-latest when decided) in a private repository by default, AWS CodeBuild when the source must not go to a git host. JOB.md records the run or build id and the commit. Pushing to the repository and starting a paid build each need JC's authorisation.
+- Before delivery rerun this batch's inputs with the built program and compare byte for byte with the source run. Windows or macOS interaction (drag and drop, double click, dialogs) that was only smoke-tested in the remote build is stated in JOB.md and in the manual's known limitations.
 - Client documents: a manual PDF in the client's language (Kami, with screenshots), plus a separate developer README.
 
 ## Project-specific

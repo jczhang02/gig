@@ -83,7 +83,7 @@ class SkillShape(unittest.TestCase):
         self.assertLessEqual(len(body.splitlines()), 160)
 
     def test_skill_and_commands_are_english(self):
-        for path in [ROOT / "SKILL.md", GIG_REF and ROOT / "references" / "gig.md", *COMMANDS_DIR.glob("*.md"), *TEMPLATES.iterdir()]:
+        for path in [ROOT / "SKILL.md", GIG_REF and ROOT / "references" / "gig.md", *COMMANDS_DIR.glob("*.md"), *(p for p in TEMPLATES.rglob("*") if p.is_file())]:
             text = path.read_text(encoding="utf-8")
             # Chinese is allowed only inside quoted examples and the note that clients read Chinese.
             stripped = re.sub(r"`[^`]*`", "", text)

@@ -1,0 +1,51 @@
+# GitHub Actions build for a partjob tool order. Copied by /partjob build; remove the matrix entries the order does not need.
+# macOS output is unsigned unless JC decides otherwise; the manual's known limitations say so.
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            exe: PROJECT_NAME.exe
+            artifact: PROJECT_NAME-windows
+          - os: ubuntu-latest
+            exe: PROJECT_NAME
+            artifact: PROJECT_NAME-linux
+          - os: macos-latest
+            exe: PROJECT_NAME
+            artifact: PROJECT_NAME-macos
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Install tkinter (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y python3-tk
+      - name: Install dependencies
+        run: |
+          uv python install 3.11
+          uv sync
+      - name: Tests
+        run: uv run python -m pytest tests
+      - name: Package
+        run: >
+          uv run pyinstaller --onefile --console --noconfirm --clean
+          --name PROJECT_NAME --paths src packaging/entry.py
+      - name: Smoke test
+        shell: bash
+        run: |
+          ./dist/${{ matrix.exe }} --version
+          ./dist/${{ matrix.exe }} --help
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/${{ matrix.exe }}

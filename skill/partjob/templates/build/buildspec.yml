@@ -1,0 +1,12 @@
+# AWS CodeBuild, Windows Server 2022 container. Started by /partjob build; see references/codebuild.md in the partjob skill.
+version: 0.2
+
+phases:
+  build:
+    commands:
+      - powershell -NoProfile -ExecutionPolicy Bypass -File packaging\codebuild.ps1
+
+artifacts:
+  files:
+    - dist/PROJECT_NAME.exe
+  discard-paths: yes

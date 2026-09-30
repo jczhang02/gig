@@ -194,7 +194,7 @@ Project-specific (in the project's AGENTS.md, drafted per type and then complete
 
 [Decided] Defaults by type, confirmed per order in JOB.md:
 - Any job: delivery report PDF (installation, usage, results, known limitations, warranty terms), source code (git archive without .gig / .scratch / client samples), README.
-- Tool jobs add: Windows and Linux executables, this batch's results, sample configuration.
+- Tool jobs add: the executables the order's decisions call for (built with `/partjob build`; Windows and Linux by default, macOS when decided, none when the order needs no program), this batch's results, sample configuration.
 - Reproduction / analysis jobs add: configurations, result data, figures, the differences or blockers report.
 - Writing jobs add: PDF and sources (tex / docx).
 - Never: copies of the client's originals, intermediates, internal audit files, data beyond test data.
@@ -226,6 +226,7 @@ Project-specific (in the project's AGENTS.md, drafted per type and then complete
 | `ask` | kickoff | Turns open questions into a forwardable message under "Client questions" |
 | `log` | kickoff | Appends a status entry at the end of a phase (commands, figures, commit, remaining) |
 | `preview` | delivery | Builds `<slug>-vX.Y.Z-preview/` from the type's default list, writes the manifest, runs `gig package check` |
+| `build [targets] [--via actions\|codebuild]` | delivery | Executables for orders whose decisions call for them: GitHub Actions (windows, linux, macos) by default, AWS CodeBuild (windows) when the source must not go to a git host; records commit and run or build id |
 | `pack [id]` | delivery | Builds the full package with manifest and check; the reproduction check happens here |
 | `send <id> [--via oss\|phone]` | delivery | After JC's approval, `gig package upload` or gsconnect; reports the short link or delivery |
 | `revise` | delivery / warranty | Compares client feedback with the decisions: rework or scope change; rework adds decisions, scope changes run `gig change` |

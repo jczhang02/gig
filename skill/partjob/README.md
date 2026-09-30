@@ -5,7 +5,7 @@ Agent workflow skill for JC's freelance orders. Invoked by hand: `/partjob <subc
 - `SKILL.md`: routing and the shortest constraints.
 - `commands/*.md`: how each subcommand works.
 - `references/workflow.md`: the complete workflow (the source). `references/gig.md`: gig cheat sheet.
-- `templates/`: files gig renders when scaffolding a project; gig's `general.templates_dir` points here.
+- `templates/`: files gig renders when scaffolding a project; gig's `general.templates_dir` points here. `templates/build/` is the exception: build files the `build` subcommand copies into a project, not rendered by gig.
 - `CHANGELOG.md`, `TODO-gig.md`: maintained by the `rule` subcommand.
 
 ## Install

@@ -1,7 +1,7 @@
 ---
 name: partjob
 description: JC's freelance order workflow. From the pre-order draft directory through delivery, payment, warranty and archive, with the agent recording state in gig. Invoked by hand, with subcommands.
-argument-hint: "<subcommand> [args]. No args = status. Subcommands: status draft drop start decide ask log preview pack send revise paid archive handoff rule"
+argument-hint: "<subcommand> [args]. No args = status. Subcommands: status draft drop start decide ask log preview build pack send revise paid archive handoff rule"
 disable-model-invocation: true
 ---
 
@@ -25,6 +25,7 @@ When the arguments are not a subcommand name (JC speaks plainly: `/partjob the c
 | `ask` | kickoff | Turn open questions for the client into a forwardable message in JOB.md |
 | `log` | kickoff | End of a phase: append a status entry |
 | `preview [version]` | delivery | Build and check a preview package |
+| `build [targets] [--via actions\|codebuild]` | delivery | Executables, only for orders whose decisions call for them; GitHub Actions by default, CodeBuild when the source must not go to a git host |
 | `pack [version]` | delivery | Build the full package, run the reproduction check, validate |
 | `send <package-id> [--via oss\|phone]` | delivery | Upload or send to the phone after JC approves |
 | `revise` | delivery / warranty | Client feedback: rework or scope change |
@@ -70,6 +71,7 @@ Say what actually happened (commands and real results), what comes next, and wha
 - `commands/`: one file per subcommand: preconditions, gig commands, files written, approvals needed, what to reply.
 - `references/workflow.md`: the complete workflow and rules, the source of this skill.
 - `references/gig.md`: gig command cheat sheet.
-- `templates/`: files gig renders when scaffolding a project (`JOB.md.j2`, `QUOTE.md.j2`, `AGENTS*.md.j2`, `README.md.j2`, `gitignore`, `NOTES.md.j2`).
+- `references/codebuild.md`: the AWS CodeBuild runbook used by `build --via codebuild`.
+- `templates/`: files gig renders when scaffolding a project (`JOB.md.j2`, `QUOTE.md.j2`, `AGENTS*.md.j2`, `README.md.j2`, `gitignore`, `NOTES.md.j2`). `templates/build/` holds the build files `build` copies into a project (GitHub Actions workflow, CodeBuild buildspec and script); gig does not render them.
 - `CHANGELOG.md`: every change made through `rule`.
 - `TODO-gig.md`: things that need gig code changes; `rule` does not edit code.
