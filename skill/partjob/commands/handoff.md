@@ -1,6 +1,7 @@
 # handoff
 
 Hand over to the next session or a sub-agent. Use the `handoff` skill, but the handoff document must contain the items below; a missing one means the next agent asks JC again.
+In Claude Code `handoff` is user-only: write the document directly by its rules (save to the OS temp directory, not the project; add a "suggested skills" section; reference existing artifacts by path; redact secrets).
 
 ## Required items
 
