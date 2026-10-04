@@ -61,6 +61,7 @@ JC approves; the agent acts. In gig these commands take `--yes`; without JC's ex
 - Reports use Kami or LaTeX; only the final PDF goes into `reports/` or the package; sources live in `.scratch/reports/`, prose passes through sepia.
 - Keep the tree clean: any top-level directory beyond the template is explained in README or AGENTS.md.
 - Sub-agents do only the assigned work; they cannot approve, send, change scope, delete or archive. Handoff items are in `commands/handoff.md`.
+- Claude Code only: work on an order runs with the session's working directory at its project directory. When the session runs elsewhere (for example `~/dev/partjobs`), ask JC to run `/cd ~/dev/partjobs/<slug>` before writing project files; a shell `cd` does not hold. Not for `draft`: `.drafts/<slug>/` is removed by `start` and `drop`.
 
 ## How to reply
 
