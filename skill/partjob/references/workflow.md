@@ -33,7 +33,7 @@ Four phases. The boundaries between them are recording points, not gates.
 ### 1.2 Kickoff
 
 [JC]
-- In the formal directory, set up agent rules with `setup-matt-pocock-skills`.
+- In the formal directory, set up agent rules with `setup-matt-pocock-skills`, for large projects only (the agent judges, JC may overrule).
 - Settle the concrete route and goals with `grill-me` or `grill-with-docs`.
 - The agent and JC do the work.
 - Questions for the client may come up midway.
@@ -136,7 +136,7 @@ QUOTE.md: project, material id, acceptance date, currency and total, commercial 
 ## 3. General requirements
 
 [JC]
-- All reports use Kami or LaTeX and keep no intermediates. They must not read as machine-written; they pass through sepia or humanizer.
+- All reports use Kami or LaTeX and keep no intermediates. They must not read as machine-written; they pass through humanizer (humanizer-zh for Chinese).
 - Working directories and file names are all English.
 - Directories stay as clean as possible; no stray files.
 
@@ -148,7 +148,7 @@ QUOTE.md: project, material id, acceptance date, currency and total, commercial 
 [Decided] "Clean directory" as checkable rules:
 - The allowed top-level entries are fixed by the template; anything beyond them is explained in README or AGENTS.md.
 - `.scratch/` is the only scratch area, gitignored, emptied or archived at the end of a phase.
-- Report pipeline: sources (Kami content / LaTeX) are generated under `.scratch/reports/<name>/`, polished with sepia, and only the final PDF goes into `reports/` or the package.
+- Report pipeline: sources (Kami content / LaTeX) are generated under `.scratch/reports/<name>/`, polished with humanizer (humanizer-zh for Chinese), and only the final PDF goes into `reports/` or the package.
 
 ## 4. Tech stack and agent rules
 
@@ -221,7 +221,7 @@ Project-specific (in the project's AGENTS.md, drafted per type and then complete
 | `status` | any | Reads gig and JOB.md; reports where things stand, the next step, what waits on JC; lists unpaid and in-warranty orders. For the start of a session |
 | `draft <slug>` | pre-order | Creates `.drafts/<slug>/NOTES.md` and the gig draft; the agent surveys the materials, lists questions and effort |
 | `drop <slug> [reason]` | pre-order | Notes into gig, directory removed, dropped record |
-| `start <slug>` | kickoff | Promotes the draft, scaffolds, drafts JOB.md / QUOTE.md, runs setup-matt-pocock-skills, points to grill |
+| `start <slug>` | kickoff | Promotes the draft, scaffolds, drafts JOB.md / QUOTE.md, runs setup-matt-pocock-skills for large projects, points to grill |
 | `decide <text>` | kickoff | Appends one of JC's decisions, dated, to "Confirmed decisions" |
 | `ask` | kickoff | Turns open questions into a forwardable message under "Client questions" |
 | `log` | kickoff | Appends a status entry at the end of a phase (commands, figures, commit, remaining) |

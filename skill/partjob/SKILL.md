@@ -58,7 +58,7 @@ JC approves; the agent acts. In gig these commands take `--yes`; without JC's ex
 - Temporary files and recovery copies go in `.scratch/` inside the project, never in a parent directory. Clear it at the end of a phase.
 - Use only the materials at hand. Questions for the client go into "Client questions" (`ask`); never assume, never ask the client for more samples unless JC decides to.
 - Working directory and file names are English throughout, inside client packages too. Chinese prose uses ASCII punctuation. Explain concepts with concrete names, no undefined abbreviations.
-- Reports use Kami or LaTeX; only the final PDF goes into `reports/` or the package; sources live in `.scratch/reports/`, prose passes through sepia.
+- Reports use Kami or LaTeX; only the final PDF goes into `reports/` or the package; sources live in `.scratch/reports/`, prose passes through humanizer (humanizer-zh for Chinese).
 - Keep the tree clean: any top-level directory beyond the template is explained in README or AGENTS.md.
 - Sub-agents do only the assigned work; they cannot approve, send, change scope, delete or archive. Handoff items are in `commands/handoff.md`.
 - Claude Code only: work on an order runs with the session's working directory at its project directory. When the session runs elsewhere (for example `~/dev/partjobs`), ask JC to run `/cd ~/dev/partjobs/<slug>` before writing project files; a shell `cd` does not hold. Not for `draft`: `.drafts/<slug>/` is removed by `start` and `drop`.

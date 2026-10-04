@@ -15,8 +15,10 @@ The client placed the order; the job officially begins. Register the order, crea
    The result lists `created_files` and `warnings` (git being unavailable shows here). The directory is `~/dev/partjobs/<slug>/` with `.gig/JOB.md`, `.gig/QUOTE.md`, `AGENTS.md`, `README.md`, `.gitignore`, `data/`, `references/`.
    Claude Code only: if the session's working directory is not `~/dev/partjobs/<slug>/`, stop and ask JC to run `/cd ~/dev/partjobs/<slug>`; continue from step 3 after the move. Other agents skip this.
 3. Read the generated `.gig/JOB.md` and `.gig/QUOTE.md` and fill every "(to fill)" with known facts. The price and words in QUOTE.md must match what JC said.
-4. In the project directory run the `setup-matt-pocock-skills` skill (issue tracker, triage labels, domain docs). It appends an "Agent skills" section to AGENTS.md; keep the template content.
-   Claude Code: the skill is user-only. Ask JC to run `/mattpocock-skills:setup-matt-pocock-skills` and continue from step 5 when it finishes.
+4. Judge whether the project is large: several modules or deliverables, work expected to span many sessions, or a route that needs CONTEXT.md and ADRs. State the judgement and the reason to JC in one line; JC may overrule. The same judgement picks the grill in step 7.
+   Large: in the project directory run the `setup-matt-pocock-skills` skill (issue tracker, triage labels, domain docs). It appends an "Agent skills" section to AGENTS.md; keep the template content.
+   Large, in Claude Code: the skill is user-only. Ask JC to run `/mattpocock-skills:setup-matt-pocock-skills` and continue from step 5 when it finishes.
+   Small: skip it; task tracking stays in JOB.md "Status".
 5. Fill the "Project-specific" section of AGENTS.md for this project type: read-only paths, whether training is allowed and where, local toolchain, whether continuous work is authorised, git authorisation. Leave what is unknown and ask in the grill.
 6. `gig start --order <slug>`. Status becomes `in_progress`.
 7. Tell JC the next step is `grill-me` (small job) or `grill-with-docs` (a job that needs CONTEXT.md and ADRs) to settle the route; in Claude Code these are `/mattpocock-skills:grill-me` and `/mattpocock-skills:grill-with-docs`. Grill conclusions go into JOB.md one by one via `/partjob decide`.

@@ -94,7 +94,7 @@ class SkillShape(unittest.TestCase):
         for needle in ("Actions only JC can approve", "Sending anything out", "Pushing to a remote", "Deleting files",
                        "paid remote resources", "Scope changes", "QUOTE.md", "--yes"):
             self.assertIn(needle, SKILL)
-        for needle in (".gig/JOB.md", "read-only", "byte for byte", ".scratch/", "ASCII punctuation", "sepia"):
+        for needle in (".gig/JOB.md", "read-only", "byte for byte", ".scratch/", "ASCII punctuation", "humanizer"):
             self.assertIn(needle, SKILL)
 
     def test_plain_language_routing_is_documented(self):
