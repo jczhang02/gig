@@ -648,6 +648,43 @@ fn artifact_upload_picks_the_uploader() {
         .any(|c| c.contains("upload") && c.contains("gig/up/artifacts/")));
 }
 
+/// Dry runs check the uploader name as a real run does, and build or run
+/// nothing: an unknown name, or an S3 name without its table, is `config`.
+#[cfg(unix)]
+#[test]
+fn a_dry_run_refuses_an_unknown_uploader() {
+    let env = Env::new();
+    let (_bin_dir, bdpan) = order_with_fake_bdpan(&env);
+    let file = env.root.path().join("demo.mp4");
+    fs::write(&file, "video").unwrap();
+    let file = file.to_string_lossy().into_owned();
+    let package = ["package", "upload", "up-v1", "--order", "up"];
+    let artifact = ["artifact", "upload", "--order", "up", file.as_str()];
+    for up in [&package[..], &artifact[..]] {
+        for bad in ["nope", "s3:missing", "bdpan:work"] {
+            let (ok, v) = env.run(&[up, &["--uploader", bad]].concat());
+            assert!(!ok, "{bad}: {v}");
+            assert_eq!(v["error"]["code"], "config", "{bad}: {v}");
+            assert!(
+                v["error"]["message"]
+                    .as_str()
+                    .unwrap()
+                    .contains(bad.trim_start_matches("s3:")),
+                "{v}"
+            );
+        }
+    }
+    // The configured default is checked the same way.
+    let cfg = env.root.path().join("config/config.toml");
+    let text = fs::read_to_string(&cfg)
+        .unwrap()
+        .replace("uploader = \"s3:hk\"", "uploader = \"nope\"");
+    fs::write(&cfg, text).unwrap();
+    assert_eq!(env.err(&package), "config");
+    assert_eq!(env.err(&artifact), "config");
+    assert!(bdpan.calls().is_empty(), "{:?}", bdpan.calls());
+}
+
 #[test]
 fn config_set_accepts_the_bdpan_uploader() {
     let env = Env::new();

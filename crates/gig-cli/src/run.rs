@@ -255,7 +255,7 @@ fn run_with_db(ctx: &Ctx, cmd: Command) -> Result<Output> {
                 out_with(r, w)
             }
             PackageCmd::Upload(a) => {
-                let name = uploader_name(ctx, a.uploader.as_deref());
+                let name = uploader_name(ctx, a.uploader.as_deref())?;
                 if !a.yes {
                     // Dry run builds no uploader; it only names it.
                     let r = packages::upload(
@@ -301,7 +301,7 @@ fn run_with_db(ctx: &Ctx, cmd: Command) -> Result<Output> {
         Command::Artifact(ar) => match ar {
             ArtifactCmd::Upload(a) => {
                 let file = PathBuf::from(&a.file);
-                let name = uploader_name(ctx, a.uploader.as_deref());
+                let name = uploader_name(ctx, a.uploader.as_deref())?;
                 if !a.yes {
                     return out(artifacts::upload(
                         ctx,
@@ -351,9 +351,15 @@ fn run_with_db(ctx: &Ctx, cmd: Command) -> Result<Output> {
     }
 }
 
-/// The uploader `--uploader` names, else the configured default.
-fn uploader_name<'a>(ctx: &'a Ctx, flag: Option<&'a str>) -> &'a str {
-    flag.unwrap_or(&ctx.config.delivery.uploader)
+/// The uploader `--uploader` names, else the configured default, checked
+/// as a real run checks it (an unset default stays "" for a dry run, which
+/// then names no uploader).
+fn uploader_name<'a>(ctx: &'a Ctx, flag: Option<&'a str>) -> Result<&'a str> {
+    let name = flag.unwrap_or(&ctx.config.delivery.uploader);
+    if !name.is_empty() {
+        delivery::check_uploader_name(&ctx.config, name)?;
+    }
+    Ok(name)
 }
 
 /// Placeholder for dry runs: carries the name of the uploader a real run

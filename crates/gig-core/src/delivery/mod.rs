@@ -173,13 +173,12 @@ pub fn configured_uploader(config: &Config, paths: &Paths) -> Result<Box<dyn Upl
     uploader_by_name(config, paths, &config.delivery.uploader)
 }
 
-/// Build the uploader called `name`: `bdpan`, or `s3:<name>` for a
-/// `[delivery.s3.<name>]` table. Only S3 is wrapped with the short linker
-/// (when short links are enabled); a Pan Share is never shortened. Any other
-/// name is a config error.
-pub fn uploader_by_name(config: &Config, paths: &Paths, name: &str) -> Result<Box<dyn Uploader>> {
+/// Check that `name` is an uploader the config can build, without building
+/// it or running anything: `bdpan`, or `s3:<name>` with its
+/// `[delivery.s3.<name>]` table. Anything else is a config error.
+pub fn check_uploader_name(config: &Config, name: &str) -> Result<()> {
     if name == "bdpan" {
-        return Ok(Box::new(BdpanUploader::new(&config.delivery)));
+        return Ok(());
     }
     let Some(s3_name) = name.strip_prefix("s3:").filter(|n| !n.is_empty()) else {
         return Err(Error::Config(if name.is_empty() {
@@ -188,6 +187,18 @@ pub fn uploader_by_name(config: &Config, paths: &Paths, name: &str) -> Result<Bo
             format!("unknown uploader {name:?}; use bdpan or s3:<name>")
         }));
     };
+    config.s3_table(s3_name).map(|_| ())
+}
+
+/// Build the uploader called `name` (see [`check_uploader_name`]). Only S3
+/// is wrapped with the short linker (when short links are enabled); a Pan
+/// Share is never shortened.
+pub fn uploader_by_name(config: &Config, paths: &Paths, name: &str) -> Result<Box<dyn Uploader>> {
+    check_uploader_name(config, name)?;
+    if name == "bdpan" {
+        return Ok(Box::new(BdpanUploader::new(&config.delivery)));
+    }
+    let s3_name = &name["s3:".len()..];
     let resolved = secrets::resolve_s3_named(config, paths, s3_name)?;
     let s3 = S3Uploader::new(&resolved)?;
     match secrets::resolve_short_link_token(config, paths)? {

@@ -94,10 +94,7 @@ pub fn resolve_s3(config: &Config, paths: &Paths) -> Result<ResolvedS3> {
 /// Resolve the S3 uploader `s3:<name>` with its credentials, whatever the
 /// configured default is.
 pub fn resolve_s3_named(config: &Config, paths: &Paths, name: &str) -> Result<ResolvedS3> {
-    let s3 =
-        config.delivery.s3.get(name).ok_or_else(|| {
-            Error::Config(format!("no [delivery.s3.{name}] section in config.toml"))
-        })?;
+    let s3 = config.s3_table(name)?;
     let file = load_file(&paths.secrets_file)?;
     let from_file = file.s3.get(name);
     let access_key = env(&env_name(name, "ACCESS_KEY"))

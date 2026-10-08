@@ -449,6 +449,14 @@ impl Config {
         Ok(())
     }
 
+    /// The `[delivery.s3.<name>]` table; a missing one is a config error.
+    pub fn s3_table(&self, name: &str) -> Result<&S3> {
+        self.delivery
+            .s3
+            .get(name)
+            .ok_or_else(|| Error::Config(format!("no [delivery.s3.{name}] section in config.toml")))
+    }
+
     /// The uploader name after "s3:", if any.
     pub fn s3_uploader_name(&self) -> Option<&str> {
         self.delivery
