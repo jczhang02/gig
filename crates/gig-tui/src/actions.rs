@@ -9,9 +9,9 @@
 use crate::app::{UiState, View};
 use crate::data::{self, OrderRow};
 use crate::popup::{Field, Form, Pick, PickFor, Popup, PopupKey};
-use crate::upload::{self, UploadJob};
+use crate::upload::{self, UploadJob, UploadKind};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use gig_core::delivery::{self, DryRunUploader};
+use gig_core::delivery::DryRunUploader;
 use gig_core::models::{Channel, Draft, ProjectType};
 use gig_core::money::{format_minor, parse_amount};
 use gig_core::services::{archive, artifacts, drafts, orders, packages, Ctx};
@@ -714,7 +714,13 @@ pub fn run(ctx: &Ctx, action: &Action) -> Result<Option<Popup>> {
             Ok(Some(archive_popup(&report)))
         }
         Action::UploadPreview { slug, package_id } => {
-            let dry = packages::upload(ctx, Some(slug), package_id, false, &DryRunUploader::default())?;
+            let dry = packages::upload(
+                ctx,
+                Some(slug),
+                package_id,
+                false,
+                &DryRunUploader::default(),
+            )?;
             let kind = dry.package.kind;
             let mut lines = vec![
                 format!("Upload package {package_id} of {slug}?"),
@@ -732,18 +738,16 @@ pub fn run(ctx: &Ctx, action: &Action) -> Result<Option<Popup>> {
             ];
             lines.extend(dry.warnings.iter().map(|w| format!("warning: {w}")));
             lines.push("The link is copied to the clipboard when done.".into());
-            Ok(Some(Popup::confirm_upload(
+            Ok(Some(Popup::confirm(
                 format!("upload {package_id}"),
                 lines,
-                UploadJob::Package {
-                    slug: slug.clone(),
-                    package_id: package_id.clone(),
-                    uploader: ctx.config.delivery.uploader.clone(),
-                },
-                delivery::uploader_choices(&ctx.config.delivery)
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect(),
+                Effect::Upload(UploadJob::new(
+                    UploadKind::Package {
+                        slug: slug.clone(),
+                        package_id: package_id.clone(),
+                    },
+                    &ctx.config.delivery,
+                )),
             )))
         }
         Action::SentPreview(m) => {
@@ -800,7 +804,7 @@ pub fn run(ctx: &Ctx, action: &Action) -> Result<Option<Popup>> {
             }
             let file = upload::expand_home(path);
             let dry = artifacts::upload(ctx, Some(slug), &file, false, &DryRunUploader::default())?;
-            Ok(Some(Popup::confirm_upload(
+            Ok(Some(Popup::confirm(
                 format!("upload artifact {slug}"),
                 vec![
                     format!("Upload {} for {slug}?", dry.local_path),
@@ -812,15 +816,13 @@ pub fn run(ctx: &Ctx, action: &Action) -> Result<Option<Popup>> {
                     "The order status does not change.".into(),
                     "The link is copied to the clipboard when done.".into(),
                 ],
-                UploadJob::Artifact {
-                    slug: slug.clone(),
-                    path: dry.local_path.into(),
-                    uploader: ctx.config.delivery.uploader.clone(),
-                },
-                delivery::uploader_choices(&ctx.config.delivery)
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect(),
+                Effect::Upload(UploadJob::new(
+                    UploadKind::Artifact {
+                        slug: slug.clone(),
+                        path: dry.local_path.into(),
+                    },
+                    &ctx.config.delivery,
+                )),
             )))
         }
         Action::NewOrder(n) => {

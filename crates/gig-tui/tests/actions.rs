@@ -540,10 +540,10 @@ fn other_forms_reach_gig_core() {
 
 // ---- uploads (spec 2.1 `u`, `m`, `U`) ----
 
-use gig_core::delivery::{UploadOpts, UploadResult, Uploader};
+use gig_core::delivery::{uploader_by_name, UploadOpts, UploadResult, Uploader};
 use gig_core::models::{Channel, PackageKind, PackageStatus};
 use gig_core::services::packages;
-use gig_tui::upload::{self, UploadJob};
+use gig_tui::upload::{self, UploadJob, UploadKind};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -699,13 +699,12 @@ fn tab_switches_the_uploader_of_an_upload_confirm() {
     h.key(KeyCode::Char('y'));
     match h.effects.pop() {
         Some(Effect::Upload(job)) => {
-            assert_eq!(job.uploader(), "bdpan");
+            assert_eq!(job.uploader, "bdpan");
             assert_eq!(
-                job,
-                UploadJob::Package {
+                job.kind,
+                UploadKind::Package {
                     slug: "tk-tab".into(),
                     package_id: pkg,
-                    uploader: "bdpan".into(),
                 }
             );
         }
@@ -722,7 +721,7 @@ fn tab_switches_the_uploader_of_an_upload_confirm() {
     h.key(KeyCode::Tab);
     h.key(KeyCode::Char('y'));
     match h.effects.pop() {
-        Some(Effect::Upload(job)) => assert_eq!(job.uploader(), "s3:b"),
+        Some(Effect::Upload(job)) => assert_eq!(job.uploader, "s3:b"),
         other => panic!("upload effect expected, got {other:?}"),
     }
 }
@@ -749,7 +748,7 @@ fn the_job_runs_with_the_chosen_uploader_and_shows_the_pwd() {
         other => panic!("upload effect expected, got {other:?}"),
     };
 
-    let uploader = upload::uploader_for(&h.ctx, &job).unwrap();
+    let uploader = uploader_by_name(&h.ctx.config, &h.ctx.paths, &job.uploader).unwrap();
     assert_eq!(uploader.name(), "bdpan");
     let mut ticks = Vec::new();
     let done = upload::run_on_worker(&mut h.ctx, &job, uploader.as_ref(), |sent, total| {
@@ -761,10 +760,16 @@ fn the_job_runs_with_the_chosen_uploader_and_shows_the_pwd() {
 
     // bdpan reports once, at the end: until then the popup spins.
     assert!(
-        ticks.iter().all(|&(sent, total)| total == 0 || sent == total),
+        ticks
+            .iter()
+            .all(|&(sent, total)| total == 0 || sent == total),
         "{ticks:?}"
     );
-    assert!(fake.calls().iter().any(|c| c.contains(" upload ")), "{:?}", fake.calls());
+    assert!(
+        fake.calls().iter().any(|c| c.contains(" upload ")),
+        "{:?}",
+        fake.calls()
+    );
     let link = format!("{}?pwd={}", fake::LINK, fake::PWD);
     assert_eq!(done.link(), Some(link.as_str()));
     assert_eq!(done.pwd.as_deref(), Some(fake::PWD));
@@ -840,13 +845,13 @@ fn upload_package_shows_progress_and_delivers() {
         other => panic!("upload effect expected, got {other:?}"),
     };
     assert_eq!(
-        job,
-        UploadJob::Package {
+        job.kind,
+        UploadKind::Package {
             slug: "tk-up".into(),
             package_id: pkg.clone(),
-            uploader: String::new(),
         }
     );
+    assert_eq!(job.uploader, "");
     // Nothing changed before the upload ran.
     assert_eq!(h.order("tk-up").status, OrderStatus::InProgress);
 
@@ -902,12 +907,14 @@ fn upload_refusals_are_shown_before_confirming() {
 fn no_uploader_configured_is_an_error_not_a_panic() {
     let h = Harness::new();
     // A fresh home: the confirmation keeps the unset default.
-    let job = UploadJob::Package {
-        slug: "tk".into(),
-        package_id: "tk-v1".into(),
-        uploader: h.ctx.config.delivery.uploader.clone(),
-    };
-    let e = match upload::uploader_for(&h.ctx, &job) {
+    let job = UploadJob::new(
+        UploadKind::Package {
+            slug: "tk".into(),
+            package_id: "tk-v1".into(),
+        },
+        &h.ctx.config.delivery,
+    );
+    let e = match uploader_by_name(&h.ctx.config, &h.ctx.paths, &job.uploader) {
         Ok(_) => panic!("a fresh home has no uploader"),
         Err(e) => e,
     };

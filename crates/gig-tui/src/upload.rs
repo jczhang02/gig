@@ -6,7 +6,10 @@
 //! callback rides in on a decorating `Uploader` instead of a new argument.
 
 use crate::data::OrderRow;
-use gig_core::delivery::{uploader_by_name, Progress, UploadOpts, UploadResult, Uploader};
+use gig_core::config::Delivery;
+use gig_core::delivery::{
+    uploader_choices, Progress, UploadOpts, UploadResult, Uploader, UploaderName,
+};
 use gig_core::models::{OrderStatus, Package, PackageKind, PackageStatus};
 use gig_core::services::{artifacts, packages, Ctx};
 use gig_core::{Error, Result};
@@ -15,50 +18,70 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread;
 
-/// One upload the app runs after a confirmed popup, through the uploader
-/// called `uploader` (`delivery::uploader_by_name`; "" is the unset
-/// default, which that refuses).
+/// What a confirmed upload sends.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum UploadJob {
+pub enum UploadKind {
     /// `packages::upload(yes=true)`.
-    Package {
-        slug: String,
-        package_id: String,
-        uploader: String,
-    },
+    Package { slug: String, package_id: String },
     /// `artifacts::upload(yes=true)`.
-    Artifact {
-        slug: String,
-        path: PathBuf,
-        uploader: String,
-    },
+    Artifact { slug: String, path: PathBuf },
+}
+
+/// One upload the app runs after a confirmed popup, and the uploader it
+/// runs through.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UploadJob {
+    pub kind: UploadKind,
+    /// The uploader `y` builds (`delivery::uploader_by_name`): the
+    /// configured default at first, "" when that is unset (which the build
+    /// refuses).
+    pub uploader: String,
+    /// What `Tab` in the confirmation switches among
+    /// (`delivery::uploader_choices`).
+    pub choices: Vec<UploaderName>,
 }
 
 impl UploadJob {
-    pub fn uploader(&self) -> &str {
-        match self {
-            UploadJob::Package { uploader, .. } | UploadJob::Artifact { uploader, .. } => uploader,
+    /// `kind` through the default uploader of `delivery`, switchable among
+    /// its configured uploaders.
+    pub fn new(kind: UploadKind, delivery: &Delivery) -> Self {
+        Self {
+            kind,
+            uploader: delivery.uploader.clone(),
+            choices: uploader_choices(delivery),
         }
     }
 
+    /// The uploader as the confirmation shows it: "none" when unset.
+    pub fn uploader_shown(&self) -> &str {
+        match self.uploader.as_str() {
+            "" => "none",
+            name => name,
+        }
+    }
+
+    /// True when `Tab` would show another uploader.
+    pub fn can_switch(&self) -> bool {
+        self.choices.iter().any(|c| c.to_string() != self.uploader)
+    }
+
     /// `Tab` in the confirmation: the uploader after the current one in
-    /// `choices`, wrapping; the first when the current one is not there.
-    pub fn next_uploader(&mut self, choices: &[String]) {
-        let at = choices.iter().position(|c| c == self.uploader());
-        let next = at.map_or(0, |i| i + 1) % choices.len().max(1);
-        if let Some(name) = choices.get(next) {
-            match self {
-                UploadJob::Package { uploader, .. } | UploadJob::Artifact { uploader, .. } => {
-                    uploader.clone_from(name)
-                }
-            }
+    /// the choices, wrapping; the first when the current one is not there.
+    pub fn next_uploader(&mut self) {
+        let at = self
+            .choices
+            .iter()
+            .position(|c| c.to_string() == self.uploader);
+        let next = at.map_or(0, |i| i + 1) % self.choices.len().max(1);
+        if let Some(name) = self.choices.get(next) {
+            self.uploader = name.to_string();
         }
     }
 
     pub fn title(&self) -> String {
-        match self {
-            UploadJob::Package { package_id, .. } => format!("uploading {package_id}"),
-            UploadJob::Artifact { path, .. } => format!(
+        match &self.kind {
+            UploadKind::Package { package_id, .. } => format!("uploading {package_id}"),
+            UploadKind::Artifact { path, .. } => format!(
                 "uploading {}",
                 path.file_name().map_or_else(
                     || path.display().to_string(),
@@ -128,12 +151,6 @@ impl Uploaded {
         }
         lines
     }
-}
-
-/// The uploader a confirmed job names (`delivery::uploader_by_name`); a
-/// secrets or config error is shown verbatim.
-pub fn uploader_for(ctx: &Ctx, job: &UploadJob) -> Result<Box<dyn Uploader>> {
-    uploader_by_name(&ctx.config, &ctx.paths, job.uploader())
 }
 
 /// Packages of the order that can go out: checked and not yet sent.
@@ -247,10 +264,8 @@ pub fn run_job(
         }
         None => uploader,
     };
-    match job {
-        UploadJob::Package {
-            slug, package_id, ..
-        } => {
+    match &job.kind {
+        UploadKind::Package { slug, package_id } => {
             let r = packages::upload(ctx, Some(slug), package_id, true, uploader)?;
             Ok(Uploaded {
                 what: package_id.clone(),
@@ -263,7 +278,7 @@ pub fn run_job(
                 warnings: r.warnings,
             })
         }
-        UploadJob::Artifact { slug, path, .. } => {
+        UploadKind::Artifact { slug, path } => {
             let r = artifacts::upload(ctx, Some(slug), path, true, uploader)?;
             Ok(Uploaded {
                 what: path
@@ -348,17 +363,16 @@ mod tests {
 
     #[test]
     fn job_titles() {
-        let p = UploadJob::Package {
+        let job = |kind| UploadJob::new(kind, &Delivery::default());
+        let p = job(UploadKind::Package {
             slug: "a".into(),
             package_id: "a-v1".into(),
-            uploader: "bdpan".into(),
-        };
+        });
         assert_eq!(p.title(), "uploading a-v1");
-        let a = UploadJob::Artifact {
+        let a = job(UploadKind::Artifact {
             slug: "a".into(),
             path: "/tmp/x/report.pdf".into(),
-            uploader: String::new(),
-        };
+        });
         assert_eq!(a.title(), "uploading report.pdf");
     }
 }
