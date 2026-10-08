@@ -8,7 +8,7 @@ pub mod s3;
 pub use bdpan::BdpanUploader;
 pub use s3::S3Uploader;
 
-use crate::config::{Config, Paths};
+use crate::config::{Config, Delivery, Paths};
 use crate::secrets;
 use crate::{Error, Result};
 use serde::{Deserialize, Serialize};
@@ -200,6 +200,26 @@ pub fn uploader_by_name(config: &Config, paths: &Paths, name: &str) -> Result<Bo
         }
         None => Ok(Box::new(s3)),
     }
+}
+
+/// The uploaders an upload can switch between (the TUI's `Tab`), in that
+/// order: `bdpan` when `delivery.uploader` names it, `[delivery.bdpan]`
+/// changes its defaults, or its binary resolves; then `s3:<name>` for each
+/// `[delivery.s3.<name>]` table.
+pub fn uploader_choices(delivery: &Delivery) -> Vec<String> {
+    uploader_choices_with(delivery, bdpan::bin_resolves)
+}
+
+/// [`uploader_choices`] with the binary lookup passed in.
+fn uploader_choices_with(delivery: &Delivery, resolves: impl Fn(&str) -> bool) -> Vec<String> {
+    let bdpan = delivery.uploader == "bdpan"
+        || delivery.bdpan != crate::config::Bdpan::default()
+        || resolves(&delivery.bdpan.bin);
+    bdpan
+        .then(|| "bdpan".to_string())
+        .into_iter()
+        .chain(delivery.s3.keys().map(|name| format!("s3:{name}")))
+        .collect()
 }
 
 pub(crate) fn validate_https_or_loopback_url(value: &str, label: &str) -> Result<()> {
@@ -403,6 +423,44 @@ mod tests {
         // S3 still needs the short link token when short links are on.
         cfg.delivery.short_link.enabled = true;
         assert_eq!(by_name_err(&cfg, &paths, "s3:hk").code(), "secrets");
+    }
+
+    #[test]
+    fn uploader_choices_list_bdpan_when_named_or_found_then_each_s3_table() {
+        let dir = tempfile::tempdir().unwrap();
+        let (cfg, _) = config_with_s3_and_short_links(dir.path());
+        let found = |_: &str| true;
+        let missing = |_: &str| false;
+        // Default bdpan settings, binary not found, not the default: S3 only.
+        assert_eq!(
+            uploader_choices_with(&cfg.delivery, missing),
+            ["s3:default", "s3:hk"]
+        );
+        // Found on PATH (or as the configured path): bdpan comes first.
+        assert_eq!(
+            uploader_choices_with(&cfg.delivery, found),
+            ["bdpan", "s3:default", "s3:hk"]
+        );
+        // Named as the default, or configured in [delivery.bdpan]: offered
+        // even when not found, so the upload says why it fails.
+        let mut named = cfg.delivery.clone();
+        named.uploader = "bdpan".into();
+        assert_eq!(
+            uploader_choices_with(&named, missing),
+            ["bdpan", "s3:default", "s3:hk"]
+        );
+        let mut table = cfg.delivery.clone();
+        table.bdpan.bin = "/opt/bdpan/bin/bdpan".into();
+        assert_eq!(uploader_choices_with(&table, missing)[0], "bdpan");
+        // The lookup is asked about the configured binary name.
+        let asked = std::cell::RefCell::new(Vec::new());
+        uploader_choices_with(&cfg.delivery, |b: &str| {
+            asked.borrow_mut().push(b.to_string());
+            false
+        });
+        assert_eq!(asked.into_inner(), ["bdpan"]);
+        // Nothing configured, nothing found.
+        assert!(uploader_choices_with(&Config::default().delivery, missing).is_empty());
     }
 
     #[test]
