@@ -1,8 +1,11 @@
-//! Uploader trait, short links, and the S3 backend. Ported from v1; the only
-//! change is that credentials arrive through `secrets::ResolvedS3`.
+//! Uploader trait, short links, and the backends: S3 (ported from v1;
+//! credentials arrive through `secrets::ResolvedS3`) and bdpan (the Baidu
+//! Netdisk CLI as a subprocess).
 
+pub mod bdpan;
 pub mod s3;
 
+pub use bdpan::BdpanUploader;
 pub use s3::S3Uploader;
 
 use crate::config::{Config, Paths};
