@@ -55,6 +55,8 @@ pub struct UploadResult {
     pub expires_at: Option<i64>,
     pub provider: String,
     pub file_size: u64,
+    /// The extraction code of a Pan Share, also embedded in `url`.
+    pub pwd: Option<String>,
 }
 
 pub trait Uploader: Send + Sync {
@@ -261,6 +263,7 @@ mod tests {
                 expires_at: Some(OffsetDateTime::now_utc().unix_timestamp() + 3600),
                 provider: "test:s3".into(),
                 file_size: 123,
+                pwd: None,
             })
         }
     }

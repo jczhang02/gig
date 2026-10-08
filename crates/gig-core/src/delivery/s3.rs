@@ -244,6 +244,7 @@ impl Uploader for S3Uploader {
             expires_at: Some(expires_at),
             provider: self.name.clone(),
             file_size,
+            pwd: None,
         })
     }
 }
