@@ -5,6 +5,7 @@ Produce the executables an order delivers. Only orders whose confirmed decisions
 ## Preconditions
 
 - A numbered item in JOB.md "Confirmed decisions" names the target platforms (windows, linux, macos) and the build channel. Without it, stop and ask JC to settle it with `/partjob decide`; never infer targets from the client's operating system.
+- Build files are copied only after that decision exists, never ahead of it. When the channel changes after files were copied, list the old channel's files for removal (deleting needs JC's approval).
 - The code to build is committed. Builds always use `HEAD`; uncommitted changes are not included.
 - The PyInstaller build succeeds locally on Linux before any remote build is started.
 

@@ -6,9 +6,10 @@ For the start of a session, or when JC asks "where are we". Read-only; changes n
 
 1. `gig ls` and `gig draft ls`. If both fail with `legacy_db` or `config`, stop and report: the environment is broken.
 2. Work out the current directory:
-   - Inside a project directory (`gig show` succeeds): read `data.order`, `data.next_action`, `data.packages`, then `.gig/JOB.md`, chiefly the last entries of "Confirmed decisions", the "Client questions" section, and the last two "Status" entries.
+   - Inside a project directory (`gig show` succeeds): read `data.order`, `data.next_action`, `data.packages`, then `.gig/JOB.md`, chiefly the "Now" section, the last entries of "Confirmed decisions", the "Client questions" section, and the last two "Status" entries.
    - Not inside a project (for example `~/dev/partjobs`): not an error. Use the `gig ls` result.
-3. From `gig ls` pick out: orders with `unpaid == true` (delivered, not paid, with `days_in_status`), orders whose `next_action` starts with `warranty until`, and `queued` orders.
+3. Inside a project whose decisions name the CodeBuild channel and whose final build is not recorded yet: run `aws sts get-caller-identity --region us-west-2` (read-only, free). An expired session goes under what waits on JC: "run `! aws login`".
+4. From `gig ls` pick out: orders with `unpaid == true` (delivered, not paid, with `days_in_status`), orders whose `next_action` starts with `warranty until`, and `queued` orders.
 
 ## Reply
 

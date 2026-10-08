@@ -5,7 +5,7 @@ In Claude Code `handoff` is user-only: write the document directly by its rules 
 
 ## Required items
 
-- Order slug, current gig state (`order.status` and `next_action` from `gig show`).
+- Order slug, current gig state (`order.status` and `next_action` from `gig show`), and the "Now" section of JOB.md, brought up to date first.
 - Absolute project path, files to read first (`.gig/JOB.md`, `.gig/QUOTE.md`, `AGENTS.md`, relevant CONTEXT.md / ADRs).
 - Where writing is allowed (which directories) and what must not be touched (original materials, QUOTE.md, checked packages under `delivery/`).
 - Completion criteria: cite the numbered "Confirmed decisions" in JOB.md; do not write a second set.

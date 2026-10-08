@@ -14,9 +14,11 @@ At the end of a phase, or before a session ends, append one entry to "Status" in
 
 ## Also
 
+- Overwrite the "Now" section of JOB.md: at most five lines (phase and latest version, last thing sent out, what waits on JC, next step). It is the only part of JOB.md that is rewritten, not appended. A JOB.md without it gets it under the title.
+- Report the size of `.scratch/` (`du -sh .scratch`) and ask JC once whether to clear it. Clearing is deleting: without JC's yes it stays.
 - Anything worth remembering across orders (a platform habit, a pitfall in a type of client material) goes to gig with `gig note "<one sentence>"`, where `status` will show it later.
 - List the commits made during the phase; explain any uncommitted changes.
 
 ## Reply
 
-The status entry as appended.
+The status entry as appended, the new "Now" lines, the `.scratch/` size.

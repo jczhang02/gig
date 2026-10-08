@@ -1,7 +1,7 @@
 ---
 name: partjob
 description: JC's freelance order workflow. From the pre-order draft directory through delivery, payment, warranty and archive, with the agent recording state in gig. Invoked by hand, with subcommands.
-argument-hint: "<subcommand> [args]. No args = status. Subcommands: status draft drop start decide ask log preview build pack send revise paid archive handoff rule"
+argument-hint: "<subcommand> [args]. No args = status. Subcommands: status draft drop start decide ask log dogfood preview build pack send revise paid archive handoff rule"
 disable-model-invocation: true
 ---
 
@@ -24,7 +24,8 @@ When the arguments are not a subcommand name (JC speaks plainly: `/partjob the c
 | `decide <text>` | kickoff | Write one of JC's decisions into JOB.md "Confirmed decisions" |
 | `ask` | kickoff | Turn open questions for the client into a forwardable message in JOB.md |
 | `log` | kickoff | End of a phase: append a status entry |
-| `preview [version]` | delivery | Build and check a preview package |
+| `dogfood [version]` | delivery | JC tries the work before any preview; findings become decisions |
+| `preview [version]` | delivery | Show JC a preview candidate, then build and check the package |
 | `build [targets] [--via actions\|codebuild]` | delivery | Executables, only for orders whose decisions call for them; GitHub Actions by default, CodeBuild when the source must not go to a git host |
 | `pack [version]` | delivery | Build the full package, run the reproduction check, validate |
 | `send <package-id> [--via oss\|phone]` | delivery | Upload or send to the phone after JC approves |

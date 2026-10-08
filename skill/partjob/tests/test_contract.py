@@ -176,7 +176,7 @@ class TemplatesRenderThroughGig(unittest.TestCase):
             self.assertEqual(created["order"]["status"], "queued")
             project = dev / "pdf-tool"
             job = (project / ".gig/JOB.md").read_text(encoding="utf-8")
-            for h in ("## Client request", "## Pre-order notes", "## Material facts", "## Confirmed decisions", "## Client questions", "## Status"):
+            for h in ("## Now", "## Client request", "## Pre-order notes", "## Material facts", "## Confirmed decisions", "## Client questions", "## Status"):
                 self.assertIn(h, job)
             self.assertIn("> 报价 800, 已成交", job)
             self.assertIn("Client budget 800.", job)

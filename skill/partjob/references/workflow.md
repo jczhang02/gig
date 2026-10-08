@@ -88,6 +88,8 @@ delivery/                          # the whole directory is gitignored
 - `gig package upload` re-checks, uploads, shortens the link and records it. Preview and full packages both go this way, distinguished by kind. The phone channel also re-checks and records channel=phone without a remote URL.
 - Uploading or sending to the phone needs JC's explicit approval, once per send. After approval the agent executes; JC need not run anything.
 - When the client is not satisfied the job returns to 1.2, new decisions go into JOB.md, and a new version is delivered.
+- Before a preview, JC tries the version (`dogfood`): the program run on JC's machine, or the figures and report draft read. Findings become decisions. (2026-10-08, thermal-video-curve: the light theme and the curve drawing both came from JC's own use, not from tests.)
+- A preview is first a candidate under `.scratch/preview/<package-id>/`; only the version JC agrees to send is built into `delivery/` and registered in gig. (Same order: four previews built, one sent.)
 
 ### 1.4 Warranty and payment
 
@@ -120,6 +122,7 @@ draft -> queued -> in_progress -> delivered -> paid -> archived
 - the client's request (verbatim, with source file and encoding)
 - price and payment facts: QUOTE.md
 
+## Now                    overwritten at each phase end: at most five lines (phase and version, last send, what waits on JC, next step)
 ## Material facts         objective observations, no judgements
 ## Confirmed decisions    numbered; each is an executable constraint, dated, with how it was confirmed; overturned ones stay, a new item supersedes them
 ## Client questions       written by the agent, forwarded by JC, turned into decisions when answered
@@ -129,7 +132,7 @@ draft -> queued -> in_progress -> delivered -> paid -> archived
 QUOTE.md: project, material id, acceptance date, currency and total, commercial status, payment status, the client's words quoted, what was not agreed (delivery date, payment milestones, warranty).
 
 [Decided]
-- JOB.md is the project's memory. Agents read it before working and append a status entry at the end of every phase. "Confirmed decisions" is only ever extended by JC; agents do not edit it.
+- JOB.md is the project's memory. Agents read it before working and append a status entry at the end of every phase. "Now" is the only section that is rewritten, so a cold session finds the current state without reading the whole log (2026-10-08, thermal-video-curve: a 1.5-day order filled 199 lines and its session was compacted). "Confirmed decisions" is only ever extended by JC; agents do not edit it.
 - QUOTE.md is the commercial snapshot; only JC changes it. A payment change runs `gig paid` at the same time.
 - Actions that need JC's explicit approval, where silence or "continue" never counts: sending anything out; pushing to a remote; deleting, cleaning up, archiving; paid remote resources; scope changes beyond the confirmed decisions; changes to QUOTE.md.
 
@@ -224,8 +227,9 @@ Project-specific (in the project's AGENTS.md, drafted per type and then complete
 | `start <slug>` | kickoff | Promotes the draft, scaffolds, drafts JOB.md / QUOTE.md, runs setup-matt-pocock-skills for large projects, points to grill |
 | `decide <text>` | kickoff | Appends one of JC's decisions, dated, to "Confirmed decisions" |
 | `ask` | kickoff | Turns open questions into a forwardable message under "Client questions" |
-| `log` | kickoff | Appends a status entry at the end of a phase (commands, figures, commit, remaining) |
-| `preview` | delivery | Builds `<slug>-vX.Y.Z-preview/` from the type's default list, writes the manifest, runs `gig package check` |
+| `log` | kickoff | Appends a status entry at the end of a phase (commands, figures, commit, remaining), rewrites "Now", reports the `.scratch/` size |
+| `dogfood [version]` | delivery | JC tries the version before any preview; a run command or local build, a checklist from the decisions; findings become decisions |
+| `preview` | delivery | A candidate in `.scratch/preview/` for JC first; then builds `<slug>-vX.Y.Z-preview/` from the type's default list, writes the manifest, runs `gig package check` |
 | `build [targets] [--via actions\|codebuild]` | delivery | Executables for orders whose decisions call for them: GitHub Actions (windows, linux, macos) by default, AWS CodeBuild (windows) when the source must not go to a git host; records commit and run or build id |
 | `pack [id]` | delivery | Builds the full package with manifest and check; the reproduction check happens here |
 | `send <id> [--via oss\|phone]` | delivery | After JC's approval, `gig package upload` or gsconnect; reports the short link or delivery |

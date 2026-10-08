@@ -20,6 +20,7 @@ The client placed the order; the job officially begins. Register the order, crea
    Large, in Claude Code: the skill is user-only. Ask JC to run `/mattpocock-skills:setup-matt-pocock-skills` and continue from step 5 when it finishes.
    Small: skip it; task tracking stays in JOB.md "Status".
 5. Fill the "Project-specific" section of AGENTS.md for this project type: read-only paths, whether training is allowed and where, local toolchain, whether continuous work is authorised, git authorisation. Leave what is unknown and ask in the grill.
+   Mixed work (for example a tool whose core is image recognition): `--type` takes the main type; copy the rules of the other type's section in `templates/AGENTS.<type>.md.j2` that apply (for example from "CV / ML projects": evaluation set and acceptance criteria written before tuning, failure examples kept) into "Project-specific" by hand. Tell JC the main type and what was copied.
 6. `gig start --order <slug>`. Status becomes `in_progress`.
 7. Tell JC the next step is `grill-me` (small job) or `grill-with-docs` (a job that needs CONTEXT.md and ADRs) to settle the route; in Claude Code these are `/mattpocock-skills:grill-me` and `/mattpocock-skills:grill-with-docs`. Grill conclusions go into JOB.md one by one via `/partjob decide`.
 8. First commit: the skeleton files. No push.
