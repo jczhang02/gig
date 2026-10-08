@@ -44,6 +44,13 @@ fi
 exit "$(cat "$d/$sub.exit")"
 "#;
 
+/// An RFC 3339 UTC time `days` from now, for [`Reply::whoami`]'s `expires_at`.
+pub fn days_from_now(days: i64) -> String {
+    (time::OffsetDateTime::now_utc() + time::Duration::days(days))
+        .format(&time::format_description::well_known::Rfc3339)
+        .expect("RFC 3339 formats any UTC time")
+}
+
 /// One canned reply: exit code, stdout, stderr.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Reply {
