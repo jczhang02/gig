@@ -596,6 +596,7 @@ impl Uploader for FakeUploader {
             expires_at: Some(1_900_000_000),
             provider: "s3:fake".into(),
             file_size: std::fs::metadata(local).unwrap().len(),
+            pwd: None,
         })
     }
 }

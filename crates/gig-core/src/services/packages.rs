@@ -395,6 +395,7 @@ mod tests {
                 expires_at: Some(1_900_000_000),
                 provider: "s3:fake".into(),
                 file_size: 3,
+                pwd: None,
             })
         }
     }
