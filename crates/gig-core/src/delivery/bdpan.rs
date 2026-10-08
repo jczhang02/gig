@@ -135,13 +135,22 @@ impl BdpanUploader {
     }
 
     /// Ask `bdpan whoami` (60 s timeout) whether the account is logged in.
-    /// The reply's token values are never kept.
+    /// The reply's token values are never kept. A whoami that fails (a
+    /// non-zero exit, a reply that is not JSON, a timeout) is an `upload`
+    /// error with bdpan's message; only the reply's login flags decide
+    /// [`LoginStatus::logged_in`].
     pub fn login_status(&self) -> Result<LoginStatus> {
         let reply = match self.call(&["whoami"], Some(self.call_timeout)) {
             Ok(v) => v,
             Err(CallError::Failed(m)) => {
-                return Err(Error::Secrets(format!(
-                    "bdpan whoami failed ({m}); {LOGIN_HINT}"
+                return Err(Error::Upload(format!(
+                    "bdpan whoami failed: {m}; if bdpan is logged out, {LOGIN_HINT}"
+                )))
+            }
+            Err(CallError::TimedOut(t)) => {
+                return Err(Error::Upload(format!(
+                    "bdpan whoami timed out after {} s",
+                    t.as_secs()
                 )))
             }
             Err(e) => return Err(e.into_error(&self.bin, "whoami")),
@@ -490,7 +499,8 @@ mod tests {
         std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
         let plain = dir.path().join("plain");
         std::fs::write(&plain, "").unwrap();
-        let path = Some(std::env::join_paths(["/nonexistent-gig-dir".as_ref(), dir.path()]).unwrap());
+        let path =
+            Some(std::env::join_paths(["/nonexistent-gig-dir".as_ref(), dir.path()]).unwrap());
 
         assert_eq!(find_bin("bdpan", path.clone()), Some(exe.clone()));
         assert_eq!(find_bin(exe.to_str().unwrap(), None), Some(exe.clone()));
@@ -789,7 +799,37 @@ mod tests {
 
             s.fake.hang("whoami", 30).unwrap();
             let err = uploader.upload(&s.local, &opts("a/b.zip")).unwrap_err();
-            assert!(err.to_string().contains("timed out"), "{err}");
+            assert_eq!(err.code(), "upload");
+            assert!(err.to_string().contains("bdpan whoami timed out"), "{err}");
+        }
+
+        #[test]
+        fn a_whoami_that_fails_otherwise_is_an_upload_error_with_bdpan_s_message() {
+            for (reply, says) in [
+                (
+                    Reply::fail(1, "Error: 网络连接失败\nUsage:\n  bdpan whoami\n"),
+                    "网络连接失败",
+                ),
+                (
+                    Reply {
+                        exit: 0,
+                        stdout: "not json".into(),
+                        stderr: String::new(),
+                    },
+                    "not JSON",
+                ),
+            ] {
+                let s = setup();
+                s.fake.reply("whoami", reply).unwrap();
+                let err = s.uploader.upload(&s.local, &opts("a/b.zip")).unwrap_err();
+                assert_eq!(err.code(), "upload");
+                let msg = err.to_string();
+                assert!(msg.contains(says), "{msg}");
+                assert!(!msg.contains("Usage"), "{msg}");
+                // Logged out is one possible cause, so the hint stays.
+                assert!(msg.contains("! bdpan login"), "{msg}");
+                assert_eq!(s.fake.calls().len(), 1);
+            }
         }
 
         #[test]

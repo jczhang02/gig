@@ -6,7 +6,7 @@ use crate::models::{OrderStatus, PackageStatus};
 use crate::package::validate::gitignore_covers_delivery;
 use crate::repo::{orders as repo_orders, packages};
 use crate::services::Ctx;
-use crate::{secrets, templates, Result};
+use crate::{secrets, templates, Error, Result};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use time::{Duration, OffsetDateTime};
@@ -181,6 +181,11 @@ pub fn run(ctx: &Ctx, fix: bool) -> Result<Report> {
 /// bdpan owns its login: ask `whoami` and report, never fix.
 fn check_bdpan(delivery: &Delivery, problems: &mut Vec<Problem>, warnings: &mut Vec<Problem>) {
     match BdpanUploader::new(delivery).login_status() {
+        // The message alone: the scope already says bdpan, and "upload
+        // failed: ..." would misread a doctor check.
+        Err(Error::Upload(m) | Error::Config(m) | Error::Secrets(m)) => {
+            problem(problems, "bdpan", m)
+        }
         Err(e) => problem(problems, "bdpan", e.to_string()),
         Ok(s) if !s.logged_in => problem(problems, "bdpan", NOT_LOGGED_IN),
         Ok(LoginStatus {

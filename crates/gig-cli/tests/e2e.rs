@@ -755,6 +755,25 @@ mod doctor_bdpan {
     }
 
     #[test]
+    fn a_whoami_that_fails_is_a_problem_in_bdpan_s_words() {
+        let env = Env::new();
+        let fake = FakeBdpan::install(env.root.path()).unwrap();
+        fake.reply("whoami", Reply::fail(1, "Error: 网络连接失败\nUsage:\n"))
+            .unwrap();
+        use_bdpan(&env, &fake.bin());
+
+        let r = env.ok(&["doctor"]);
+
+        let problems = entries(&r, "problems");
+        assert_eq!(problems.len(), 1, "{r}");
+        assert!(
+            problems[0].starts_with("bdpan: bdpan whoami failed: 网络连接失败"),
+            "{r}"
+        );
+        assert!(!problems[0].contains("upload failed"), "{r}");
+    }
+
+    #[test]
     fn a_token_that_expires_within_7_days_is_a_warning_with_the_date() {
         let env = Env::new();
         let fake = FakeBdpan::install(env.root.path()).unwrap();
