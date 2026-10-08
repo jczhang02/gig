@@ -24,9 +24,13 @@ still exit 0 with `code != 0` in its JSON.
   Platform API in Rust.
 - gig never reads or stores Baidu credentials. bdpan keeps its own login; when
   it is logged out, gig fails with `secrets` and tells JC to run `! bdpan login`.
+  A `whoami` that fails for another reason (exit code, a reply that is not
+  JSON, a timeout) is `upload` with bdpan's own message, not a login problem.
 - The result is a **Pan Share**: `url` is `<link>?pwd=<code>`, and `pwd` is also
-  returned on its own. The share period is the smallest of 1, 7, 30 days that
-  covers `link_ttl_seconds`, never permanent.
+  returned on its own; a share reply without a code is a failure. The share
+  period asked for is the smallest of 1, 7, 30 days that covers
+  `link_ttl_seconds`, never permanent; `expires_at` follows the period in
+  bdpan's reply.
 - No **Short Link** over a Pan Share. The link already carries the code, Baidu
   controls its expiry, and a redirect would only add a second thing that can
   expire. `delivery.short_link` applies to `s3:*` uploaders only.

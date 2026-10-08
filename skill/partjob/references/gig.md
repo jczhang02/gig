@@ -9,7 +9,7 @@ The full spec is `docs/v2/SPEC.md` in the gig repository. This lists what an age
 - Irreversible or outward commands need `--yes`; without it they only rehearse (`"dry_run": true`): `draft drop`, `package upload`, `package sent`, `artifact upload`, `archive`, `cancel`, `delete`.
 - Money is a decimal in major units, at most two fractional digits (`800`, `800.50`). Dates are `YYYY-MM-DD`.
 - Error codes: `not_found`, `invalid_state`, `invalid_input`, `unsafe_package`, `needs_check`, `needs_yes`, `config`, `secrets`, `upload`, `legacy_db`, `io`, `db`.
-- Uploads: `--uploader` overrides `delivery.uploader` for one upload. `bdpan` uploads to Baidu Netdisk and records channel `pan`; its `url` is the share link with the extraction code in it (`?pwd=`), `pwd` repeats the code, there is no `short_url`, and a `secrets` error means JC must run `! bdpan login`. `s3:<name>` uploads to object storage, records channel `oss` and shortens the link when short links are on.
+- Uploads: `--uploader` overrides `delivery.uploader` for one upload. `bdpan` uploads to Baidu Netdisk and records channel `pan`; its `url` is the share link with the extraction code in it (`?pwd=`), `pwd` repeats the code, there is no `short_url`, and a `secrets` error means JC must run `! bdpan login` (an `upload` error from `whoami` carries bdpan's own message). A dry run already refuses an unknown uploader name with `config`. `s3:<name>` uploads to object storage, records channel `oss` and shortens the link when short links are on.
 - States: `queued -> in_progress -> delivered -> paid -> archived`, plus `cancelled`. A preview changes no state. Packages may still be sent during the warranty (`paid`).
 
 ## Commands
