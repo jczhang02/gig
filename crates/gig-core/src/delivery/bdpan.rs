@@ -26,22 +26,36 @@ const DAY_SECONDS: u64 = 86_400;
 /// Timeout for `whoami` and `share`. `upload` has none.
 const CALL_TIMEOUT: Duration = Duration::from_secs(60);
 
+/// The text of [`LOGIN_HINT`], as a literal so `concat!` can reuse it.
+macro_rules! login_hint {
+    () => {
+        "run `! bdpan login`"
+    };
+}
+
 /// What to tell JC when bdpan is not logged in.
-pub const LOGIN_HINT: &str = "run `! bdpan login`";
+pub const LOGIN_HINT: &str = login_hint!();
 
 /// The message for a [`LoginStatus`] that is not logged in.
-pub const NOT_LOGGED_IN: &str =
-    "bdpan is not logged in or its token has expired; run `! bdpan login`";
+pub const NOT_LOGGED_IN: &str = concat!(
+    "bdpan is not logged in or its token has expired; ",
+    login_hint!()
+);
 
-/// Share periods bdpan accepts, in days. 0 (permanent) is never derived.
+/// Share periods bdpan accepts, in days, shortest first. 0 (permanent) is
+/// never derived.
 const SHARE_PERIODS: [u32; 3] = [1, 7, 30];
 
-/// The smallest share period that covers `ttl_seconds`, capped at 30 days.
+/// The longest share period gig asks for.
+const LONGEST_SHARE_PERIOD: u32 = SHARE_PERIODS[SHARE_PERIODS.len() - 1];
+
+/// The smallest share period that covers `ttl_seconds`, capped at the
+/// longest.
 pub fn share_period_days(ttl_seconds: u32) -> u32 {
     SHARE_PERIODS
         .into_iter()
         .find(|d| u64::from(*d) * DAY_SECONDS >= u64::from(ttl_seconds))
-        .unwrap_or(30)
+        .unwrap_or(LONGEST_SHARE_PERIOD)
 }
 
 /// True when `bin` names an executable file: a path as given, or a bare
