@@ -28,3 +28,6 @@ __pycache__/
 .beads/
 .pi/workflow-runs/
 docs/.vercel/
+
+# Local issue tracker (docs/agents/issue-tracker.md): PRDs and issues stay on this machine
+.scratch/
