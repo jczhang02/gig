@@ -28,7 +28,7 @@ When the arguments are not a subcommand name (JC speaks plainly: `/partjob the c
 | `preview [version]` | delivery | Show JC a preview candidate, then build and check the package |
 | `build [targets] [--via actions\|codebuild]` | delivery | Executables, only for orders whose decisions call for them; GitHub Actions by default, CodeBuild when the source must not go to a git host |
 | `pack [version]` | delivery | Build the full package, run the reproduction check, validate |
-| `send <package-id> [--via oss\|phone]` | delivery | Upload or send to the phone after JC approves |
+| `send <package-id> [--via pan\|oss\|phone]` | delivery | Upload to Baidu Netdisk (default) or object storage, or send to the phone, after JC approves |
 | `revise` | delivery / warranty | Client feedback: rework or scope change |
 | `paid [date] [amount]` | warranty | Record payment, compute the warranty end |
 | `archive` | warranty | Scorecard, report the dirty state, archive after approval |
