@@ -52,6 +52,7 @@ const ORDER_KEYS: &[Entry] = &[
     ("y", "copy link", ""),
     ("N", "new order", ""),
     ("a", "show archived", ""),
+    ("Tab", "uploader", "in the upload confirm"),
 ];
 
 const DRAFTS_KEYS: &[Entry] = &[
