@@ -543,6 +543,122 @@ fn bare_gig_without_a_terminal_still_requires_a_command() {
     assert!(!err.contains("--theme"), "{err}");
 }
 
+/// An in-progress order `up` with a checked package `up-v1`, the default
+/// uploader `s3:hk` (no keys), short links enabled (no token), and
+/// `delivery.bdpan.bin` pointing at a fake bdpan.
+#[cfg(unix)]
+fn order_with_fake_bdpan(
+    env: &Env,
+) -> (
+    tempfile::TempDir,
+    gig_core::delivery::bdpan::fake::FakeBdpan,
+) {
+    let bin_dir = tempfile::tempdir().unwrap();
+    let bdpan = gig_core::delivery::bdpan::fake::FakeBdpan::install(bin_dir.path()).unwrap();
+    let cfg = env.root.path().join("config/config.toml");
+    let mut text = fs::read_to_string(&cfg).unwrap();
+    text.push_str(&format!(
+        "[delivery]\nuploader = \"s3:hk\"\n[delivery.s3.hk]\nbucket = \"b\"\nregion = \"r\"\nendpoint = \"https://s3.example.test\"\n[delivery.short_link]\nenabled = true\nendpoint = \"https://go.example.test/api\"\n[delivery.bdpan]\nbin = {:?}\n",
+        bdpan.bin()
+    ));
+    fs::write(&cfg, text).unwrap();
+    env.ok(&["new", "up", "--title", "Up"]);
+    env.ok(&["start", "up"]);
+    let pkg = env.dev().join("up/delivery/up-v1");
+    fs::create_dir_all(&pkg).unwrap();
+    fs::write(pkg.join("manual.pdf"), "pdf").unwrap();
+    env.ok(&[
+        "package",
+        "build",
+        "up-v1",
+        "--order",
+        "up",
+        "--write-manifest",
+    ]);
+    (bin_dir, bdpan)
+}
+
+#[cfg(unix)]
+#[test]
+fn package_upload_picks_the_uploader() {
+    use gig_core::delivery::bdpan::fake;
+    let env = Env::new();
+    let (_bin_dir, bdpan) = order_with_fake_bdpan(&env);
+    let up = ["package", "upload", "up-v1", "--order", "up"];
+    let with = |extra: &[&'static str]| [&up[..], extra].concat();
+
+    // Dry runs name the uploader and run nothing.
+    assert_eq!(env.ok(&up)["uploader"], "s3:hk");
+    let dry = env.ok(&with(&["--uploader", "bdpan"]));
+    assert_eq!(dry["uploader"], "bdpan");
+    assert_eq!(dry["dry_run"], true);
+    assert!(bdpan.calls().is_empty());
+
+    // Unknown names are config errors; the S3 default still needs its keys.
+    assert_eq!(env.err(&with(&["--uploader", "nope", "--yes"])), "config");
+    assert_eq!(env.err(&with(&["--yes"])), "secrets");
+
+    // bdpan: channel pan, no short link even with short links enabled.
+    let sent = env.ok(&with(&["--uploader", "bdpan", "--yes"]));
+    assert_eq!(sent["package"]["status"], "sent");
+    assert_eq!(sent["package"]["channel"], "pan");
+    assert_eq!(sent["package"]["uploader"], "bdpan");
+    assert_eq!(sent["package"]["short_url"], Value::Null);
+    assert_eq!(sent["short_url"], Value::Null);
+    assert_eq!(sent["uploader"], "bdpan");
+    assert_eq!(sent["pwd"], fake::PWD);
+    assert_eq!(
+        sent["url"].as_str().unwrap(),
+        format!("{}?pwd={}", fake::LINK, fake::PWD)
+    );
+    assert_eq!(sent["order_status"], "delivered");
+    assert!(bdpan
+        .calls()
+        .iter()
+        .any(|c| c.contains("upload") && c.contains("gig/up/up-v1/")));
+}
+
+#[cfg(unix)]
+#[test]
+fn artifact_upload_picks_the_uploader() {
+    use gig_core::delivery::bdpan::fake;
+    let env = Env::new();
+    let (_bin_dir, bdpan) = order_with_fake_bdpan(&env);
+    let file = env.root.path().join("demo.mp4");
+    fs::write(&file, "video").unwrap();
+    let file = file.to_string_lossy().into_owned();
+    let up = ["artifact", "upload", "--order", "up", file.as_str()];
+    let with = |extra: &[&'static str]| [&up[..], extra].concat();
+
+    assert_eq!(env.ok(&up)["uploader"], "s3:hk");
+    assert_eq!(env.ok(&with(&["--uploader", "bdpan"]))["uploader"], "bdpan");
+    assert!(bdpan.calls().is_empty());
+    assert_eq!(env.err(&with(&["--uploader", "nope", "--yes"])), "config");
+    assert_eq!(env.err(&with(&["--yes"])), "secrets");
+
+    let d = env.ok(&with(&["--uploader", "bdpan", "--yes"]));
+    assert_eq!(d["artifact"]["uploader"], "bdpan");
+    assert_eq!(d["artifact"]["short_url"], Value::Null);
+    assert_eq!(d["short_url"], Value::Null);
+    assert_eq!(d["uploader"], "bdpan");
+    assert_eq!(d["pwd"], fake::PWD);
+    assert!(bdpan
+        .calls()
+        .iter()
+        .any(|c| c.contains("upload") && c.contains("gig/up/artifacts/")));
+}
+
+#[test]
+fn config_set_accepts_the_bdpan_uploader() {
+    let env = Env::new();
+    let v = env.ok(&["config", "set", "delivery.uploader", "bdpan"]);
+    assert_eq!(v["value"], "bdpan");
+    assert_eq!(
+        env.ok(&["config", "get", "delivery.uploader"])["value"],
+        "bdpan"
+    );
+}
+
 #[cfg(unix)]
 mod doctor_bdpan {
     use super::Env;

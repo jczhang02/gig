@@ -88,6 +88,12 @@ pub fn resolve_s3(config: &Config, paths: &Paths) -> Result<ResolvedS3> {
     let name = config.s3_uploader_name().ok_or_else(|| {
         Error::Config("delivery.uploader is not set to an s3:<name> target".into())
     })?;
+    resolve_s3_named(config, paths, name)
+}
+
+/// Resolve the S3 uploader `s3:<name>` with its credentials, whatever the
+/// configured default is.
+pub fn resolve_s3_named(config: &Config, paths: &Paths, name: &str) -> Result<ResolvedS3> {
     let s3 =
         config.delivery.s3.get(name).ok_or_else(|| {
             Error::Config(format!("no [delivery.s3.{name}] section in config.toml"))
@@ -155,8 +161,11 @@ pub fn availability(config: &Config, paths: &Paths) -> Vec<String> {
             problems.push(e.to_string());
         }
     }
-    if let Err(e) = resolve_short_link_token(config, paths) {
-        problems.push(e.to_string());
+    // Short links wrap S3 only; a bdpan default never needs the token.
+    if config.delivery.uploader != "bdpan" {
+        if let Err(e) = resolve_short_link_token(config, paths) {
+            problems.push(e.to_string());
+        }
     }
     problems
 }
@@ -214,6 +223,18 @@ mod tests {
         assert_eq!(load_file(&p).unwrap_err().code(), "secrets");
         write_file(&p, "[short_link]\ntoken = \"t\"\n").unwrap();
         assert_eq!(load_file(&p).unwrap().short_link.token, "t");
+    }
+
+    #[test]
+    fn availability_skips_short_link_token_for_bdpan() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::under_root(dir.path());
+        let mut cfg = Config::default();
+        cfg.delivery.short_link.enabled = true;
+        // Unchanged: no uploader set, short links on, no token -> reported.
+        assert_eq!(availability(&cfg, &paths).len(), 1);
+        cfg.delivery.uploader = "bdpan".into();
+        assert!(availability(&cfg, &paths).is_empty());
     }
 
     #[test]

@@ -438,6 +438,9 @@ pub struct PackageUploadArgs {
     #[arg(long)]
     pub order: Option<String>,
     pub package_id: String,
+    /// Uploader for this upload: bdpan or s3:<name> (default: delivery.uploader)
+    #[arg(long)]
+    pub uploader: Option<String>,
     #[arg(long)]
     pub yes: bool,
 }
@@ -477,6 +480,9 @@ pub struct ArtifactUploadArgs {
     #[arg(long)]
     pub order: Option<String>,
     pub file: String,
+    /// Uploader for this upload: bdpan or s3:<name> (default: delivery.uploader)
+    #[arg(long)]
+    pub uploader: Option<String>,
     #[arg(long)]
     pub yes: bool,
 }
