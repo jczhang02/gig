@@ -165,8 +165,9 @@ impl BdpanUploader {
         }
     }
 
-    /// Share `remote` for `days`; returns `(link, pwd)`.
-    fn share(&self, remote: &str, days: u32) -> Result<(String, Option<String>)> {
+    /// Share `remote`, asking for `days`. A reply without an https link or
+    /// without an extraction code is a failure: a Pan Share carries both.
+    fn share(&self, remote: &str, days: u32) -> Result<Share> {
         let failed = |m: String| {
             Error::Upload(format!(
                 "uploaded to bdpan at {remote} but sharing it failed: {m}"
@@ -178,7 +179,12 @@ impl BdpanUploader {
                 Some(self.call_timeout),
             )
             .map_err(|e| failed(e.message()))?;
-        share_details(&reply).ok_or_else(|| failed("the reply has no https share link".into()))
+        let share = share_details(&reply)
+            .ok_or_else(|| failed("the reply has no https share link".into()))?;
+        if share.pwd.is_empty() {
+            return Err(failed("the reply has no extraction code (pwd)".into()));
+        }
+        Ok(share)
     }
 
     /// Run bdpan with `args` and return its JSON reply when it succeeded.
@@ -231,23 +237,22 @@ impl Uploader for BdpanUploader {
         }
         opts.report(file_size, file_size);
         let days = share_period_days(self.link_ttl_seconds);
-        let (link, pwd) = self.share(&remote, days)?;
-        let url = match &pwd {
-            Some(p) => {
-                let sep = if link.contains('?') { '&' } else { '?' };
-                format!("{link}{sep}pwd={p}")
-            }
-            None => link,
+        let shared_at = OffsetDateTime::now_utc().unix_timestamp();
+        let share = self.share(&remote, days)?;
+        let sep = if share.link.contains('?') { '&' } else { '?' };
+        let url = format!("{}{sep}pwd={}", share.link, share.pwd);
+        // bdpan's reply says how long the share lasts; 0 is permanent.
+        let expires_at = match share.period_days.unwrap_or(days) {
+            0 => None,
+            d => Some(shared_at + i64::from(d) * DAY_SECONDS as i64),
         };
-        let expires_at =
-            OffsetDateTime::now_utc().unix_timestamp() + i64::from(days) * DAY_SECONDS as i64;
         Ok(UploadResult {
             url,
             short_url: None,
-            expires_at: Some(expires_at),
+            expires_at,
             provider: "bdpan".into(),
             file_size,
-            pwd,
+            pwd: Some(share.pwd),
         })
     }
 }
@@ -396,19 +401,33 @@ fn stderr_error(stderr: &str) -> Option<String> {
     Some(line.trim_start_matches("Error:").trim().to_string())
 }
 
-/// `(link, pwd)` from a share reply, at the top level or under `data`.
-fn share_details(value: &Value) -> Option<(String, Option<String>)> {
+/// What a share reply gives: the link, the extraction code ("" when the
+/// reply has none) and the period in days, when the reply says.
+#[derive(Debug, PartialEq, Eq)]
+struct Share {
+    link: String,
+    pwd: String,
+    period_days: Option<u32>,
+}
+
+/// The [`Share`] in a reply with an https `link`, at the top level or under
+/// `data`.
+fn share_details(value: &Value) -> Option<Share> {
     let obj = value.as_object()?;
     if let Some(link) = obj.get("link").and_then(Value::as_str) {
         if !link.starts_with("https://") {
             return None;
         }
-        let pwd = obj
-            .get("pwd")
-            .and_then(Value::as_str)
-            .filter(|p| !p.is_empty())
-            .map(str::to_string);
-        return Some((link.to_string(), pwd));
+        let pwd = obj.get("pwd").and_then(Value::as_str).unwrap_or_default();
+        let period_days = obj
+            .get("period")
+            .and_then(Value::as_u64)
+            .and_then(|d| u32::try_from(d).ok());
+        return Some(Share {
+            link: link.to_string(),
+            pwd: pwd.to_string(),
+            period_days,
+        });
     }
     share_details(obj.get("data")?)
 }
@@ -623,6 +642,55 @@ mod tests {
                     format!("--json --no-check-update share {remote} --period 7"),
                 ]
             );
+        }
+
+        /// `expires_at` of an upload whose share reply is `share`, and the
+        /// time just before the upload.
+        fn expires_with_share_reply(share: Reply) -> (i64, i64) {
+            let s = setup();
+            s.fake.reply("share", share).unwrap();
+            let before = time::OffsetDateTime::now_utc().unix_timestamp();
+            let r = s.uploader.upload(&s.local, &opts("a/b.zip")).unwrap();
+            assert!(s.fake.calls()[2].ends_with(" --period 7"));
+            (r.expires_at.unwrap(), before)
+        }
+
+        #[test]
+        fn expires_at_follows_the_period_bdpan_replies_with() {
+            // Asked for 7 days (the default TTL), bdpan says 30.
+            let (expires, before) = expires_with_share_reply(Reply::share_ok(30));
+            assert!((before + 30 * 86_400..=before + 30 * 86_400 + 5).contains(&expires));
+        }
+
+        #[test]
+        fn a_permanent_share_in_the_reply_has_no_expiry() {
+            let s = setup();
+            s.fake.reply("share", Reply::share_ok(0)).unwrap();
+            let r = s.uploader.upload(&s.local, &opts("a/b.zip")).unwrap();
+            assert_eq!(r.expires_at, None);
+        }
+
+        #[test]
+        fn without_a_period_in_the_reply_expires_at_uses_the_requested_days() {
+            let reply = Reply::json(serde_json::json!({"link": fake::LINK, "pwd": fake::PWD}));
+            let (expires, before) = expires_with_share_reply(reply);
+            assert!((before + 7 * 86_400..=before + 7 * 86_400 + 5).contains(&expires));
+        }
+
+        #[test]
+        fn a_share_reply_without_a_pwd_is_a_share_failure() {
+            for reply in [
+                serde_json::json!({"link": fake::LINK, "period": 7}),
+                serde_json::json!({"link": fake::LINK, "period": 7, "pwd": ""}),
+            ] {
+                let s = setup();
+                s.fake.reply("share", Reply::json(reply)).unwrap();
+                let err = s.uploader.upload(&s.local, &opts("a/b.zip")).unwrap_err();
+                assert_eq!(err.code(), "upload");
+                let msg = err.to_string();
+                assert!(msg.contains("gig/a/b.zip"), "{msg}");
+                assert!(msg.contains("pwd"), "{msg}");
+            }
         }
 
         #[test]
