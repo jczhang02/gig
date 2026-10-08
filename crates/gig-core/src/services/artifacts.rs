@@ -17,6 +17,11 @@ pub struct ArtifactUpload {
     pub size: u64,
     pub url: Option<String>,
     pub short_url: Option<String>,
+    /// The uploader used, or the one a dry run would use.
+    pub uploader: String,
+    /// The Pan Share extraction code, when the uploader returned one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pwd: Option<String>,
     pub dry_run: bool,
 }
 
@@ -53,6 +58,8 @@ pub fn upload(
             size: meta.len(),
             url: None,
             short_url: None,
+            uploader: uploader.name().to_string(),
+            pwd: None,
             dry_run: true,
         });
     }
@@ -96,6 +103,8 @@ pub fn upload(
         size: result.file_size,
         url: Some(result.url),
         short_url: result.short_url,
+        uploader: uploader.name().to_string(),
+        pwd: result.pwd,
         dry_run: false,
     })
 }

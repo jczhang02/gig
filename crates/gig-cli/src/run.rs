@@ -255,20 +255,21 @@ fn run_with_db(ctx: &Ctx, cmd: Command) -> Result<Output> {
                 out_with(r, w)
             }
             PackageCmd::Upload(a) => {
+                let name = uploader_name(ctx, a.uploader.as_deref());
                 if !a.yes {
-                    // Dry run needs no uploader.
+                    // Dry run builds no uploader; it only names it.
                     let r = packages::upload(
                         ctx,
                         a.order.as_deref(),
                         &a.package_id,
                         false,
-                        &NoUploader,
+                        &NoUploader(name),
                     )?;
                     let w = r.warnings.clone();
                     return out_with(r, w);
                 }
                 packages::preflight(ctx, a.order.as_deref(), &a.package_id)?;
-                let uploader = delivery::configured_uploader(&ctx.config, &ctx.paths)?;
+                let uploader = delivery::uploader_by_name(&ctx.config, &ctx.paths, name)?;
                 let r = packages::upload(
                     ctx,
                     a.order.as_deref(),
@@ -300,16 +301,17 @@ fn run_with_db(ctx: &Ctx, cmd: Command) -> Result<Output> {
         Command::Artifact(ar) => match ar {
             ArtifactCmd::Upload(a) => {
                 let file = PathBuf::from(&a.file);
+                let name = uploader_name(ctx, a.uploader.as_deref());
                 if !a.yes {
                     return out(artifacts::upload(
                         ctx,
                         a.order.as_deref(),
                         &file,
                         false,
-                        &NoUploader,
+                        &NoUploader(name),
                     )?);
                 }
-                let uploader = delivery::configured_uploader(&ctx.config, &ctx.paths)?;
+                let uploader = delivery::uploader_by_name(&ctx.config, &ctx.paths, name)?;
                 out(artifacts::upload(
                     ctx,
                     a.order.as_deref(),
@@ -348,12 +350,22 @@ fn run_with_db(ctx: &Ctx, cmd: Command) -> Result<Output> {
     }
 }
 
-/// Placeholder for dry runs; never uploads.
-struct NoUploader;
+/// The uploader `--uploader` names, else the configured default.
+fn uploader_name<'a>(ctx: &'a Ctx, flag: Option<&'a str>) -> &'a str {
+    flag.unwrap_or(&ctx.config.delivery.uploader)
+}
 
-impl delivery::Uploader for NoUploader {
+/// Placeholder for dry runs: carries the name of the uploader a real run
+/// would use ("none" when none is set); never uploads.
+struct NoUploader<'a>(&'a str);
+
+impl delivery::Uploader for NoUploader<'_> {
     fn name(&self) -> &str {
-        "none"
+        if self.0.is_empty() {
+            "none"
+        } else {
+            self.0
+        }
     }
     fn upload(
         &self,
