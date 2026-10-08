@@ -167,9 +167,28 @@ impl ShortLinker for HttpShortLinker {
     }
 }
 
-/// The configured uploader, wrapped with the short linker when enabled.
+/// The configured default uploader (`delivery.uploader`); see
+/// [`uploader_by_name`].
 pub fn configured_uploader(config: &Config, paths: &Paths) -> Result<Box<dyn Uploader>> {
-    let resolved = secrets::resolve_s3(config, paths)?;
+    uploader_by_name(config, paths, &config.delivery.uploader)
+}
+
+/// Build the uploader called `name`: `bdpan`, or `s3:<name>` for a
+/// `[delivery.s3.<name>]` table. Only S3 is wrapped with the short linker
+/// (when short links are enabled); a Pan Share is never shortened. Any other
+/// name is a config error.
+pub fn uploader_by_name(config: &Config, paths: &Paths, name: &str) -> Result<Box<dyn Uploader>> {
+    if name == "bdpan" {
+        return Ok(Box::new(BdpanUploader::new(&config.delivery)));
+    }
+    let Some(s3_name) = name.strip_prefix("s3:").filter(|n| !n.is_empty()) else {
+        return Err(Error::Config(if name.is_empty() {
+            "delivery.uploader is not set; use bdpan or s3:<name>".into()
+        } else {
+            format!("unknown uploader {name:?}; use bdpan or s3:<name>")
+        }));
+    };
+    let resolved = secrets::resolve_s3_named(config, paths, s3_name)?;
     let s3 = S3Uploader::new(&resolved)?;
     match secrets::resolve_short_link_token(config, paths)? {
         Some(token) => {
@@ -321,6 +340,81 @@ mod tests {
         // Without a callback, reporting is a no-op.
         UploadOpts::default().report(1, 1);
         assert!(format!("{opts:?}").contains("progress: Some"));
+    }
+
+    fn config_with_s3_and_short_links(dir: &Path) -> (Config, Paths) {
+        let paths = Paths::under_root(dir);
+        let mut cfg = Config::default();
+        cfg.delivery.uploader = "s3:default".into();
+        for name in ["default", "hk"] {
+            cfg.delivery.s3.insert(
+                name.into(),
+                crate::config::S3 {
+                    bucket: "b".into(),
+                    region: "r".into(),
+                    endpoint: "https://s3.example.test".into(),
+                    ..Default::default()
+                },
+            );
+        }
+        cfg.delivery.short_link.enabled = true;
+        cfg.delivery.short_link.endpoint = "https://go.example.test/api".into();
+        (cfg, paths)
+    }
+
+    fn by_name_err(cfg: &Config, paths: &Paths, name: &str) -> Error {
+        match uploader_by_name(cfg, paths, name) {
+            Ok(u) => panic!("{name} should be refused, built {}", u.name()),
+            Err(e) => e,
+        }
+    }
+
+    #[test]
+    fn bdpan_is_built_without_short_link_secrets() {
+        let dir = tempfile::tempdir().unwrap();
+        // Short links on, but no token and no S3 keys anywhere.
+        let (cfg, paths) = config_with_s3_and_short_links(dir.path());
+        let u = uploader_by_name(&cfg, &paths, "bdpan").unwrap();
+        assert_eq!(u.name(), "bdpan");
+    }
+
+    #[test]
+    fn s3_by_name_overrides_the_configured_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut cfg, paths) = config_with_s3_and_short_links(dir.path());
+        cfg.delivery.short_link.enabled = false;
+        secrets::write_file(
+            &paths.secrets_file,
+            "[s3.hk]\naccess_key = \"AK\"\nsecret_key = \"SK\"\n",
+        )
+        .unwrap();
+        assert_eq!(
+            uploader_by_name(&cfg, &paths, "s3:hk").unwrap().name(),
+            "s3:hk"
+        );
+        // The default has no keys: still the secrets error it always was.
+        assert_eq!(
+            match configured_uploader(&cfg, &paths) {
+                Ok(_) => panic!("s3:default has no keys"),
+                Err(e) => e.code(),
+            },
+            "secrets"
+        );
+        // S3 still needs the short link token when short links are on.
+        cfg.delivery.short_link.enabled = true;
+        assert_eq!(by_name_err(&cfg, &paths, "s3:hk").code(), "secrets");
+    }
+
+    #[test]
+    fn unknown_uploader_names_are_config_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        let (cfg, paths) = config_with_s3_and_short_links(dir.path());
+        for name in ["", "nope", "s3:", "s3:missing", "bdpan:work", "BDPAN"] {
+            assert_eq!(by_name_err(&cfg, &paths, name).code(), "config", "{name}");
+        }
+        assert!(by_name_err(&cfg, &paths, "nope")
+            .to_string()
+            .contains("bdpan or s3:<name>"));
     }
 
     #[test]
