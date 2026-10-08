@@ -14,6 +14,7 @@ use std::path::Path;
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
+use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
 const DAY_SECONDS: u64 = 86_400;
@@ -21,7 +22,12 @@ const DAY_SECONDS: u64 = 86_400;
 /// Timeout for `whoami` and `share`. `upload` has none.
 const CALL_TIMEOUT: Duration = Duration::from_secs(60);
 
-const LOGIN_HINT: &str = "run `! bdpan login`";
+/// What to tell JC when bdpan is not logged in.
+pub const LOGIN_HINT: &str = "run `! bdpan login`";
+
+/// The message for a [`LoginStatus`] that is not logged in.
+pub const NOT_LOGGED_IN: &str =
+    "bdpan is not logged in or its token has expired; run `! bdpan login`";
 
 /// Share periods bdpan accepts, in days. 0 (permanent) is never derived.
 const SHARE_PERIODS: [u32; 3] = [1, 7, 30];
@@ -32,6 +38,15 @@ pub fn share_period_days(ttl_seconds: u32) -> u32 {
         .into_iter()
         .find(|d| u64::from(*d) * DAY_SECONDS >= u64::from(ttl_seconds))
         .unwrap_or(30)
+}
+
+/// What `bdpan whoami` says about the login, without any token value.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoginStatus {
+    /// Authenticated and holding a valid token.
+    pub logged_in: bool,
+    /// When the token expires, if bdpan said so in a readable form.
+    pub expires_at: Option<OffsetDateTime>,
 }
 
 /// Uploads through the `bdpan` CLI to `<remote_root>/<object_key>` and
@@ -82,7 +97,9 @@ impl BdpanUploader {
         })
     }
 
-    fn ensure_logged_in(&self) -> Result<()> {
+    /// Ask `bdpan whoami` (60 s timeout) whether the account is logged in.
+    /// The reply's token values are never kept.
+    pub fn login_status(&self) -> Result<LoginStatus> {
         let reply = match self.call(&["whoami"], Some(self.call_timeout)) {
             Ok(v) => v,
             Err(CallError::Failed(m)) => {
@@ -93,12 +110,21 @@ impl BdpanUploader {
             Err(e) => return Err(e.into_error(&self.bin, "whoami")),
         };
         let flag = |k: &str| reply.get(k).and_then(Value::as_bool).unwrap_or(false);
-        if flag("authenticated") && flag("has_valid_token") {
+        let expires_at = reply
+            .get("expires_at")
+            .and_then(Value::as_str)
+            .and_then(|t| OffsetDateTime::parse(t, &Rfc3339).ok());
+        Ok(LoginStatus {
+            logged_in: flag("authenticated") && flag("has_valid_token"),
+            expires_at,
+        })
+    }
+
+    fn ensure_logged_in(&self) -> Result<()> {
+        if self.login_status()?.logged_in {
             Ok(())
         } else {
-            Err(Error::Secrets(format!(
-                "bdpan is not logged in or its token has expired; {LOGIN_HINT}"
-            )))
+            Err(Error::Secrets(NOT_LOGGED_IN.into()))
         }
     }
 
@@ -133,6 +159,7 @@ impl BdpanUploader {
             .spawn()
             .map_err(|e| match e.kind() {
                 io::ErrorKind::NotFound => CallError::NotFound,
+                io::ErrorKind::PermissionDenied => CallError::NotExecutable,
                 _ => CallError::Failed(format!("cannot run it: {e}")),
             })?;
         let stdout = drain(child.stdout.take());
@@ -191,6 +218,7 @@ impl Uploader for BdpanUploader {
 /// Why a bdpan call did not give a usable reply. Messages are redacted.
 enum CallError {
     NotFound,
+    NotExecutable,
     TimedOut(Duration),
     Failed(String),
 }
@@ -199,6 +227,7 @@ impl CallError {
     fn message(&self) -> String {
         match self {
             CallError::NotFound => "binary not found".into(),
+            CallError::NotExecutable => "binary not executable".into(),
             CallError::TimedOut(t) => format!("timed out after {} s", t.as_secs()),
             CallError::Failed(m) => m.clone(),
         }
@@ -208,6 +237,9 @@ impl CallError {
         match self {
             CallError::NotFound => Error::Config(format!(
                 "bdpan binary {bin:?} not found; install bdpan or set delivery.bdpan.bin"
+            )),
+            CallError::NotExecutable => Error::Config(format!(
+                "bdpan binary {bin:?} is not executable; fix its mode or set delivery.bdpan.bin"
             )),
             other => Error::Upload(format!("bdpan {subcommand}: {}", other.message())),
         }
@@ -592,6 +624,24 @@ mod tests {
                 assert!(err.to_string().contains("! bdpan login"), "{err}");
                 assert_eq!(s.fake.calls().len(), 1);
             }
+        }
+
+        #[test]
+        fn login_status_reads_the_live_expires_at_format() {
+            let s = setup();
+            // The shape bdpan 3.8.7 prints: nanoseconds and a local offset.
+            s.fake
+                .reply(
+                    "whoami",
+                    Reply::whoami(true, true, "2026-11-07T02:55:19.302803929-08:00"),
+                )
+                .unwrap();
+            let status = s.uploader.login_status().unwrap();
+            assert!(status.logged_in);
+            assert_eq!(
+                status.expires_at,
+                Some(time::macros::datetime!(2026-11-07 10:55:19.302803929 UTC))
+            );
         }
 
         #[test]
