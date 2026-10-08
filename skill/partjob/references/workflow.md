@@ -190,7 +190,7 @@ Project-specific (in the project's AGENTS.md, drafted per type and then complete
 [Decided] A preview convinces the client the work is done while being useless on its own:
 - Included: visual evidence of results (before/after comparisons, screenshots, metrics tables, the report's summary pages), a few processed results from the client's own samples (tk's 19 comparison images are the example), a short video or GIF of the program running.
 - Excluded: source code, executables, the full batch of results, the full report, copyable data files.
-- Form: a `<slug>-vX.Y.Z-preview/` package with the same manifest check and OSS short link; the client views it in a browser. Watermarking is JC's call.
+- Form: a `<slug>-vX.Y.Z-preview/` package with the same manifest check and upload; the client views it in a browser. Watermarking is JC's call.
 - Defaults by type: tool = comparison images and a demo GIF; reproduction / analysis = key figures and summary pages; writing = table of contents and one section.
 
 ### 5.2 Full delivery

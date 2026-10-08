@@ -9,7 +9,7 @@ Send a checked package out. JC approves; the agent acts. Without JC's explicit "
 
 ## Steps
 
-1. Rehearse: `gig package upload <package-id>` (no `--yes`). It returns `dry_run: true`, `size`, `uploader`, `warnings`. Tell JC the package id, size, kind (preview / full), the state change it causes (a full package moves the order to delivered) and the intended channel, then ask in one sentence: `网盘, OSS, or phone?`, plus "Send?". Default to pan when JC named no channel, but always offer the other two so one word switches it.
+1. Rehearse: `gig package upload <package-id>` (no `--yes`). It returns `dry_run: true`, `size`, `uploader` (only the configured default, not the channel JC picks), `warnings`. Tell JC the package id, size, kind (preview / full), the state change it causes (a full package moves the order to delivered) and the intended channel, then ask in one sentence: `网盘, OSS, or phone?`, plus "Send?". Default to pan when JC named no channel, but always offer the other two so one word switches it.
 2. After JC explicitly agrees:
    - pan: `gig package upload <package-id> --uploader bdpan --yes`. It returns `url` (the share link with `?pwd=` in it), `pwd` (the extraction code on its own), `expires_at` (Baidu ends the share then) and no `short_url`; a Pan Share is never shortened. A `secrets` error means bdpan is not logged in: ask JC to run `! bdpan login`, then retry; the agent cannot log in for JC. A failed upload after the file reached the netdisk names the remote path; a retry uploads again to a new directory.
    - oss: `gig package upload <package-id> --uploader s3:<name> --yes`. It returns `short_url` (or `url` when short links are off) and `expires_at`.
