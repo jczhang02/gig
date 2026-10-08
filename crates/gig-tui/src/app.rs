@@ -17,7 +17,7 @@ use crossterm::event::{
     MouseEventKind,
 };
 use gig_core::config::{Config, Tui};
-use gig_core::delivery::configured_uploader;
+use gig_core::delivery::uploader_by_name;
 use gig_core::models::Draft;
 use gig_core::services::Ctx;
 use gig_core::Result;
@@ -1316,13 +1316,13 @@ impl App {
         Ok(())
     }
 
-    /// Confirmed `u` or `U`: build the configured uploader (a secrets or
-    /// config error is shown verbatim), run the upload on a worker thread
+    /// Confirmed `u` or `U`: build the uploader the confirmation chose (a
+    /// secrets or config error is shown verbatim), run the upload on a worker thread
     /// while this thread draws the progress popup, then show the link and
     /// copy it. Keys pressed meanwhile are dropped: one upload at a time,
     /// and there is no cancel.
     fn upload(&mut self, job: &UploadJob, term: &mut Term) -> Result<()> {
-        let uploader = match configured_uploader(&self.ctx.config, &self.ctx.paths) {
+        let uploader = match uploader_by_name(&self.ctx.config, &self.ctx.paths, job.uploader()) {
             Ok(u) => u,
             Err(e) => {
                 self.ui.popup = Some(Popup::error(&e));

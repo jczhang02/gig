@@ -3,6 +3,7 @@
 //! $EDITOR round trip live in `actions` and `app`.
 
 use crate::actions::{Effect, FormKind};
+use crate::upload::UploadJob;
 use crate::mouse::{Hits, Pane, Target};
 use crate::text;
 use crate::theme::Theme;
@@ -297,7 +298,8 @@ pub enum Popup {
     Form(Form),
     Pick(Pick),
     /// A dangerous action waits for a typed `y`; scroll keys scroll, any
-    /// other key cancels.
+    /// other key cancels. An upload also shows its uploader, and `Tab`
+    /// switches it.
     Confirm {
         title: String,
         lines: Vec<String>,
@@ -307,6 +309,9 @@ pub enum Popup {
         /// Destructive (cancel): the title is drawn in the error colour.
         /// Routine steps (upload, mark sent) are not.
         danger: bool,
+        /// The uploaders `Tab` cycles through when `then` is an upload
+        /// (`delivery::uploader_choices`); empty otherwise.
+        uploaders: Vec<String>,
     },
     /// A running upload. Drawn by the blocking upload loop, which reads no
     /// keys, so it never closes by key.
@@ -413,7 +418,7 @@ impl Popup {
         }
     }
 
-    /// A routine confirmation (upload, mark sent).
+    /// A routine confirmation (mark sent).
     pub fn confirm(title: impl Into<String>, lines: Vec<String>, then: Effect) -> Self {
         Popup::Confirm {
             title: title.into(),
@@ -421,27 +426,32 @@ impl Popup {
             then,
             scroll: Scroll::default(),
             danger: false,
+            uploaders: Vec::new(),
         }
+    }
+
+    /// An upload confirmation: `job` starts with the default uploader, and
+    /// `Tab` switches among `uploaders`.
+    pub fn confirm_upload(
+        title: impl Into<String>,
+        lines: Vec<String>,
+        job: UploadJob,
+        uploaders: Vec<String>,
+    ) -> Self {
+        let mut p = Self::confirm(title, lines, Effect::Upload(job));
+        if let Popup::Confirm { uploaders: u, .. } = &mut p {
+            *u = uploaders;
+        }
+        p
     }
 
     /// A destructive confirmation (cancel an order).
     pub fn confirm_danger(title: impl Into<String>, lines: Vec<String>, then: Effect) -> Self {
-        match Self::confirm(title, lines, then) {
-            Popup::Confirm {
-                title,
-                lines,
-                then,
-                scroll,
-                ..
-            } => Popup::Confirm {
-                title,
-                lines,
-                then,
-                scroll,
-                danger: true,
-            },
-            other => other,
+        let mut p = Self::confirm(title, lines, then);
+        if let Popup::Confirm { danger, .. } = &mut p {
+            *danger = true;
         }
+        p
     }
 
     pub fn handle_key(&mut self, key: KeyEvent) -> PopupKey {
@@ -458,9 +468,21 @@ impl Popup {
             Popup::Form(form) => form.key(key),
             Popup::Pick(pick) => pick.key(key),
             Popup::Progress { .. } | Popup::Busy { .. } => PopupKey::None,
-            Popup::Confirm { scroll, .. } => match key.code {
+            Popup::Confirm {
+                scroll,
+                then,
+                uploaders,
+                ..
+            } => match key.code {
                 // Only a plain `y` confirms; Ctrl+Y or Alt+Y cancels.
                 KeyCode::Char('y') if !chord => PopupKey::Confirmed,
+                // An upload switches its uploader; it never cancels on Tab.
+                KeyCode::Tab if !chord && matches!(then, Effect::Upload(_)) => {
+                    if let Effect::Upload(job) = then {
+                        job.next_uploader(uploaders);
+                    }
+                    PopupKey::None
+                }
                 // The same scroll keys as a message.
                 KeyCode::Up
                 | KeyCode::Down
@@ -631,6 +653,25 @@ pub(crate) fn hint_line(t: &Theme, pairs: &[(&str, &str)]) -> Line<'static> {
     Line::from(spans)
 }
 
+/// The body of a confirmation as drawn: its lines, then for an upload the
+/// uploader `y` will use ("none" when the default is unset).
+pub fn confirm_body(lines: &[String], then: &Effect) -> Vec<String> {
+    let mut body = lines.to_vec();
+    if let Effect::Upload(job) = then {
+        let name = match job.uploader() {
+            "" => "none",
+            name => name,
+        };
+        body.push(format!("uploader: {name}"));
+    }
+    body
+}
+
+/// True when `Tab` would show another uploader.
+fn can_switch_uploader(then: &Effect, uploaders: &[String]) -> bool {
+    matches!(then, Effect::Upload(job) if uploaders.iter().any(|u| u != job.uploader()))
+}
+
 pub fn render(frame: &mut Frame, area: Rect, popup: &Popup, theme: &Theme, hits: &Hits) {
     let t = theme;
     let (width, tone) = match popup {
@@ -678,12 +719,18 @@ pub fn render(frame: &mut Frame, area: Rect, popup: &Popup, theme: &Theme, hits:
         Popup::Confirm {
             title,
             lines,
+            then,
             scroll,
+            uploaders,
             ..
         } => (
             title.clone(),
-            confirm_lines(lines, t, inner_w),
-            hint_line(t, &[("y", "yes"), ("Esc", "no")]),
+            confirm_lines(&confirm_body(lines, then), t, inner_w),
+            if can_switch_uploader(then, uploaders) {
+                hint_line(t, &[("y", "yes"), ("Tab", "uploader"), ("Esc", "no")])
+            } else {
+                hint_line(t, &[("y", "yes"), ("Esc", "no")])
+            },
             Some(scroll),
         ),
         Popup::Progress {
@@ -1212,6 +1259,38 @@ mod tests {
         f.key(key(KeyCode::Tab));
         assert_eq!(f.key(key(KeyCode::Enter)), PopupKey::Submit);
         assert_eq!(f.get("slug"), "fixed");
+    }
+
+    #[test]
+    fn tab_switches_an_upload_and_cancels_anything_else() {
+        let job = |uploader: &str| crate::upload::UploadJob::Package {
+            slug: "a".into(),
+            package_id: "a-v1".into(),
+            uploader: uploader.into(),
+        };
+        let shown = |p: &Popup| match p {
+            Popup::Confirm { lines, then, .. } => confirm_body(lines, then).join("\n"),
+            other => panic!("{other:?}"),
+        };
+        // One choice: Tab moves to it, then stays; the hint goes away.
+        let mut p = Popup::confirm_upload("upload", vec![], job(""), vec!["s3:a".into()]);
+        assert_eq!(shown(&p), "uploader: none");
+        assert!(screen(&p, 80, 24).contains("y yes  Tab uploader  Esc no"));
+        assert_eq!(p.handle_key(key(KeyCode::Tab)), PopupKey::None);
+        assert_eq!(shown(&p), "uploader: s3:a");
+        assert_eq!(p.handle_key(key(KeyCode::Tab)), PopupKey::None);
+        assert_eq!(shown(&p), "uploader: s3:a");
+        let text = screen(&p, 80, 24);
+        assert!(text.contains("y yes  Esc no"), "{text}");
+        assert!(text.contains("uploader  s3:a"), "{text}");
+        // Nothing configured at all: Tab still does not cancel the upload.
+        let mut p = Popup::confirm_upload("upload", vec![], job(""), vec![]);
+        assert_eq!(p.handle_key(key(KeyCode::Tab)), PopupKey::None);
+        assert_eq!(shown(&p), "uploader: none");
+        // Other confirmations show no uploader and cancel on Tab.
+        let mut p = Popup::confirm("mark sent", vec!["Record it?".into()], Effect::None);
+        assert_eq!(shown(&p), "Record it?");
+        assert_eq!(p.handle_key(key(KeyCode::Tab)), PopupKey::Close);
     }
 
     #[test]

@@ -11,6 +11,7 @@ use crate::data::{self, OrderRow};
 use crate::popup::{Field, Form, Pick, PickFor, Popup, PopupKey};
 use crate::upload::{self, NoUploader, UploadJob};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use gig_core::delivery;
 use gig_core::models::{Channel, Draft, ProjectType};
 use gig_core::money::{format_minor, parse_amount};
 use gig_core::services::{archive, artifacts, drafts, orders, packages, Ctx};
@@ -154,8 +155,8 @@ pub enum Effect {
     EditFile(PathBuf),
     /// Put a link on the clipboard, or show it when there is none.
     Copy(String),
-    /// Build the configured uploader and run the upload with a progress
-    /// popup, then show and copy the link (`App::upload`).
+    /// Build the job's uploader and run the upload with a progress popup,
+    /// then show and copy the link (`App::upload`).
     Upload(UploadJob),
 }
 
@@ -731,13 +732,15 @@ pub fn run(ctx: &Ctx, action: &Action) -> Result<Option<Popup>> {
             ];
             lines.extend(dry.warnings.iter().map(|w| format!("warning: {w}")));
             lines.push("The link is copied to the clipboard when done.".into());
-            Ok(Some(Popup::confirm(
+            Ok(Some(Popup::confirm_upload(
                 format!("upload {package_id}"),
                 lines,
-                Effect::Upload(UploadJob::Package {
+                UploadJob::Package {
                     slug: slug.clone(),
                     package_id: package_id.clone(),
-                }),
+                    uploader: ctx.config.delivery.uploader.clone(),
+                },
+                delivery::uploader_choices(&ctx.config.delivery),
             )))
         }
         Action::SentPreview(m) => {
@@ -794,7 +797,7 @@ pub fn run(ctx: &Ctx, action: &Action) -> Result<Option<Popup>> {
             }
             let file = upload::expand_home(path);
             let dry = artifacts::upload(ctx, Some(slug), &file, false, &NoUploader)?;
-            Ok(Some(Popup::confirm(
+            Ok(Some(Popup::confirm_upload(
                 format!("upload artifact {slug}"),
                 vec![
                     format!("Upload {} for {slug}?", dry.local_path),
@@ -806,10 +809,12 @@ pub fn run(ctx: &Ctx, action: &Action) -> Result<Option<Popup>> {
                     "The order status does not change.".into(),
                     "The link is copied to the clipboard when done.".into(),
                 ],
-                Effect::Upload(UploadJob::Artifact {
+                UploadJob::Artifact {
                     slug: slug.clone(),
                     path: dry.local_path.into(),
-                }),
+                    uploader: ctx.config.delivery.uploader.clone(),
+                },
+                delivery::uploader_choices(&ctx.config.delivery),
             )))
         }
         Action::NewOrder(n) => {

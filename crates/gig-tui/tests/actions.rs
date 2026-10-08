@@ -636,11 +636,115 @@ fn with_checked_package(h: &mut Harness, slug: &str, kind: PackageKind) -> (i64,
     (id, pkg)
 }
 
+/// A confirmation as drawn: title, then the body.
 fn confirm_text(h: &Harness) -> String {
     match &h.ui.popup {
-        Some(Popup::Confirm { title, lines, .. }) => format!("{title}\n{}", lines.join("\n")),
+        Some(Popup::Confirm {
+            title, lines, then, ..
+        }) => format!(
+            "{title}\n{}",
+            gig_tui::popup::confirm_body(lines, then).join("\n")
+        ),
         other => panic!("expected a confirmation, got {other:?}"),
     }
+}
+
+/// S3 tables `a` and `b` with `s3:a` as the default, and `[delivery.bdpan]`
+/// pointing at `bin`.
+fn with_uploaders(h: &mut Harness, bin: &Path) {
+    let d = &mut h.ctx.config.delivery;
+    d.uploader = "s3:a".into();
+    for name in ["a", "b"] {
+        d.s3.insert(
+            name.into(),
+            gig_core::config::S3 {
+                bucket: "bucket".into(),
+                region: "r".into(),
+                endpoint: "https://s3.example.test".into(),
+                ..Default::default()
+            },
+        );
+    }
+    d.bdpan.bin = bin.to_string_lossy().into_owned();
+}
+
+/// The uploader line of the open confirmation.
+fn uploader_shown(h: &Harness) -> String {
+    let text = confirm_text(h);
+    text.lines()
+        .find_map(|l| l.strip_prefix("uploader: "))
+        .unwrap_or_else(|| panic!("no uploader line in {text}"))
+        .to_string()
+}
+
+#[test]
+fn tab_switches_the_uploader_of_an_upload_confirm() {
+    let mut h = Harness::new();
+    let bin = h._dir.path().join("no-bdpan-here");
+    with_uploaders(&mut h, &bin);
+    let (_, pkg) = with_checked_package(&mut h, "tk-tab", PackageKind::Full);
+
+    h.key(KeyCode::Char('u'));
+    h.key(KeyCode::Enter);
+    // The default from the config first; Tab visits bdpan, then each S3
+    // table, and wraps.
+    assert_eq!(uploader_shown(&h), "s3:a");
+    let mut seen = Vec::new();
+    for _ in 0..4 {
+        h.key(KeyCode::Tab);
+        seen.push(uploader_shown(&h));
+    }
+    assert_eq!(seen, ["s3:b", "bdpan", "s3:a", "s3:b"]);
+    h.key(KeyCode::Tab);
+    h.key(KeyCode::Char('y'));
+    match h.effects.pop() {
+        Some(Effect::Upload(job)) => {
+            assert_eq!(job.uploader(), "bdpan");
+            assert_eq!(
+                job,
+                UploadJob::Package {
+                    slug: "tk-tab".into(),
+                    package_id: pkg,
+                    uploader: "bdpan".into(),
+                }
+            );
+        }
+        other => panic!("upload effect expected, got {other:?}"),
+    }
+
+    // The artifact confirm switches the same way.
+    let file = h._dir.path().join("report.pdf");
+    std::fs::write(&file, "report").unwrap();
+    h.key(KeyCode::Char('U'));
+    h.chars(&file.display().to_string());
+    h.key(KeyCode::Enter);
+    assert_eq!(uploader_shown(&h), "s3:a");
+    h.key(KeyCode::Tab);
+    h.key(KeyCode::Char('y'));
+    match h.effects.pop() {
+        Some(Effect::Upload(job)) => assert_eq!(job.uploader(), "s3:b"),
+        other => panic!("upload effect expected, got {other:?}"),
+    }
+}
+
+#[test]
+fn an_unset_default_shows_none_and_tab_reaches_the_configured_uploaders() {
+    let mut h = Harness::new();
+    let bin = h._dir.path().join("no-bdpan-here");
+    with_uploaders(&mut h, &bin);
+    h.ctx.config.delivery.uploader = String::new();
+    with_checked_package(&mut h, "tk-none", PackageKind::Full);
+    h.key(KeyCode::Char('u'));
+    h.key(KeyCode::Enter);
+    assert_eq!(uploader_shown(&h), "none");
+    // Tab never goes back to "none".
+    let mut seen = Vec::new();
+    for _ in 0..4 {
+        h.key(KeyCode::Tab);
+        seen.push(uploader_shown(&h));
+    }
+    assert_eq!(seen, ["bdpan", "s3:a", "s3:b", "bdpan"]);
+    assert!(h.effects.is_empty());
 }
 
 #[test]
@@ -683,7 +787,8 @@ fn upload_package_shows_progress_and_delivers() {
         job,
         UploadJob::Package {
             slug: "tk-up".into(),
-            package_id: pkg.clone()
+            package_id: pkg.clone(),
+            uploader: String::new(),
         }
     );
     // Nothing changed before the upload ran.
