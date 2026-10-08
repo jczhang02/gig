@@ -44,8 +44,12 @@ default_currency = "CNY"
 warranty_days = 15
 
 [delivery]
-uploader = "s3:aliyun-bj"        # "" disables upload; package sent --channel phone still works
+uploader = "s3:aliyun-bj"        # "bdpan", "s3:<name>", or "" (disables upload; package sent --channel phone still works)
 link_ttl_seconds = 604800
+
+[delivery.bdpan]                 # optional; used when the uploader is "bdpan"
+bin = "bdpan"                    # resolved on PATH when not a path
+remote_root = "gig"              # folder under the bdpan app root /apps/bdpan/
 
 [delivery.s3.aliyun-bj]
 bucket = "..."
@@ -61,6 +65,8 @@ endpoint = "https://go.example/api/links"
 ```
 
 Region and endpoint are JC's configuration; the tool ships no region default.
+
+`uploader = "bdpan"` uploads through the official Baidu Netdisk CLI (see `docs/adr/0001-bdpan-uploader-via-cli.md`). bdpan owns its login (`bdpan login`); gig stores no Baidu credential and needs no secret for it. One Baidu account only. Env overrides: `GIG_DELIVERY_BDPAN_BIN`, `GIG_DELIVERY_BDPAN_REMOTE_ROOT`. `delivery.short_link` applies to `s3:*` uploaders only; a Pan Share is never shortened.
 
 ### secrets
 
@@ -154,7 +160,7 @@ CREATE TABLE packages (
   zip_sha256 TEXT, file_count INTEGER,
   status TEXT NOT NULL,            -- checked | sent | legacy
   checked_at TEXT, sent_at TEXT,
-  channel TEXT,                    -- oss | phone | other
+  channel TEXT,                    -- oss | pan | phone | other
   uploader TEXT, remote_url TEXT, short_url TEXT, expires_at TEXT,
   created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
   UNIQUE(order_id, package_id)
@@ -250,8 +256,11 @@ Layout is fixed: `<dev_path>/delivery/<package-id>/`, `<dev_path>/delivery/<pack
   With `--write-manifest`: walks `delivery/<package-id>/`, refuses on the first unsafe entry, writes the manifest listing every regular file. Then writes the zip from the manifest (deterministic order, stored mtimes zeroed), then runs the same validation as `check`. Data: as `check`.
 - `gig package check [<slug>] <package-id>`
   Validates and records a package row (status checked, zip sha256). Data: `{ package, files: [...], zip_sha256, warnings }`. Warnings include: `.gitignore` does not ignore `delivery/`.
-- `gig package upload [<slug>] <package-id> [--yes]`
-  Re-validates; refuses if not previously checked or if the zip sha256 changed since the check (`needs_check`). Uploads via the configured uploader to object key `<slug>/<package-id>/<sent_at compact UTC>/<package-id>.zip` so the presigned URL's basename is the package id; the port keeps the Content-Disposition attachment header. Shortens the link when enabled, records channel oss, status sent. kind=full moves the order to delivered. Data: `{ package, url, short_url, expires_at, size }`.
+- `gig package upload [<slug>] <package-id> [--uploader bdpan|s3:<name>] [--yes]`
+  Re-validates; refuses if not previously checked or if the zip sha256 changed since the check (`needs_check`). Uploads via `--uploader`, or `delivery.uploader` when it is not given (an empty or unknown name is `config`), to object key `<slug>/<package-id>/<sent_at compact UTC>/<package-id>.zip`, records status sent and the uploader name; kind=full moves the order to delivered. The channel follows the uploader: `s3:<name>` records `oss`, `bdpan` records `pan`.
+  - `s3:<name>`: the presigned URL's basename is the package id; the port keeps the Content-Disposition attachment header. Shortens the link when `delivery.short_link` is enabled.
+  - `bdpan`: runs `bdpan whoami` first (not logged in or no valid token: `secrets`, the message says to run `! bdpan login`), uploads to the remote path `<remote_root>/<object key>` (relative to `/apps/bdpan/`; bdpan creates the directories), then `share <remote path> --period <days>`, where days is the smallest of 1, 7, 30 that covers `link_ttl_seconds`, capped at 30. `url` is `<link>?pwd=<code>`, `pwd` is the extraction code on its own, `short_url` is null, `expires_at` is share time plus the period. A share that fails after the upload is `upload`, records nothing and names the remote path; the remote file stays and a retry uses a new directory. gig never deletes remote files.
+  Data: `{ package, order_status, url, short_url, expires_at, uploader, pwd, size, dry_run, warnings }`; `uploader` is also set on a dry run, `uploader` and `pwd` are left out when absent.
 - `gig package sent [<slug>] <package-id> --channel phone|other [--note TEXT] [--yes]`
   For packages JC sends by hand (gsconnect to phone, then forwarded). Same re-validation and state change as upload, no remote URL.
 - `gig package ls [<slug>]`
@@ -272,7 +281,7 @@ Any failure is `unsafe_package` with the offending path in the message. Nothing 
 
 ### Artifacts
 
-- `gig artifact upload [<slug>] <FILE> [--yes]` Single file outside a package. The file must pass the path rule on its basename and must be a regular file. Records an artifact row.
+- `gig artifact upload [<slug>] <FILE> [--uploader bdpan|s3:<name>] [--yes]` Single file outside a package. The file must pass the path rule on its basename and must be a regular file. Uploads to object key `<slug>/artifacts/<UTC stamp>/<name>` through the same uploaders as `package upload` (for bdpan under `<remote_root>/`) and records an artifact row. Data adds `uploader` and, for bdpan, `pwd`.
 - `gig artifact ls [<slug>]`
 
 ### Maintenance
@@ -281,7 +290,7 @@ Any failure is `unsafe_package` with the offending path in the message. Nothing 
   See section 6. Refuses to overwrite an existing `--to`.
 - `gig config split-secrets [--yes]`
   Reads a v1 `config.toml` that still contains `access_key`, `secret_key`, `short_link.token`, writes them to `secrets.toml` (0600) and rewrites `config.toml` without them (v2 layout, `delivery.uploader` from `default_uploader`, `link_ttl_seconds` hoisted). Prints only the field names moved, never the values. Without `--yes` it reports what it would move. This is the step that runs at handover before the first v2 command.
-- `gig doctor [--fix]` Checks: dev_path/archive_path exist; package zip files exist; `.gig/JOB.md` and `.gig/QUOTE.md` present for active orders; `delivery/` gitignored; config has no secrets; secrets available for the configured uploader; templates_dir has every required template. `--fix` only repairs paths that can be found by slug under dev_root/archive_root.
+- `gig doctor [--fix]` Checks: dev_path/archive_path exist; package zip files exist; `.gig/JOB.md` and `.gig/QUOTE.md` present for active orders; `delivery/` gitignored; config has no secrets; secrets available for the configured uploader; templates_dir has every required template. When `delivery.uploader` is `bdpan`: a missing or non-executable `delivery.bdpan.bin` is a problem, `bdpan whoami` not logged in or without a valid token is a problem that says to run `! bdpan login`, and a token that expires within 7 days is a warning with the date. Doctor never prints token values; `--fix` does not touch bdpan. `--fix` only repairs paths that can be found by slug under dev_root/archive_root.
 - `gig config get KEY | set KEY VALUE | path` `path` prints all resolved paths. `set` edits config.toml in place (comments, key order and formatting kept; atomic write) and validates the keys of the settings schema (`gig_core::config::schema`: ranges and types, error code `invalid_input`).
 - `gig backup` Copies the database to backups dir with a timestamp.
 - `gig completion SHELL`

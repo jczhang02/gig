@@ -28,6 +28,10 @@ _Avoid_: Attachment, asset, upload
 A stable client-facing redirect URL that points to an expiring delivery URL.
 _Avoid_: CDN URL, storage URL, proxy link
 
+**Pan Share**:
+A Baidu Netdisk share link for a **Client Package** or **Delivery Artifact**, with the extraction code embedded; its expiry is set by Baidu.
+_Avoid_: short link, 网盘链接 without code
+
 ## Relationships
 
 - A **Quote Draft** may be accepted into at most one **Order**.
@@ -35,6 +39,7 @@ _Avoid_: CDN URL, storage URL, proxy link
 - A **Client Package** belongs to exactly one **Order**.
 - A **Delivery Artifact** belongs to exactly one **Order**.
 - A **Short Link** points to one expiring delivery URL for a **Client Package** or **Delivery Artifact**.
+- A **Pan Share** gives the client one **Client Package** or **Delivery Artifact** from Baidu Netdisk; it is never wrapped in a **Short Link**.
 
 ## Example dialogue
 
@@ -45,3 +50,4 @@ _Avoid_: CDN URL, storage URL, proxy link
 
 - "package" should mean **Client Package** when discussing the canonical final bundle; use **Delivery Artifact** for extra one-off files.
 - "short link" should mean a redirecting **Short Link**, not a storage endpoint, CDN hostname, or proxy download service.
+- A **Pan Share** is not a **Short Link**: Baidu hosts and expires it, and gig does not redirect it. bdpan also returns its own `short_url` field; gig ignores it, so do not call a Pan Share a short link because of that field.
