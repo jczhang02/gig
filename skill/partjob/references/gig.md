@@ -9,6 +9,7 @@ The full spec is `docs/v2/SPEC.md` in the gig repository. This lists what an age
 - Irreversible or outward commands need `--yes`; without it they only rehearse (`"dry_run": true`): `draft drop`, `package upload`, `package sent`, `artifact upload`, `archive`, `cancel`, `delete`.
 - Money is a decimal in major units, at most two fractional digits (`800`, `800.50`). Dates are `YYYY-MM-DD`.
 - Error codes: `not_found`, `invalid_state`, `invalid_input`, `unsafe_package`, `needs_check`, `needs_yes`, `config`, `secrets`, `upload`, `legacy_db`, `io`, `db`.
+- Uploads: `--uploader` overrides `delivery.uploader` for one upload. `bdpan` uploads to Baidu Netdisk and records channel `pan`; its `url` is the share link with the extraction code in it (`?pwd=`), `pwd` repeats the code, there is no `short_url`, and a `secrets` error means JC must run `! bdpan login`. `s3:<name>` uploads to object storage, records channel `oss` and shortens the link when short links are on.
 - States: `queued -> in_progress -> delivered -> paid -> archived`, plus `cancelled`. A preview changes no state. Packages may still be sent during the warranty (`paid`).
 
 ## Commands
@@ -34,11 +35,11 @@ gig cd [--order <slug>]
 
 gig package build <package-id> [--order <slug>] [--kind full|preview] [--write-manifest [--client-named results/]...]
 gig package check <package-id> [--order <slug>]
-gig package upload <package-id> [--order <slug>] [--yes]
+gig package upload <package-id> [--order <slug>] [--uploader bdpan|s3:<name>] [--yes]
 gig package sent <package-id> [--order <slug>] --channel phone|other [--note TEXT] [--yes]
 gig package ls [--order <slug>]
 
-gig artifact upload <FILE> [--order <slug>] [--yes]
+gig artifact upload <FILE> [--order <slug>] [--uploader bdpan|s3:<name>] [--yes]
 gig artifact ls [--order <slug>]
 
 gig delete <slug> --yes                      removes the row only, never files; for registration mistakes
