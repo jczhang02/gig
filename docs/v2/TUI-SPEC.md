@@ -34,9 +34,9 @@ Actions from Orders or Detail (each shows an error verbatim and refreshes when g
 | `k` | scorecard | form: 4 counts + score 1..5 + note -> `orders::scorecard` | none |
 | `x` | cancel | form: reason -> `orders::cancel(yes=true)` | yes, typed `y` in a popup |
 | `A` | archive preview | `archive::archive(yes=false)`: shows blockers, dirty files, large files, unsent packages. No execution; the popup says to have the agent archive. | n/a |
-| `u` | upload package | pick one checked package -> confirm popup (id, kind, size, resulting state) -> `packages::upload(yes=true)` with a progress bar; on success the short link is shown and copied to the clipboard | yes |
+| `u` | upload package | pick one checked package -> confirm popup (id, kind, size, resulting state, uploader; `Tab` switches the uploader among `bdpan` and each `s3:<name>`, starting at `delivery.uploader`) -> `packages::upload(yes=true)` through that uploader with a progress bar (a spinner until bdpan reports at the end); on success the short link (or the Pan Share link, with its `pwd` on the next line) is shown and copied to the clipboard | yes |
 | `m` | mark sent | pick a checked package, channel phone/other, note -> `packages::sent(yes=true)` | yes |
-| `U` | upload artifact | path field ($EDITOR-less, single line) -> `artifacts::upload(yes=true)` | yes |
+| `U` | upload artifact | path field ($EDITOR-less, single line) -> confirm popup with the uploader as for `u` (`Tab` switches it) -> `artifacts::upload(yes=true)` | yes |
 | `e` | edit JOB.md | `$EDITOR <dev_path>/.gig/JOB.md`, TUI suspended | n/a |
 | `y` | copy link | latest short link (or url) of the selected order to the clipboard | n/a |
 | `N` | new order | form: slug, title, price, type, material path, platform, client words ($EDITOR), from draft (toggle) -> `orders::new` with scaffold | none; the result popup lists created files and says the next step is grill |
