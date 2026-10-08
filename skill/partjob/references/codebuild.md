@@ -24,7 +24,7 @@ macOS: not through CodeBuild. It requires a reserved Mac fleet billed for at lea
 
 ## Files the project needs
 
-From the skill's `templates/build/`: `buildspec.yml` at the project root, `codebuild.ps1` in `packaging/`, with `PROJECT_NAME` replaced. The container has no Python; the script installs uv, Python 3.11 and the dependencies, runs the tests, PyInstaller, and a smoke test.
+From the skill's `templates/build/`: `buildspec.yml` at the project root, `build-windows.ps1` in `packaging/`, with `PROJECT_NAME` replaced. The script is shared with the local VM channel (`references/vm.md`); it was named `codebuild.ps1` until 2026-10-08, and the renamed path has not run on CodeBuild yet (older projects keep `codebuild.ps1` with their own buildspec). The container has no Python; the script installs uv, Python 3.11 and the dependencies, runs the tests, PyInstaller, and a smoke test.
 
 - PowerShell does not stop when an external command fails; the `Step` function checks `$LASTEXITCODE`. Pure PowerShell steps (installing uv) never set it, so it is reset to 0 before each step. The first verification run failed on exactly this.
 - Keep the script ASCII. Non-ASCII text needs a UTF-8 BOM for Windows PowerShell 5.1.

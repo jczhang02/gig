@@ -230,7 +230,7 @@ Project-specific (in the project's AGENTS.md, drafted per type and then complete
 | `log` | kickoff | Appends a status entry at the end of a phase (commands, figures, commit, remaining), rewrites "Now", reports the `.scratch/` size |
 | `dogfood [version]` | delivery | JC tries the version before any preview; a run command or local build, a checklist from the decisions; findings become decisions |
 | `preview` | delivery | A candidate in `.scratch/preview/` for JC first; then builds `<slug>-vX.Y.Z-preview/` from the type's default list, writes the manifest, runs `gig package check` |
-| `build [targets] [--via actions\|codebuild]` | delivery | Executables for orders whose decisions call for them: GitHub Actions (windows, linux, macos) by default, AWS CodeBuild (windows) when the source must not go to a git host; records commit and run or build id |
+| `build [targets] [--via actions\|codebuild\|vm]` | delivery | Executables for orders whose decisions call for them: GitHub Actions (windows, linux, macos) by default, AWS CodeBuild or the local Windows VM (windows) when the source must not go to a git host; records commit and run id, build id or VM log time |
 | `pack [id]` | delivery | Builds the full package with manifest and check; the reproduction check happens here |
 | `send <id> [--via pan\|oss\|phone]` | delivery | After JC's approval, `gig package upload --uploader bdpan` (default), `--uploader s3:<name>` or gsconnect; reports the Pan Share with its code, the short link, or delivery |
 | `revise` | delivery / warranty | Compares client feedback with the decisions: rework or scope change; rework adds decisions, scope changes run `gig change` |

@@ -4,7 +4,7 @@ version: 0.2
 phases:
   build:
     commands:
-      - powershell -NoProfile -ExecutionPolicy Bypass -File packaging\codebuild.ps1
+      - powershell -NoProfile -ExecutionPolicy Bypass -File packaging\build-windows.ps1
 
 artifacts:
   files:

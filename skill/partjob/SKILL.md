@@ -26,7 +26,7 @@ When the arguments are not a subcommand name (JC speaks plainly: `/partjob the c
 | `log` | kickoff | End of a phase: append a status entry |
 | `dogfood [version]` | delivery | JC tries the work before any preview; findings become decisions |
 | `preview [version]` | delivery | Show JC a preview candidate, then build and check the package |
-| `build [targets] [--via actions\|codebuild]` | delivery | Executables, only for orders whose decisions call for them; GitHub Actions by default, CodeBuild when the source must not go to a git host |
+| `build [targets] [--via actions\|codebuild\|vm]` | delivery | Executables, only for orders whose decisions call for them; GitHub Actions by default, CodeBuild or the local Windows VM when the source must not go to a git host |
 | `pack [version]` | delivery | Build the full package, run the reproduction check, validate |
 | `send <package-id> [--via pan\|oss\|phone]` | delivery | Upload to Baidu Netdisk (default) or object storage, or send to the phone, after JC approves |
 | `revise` | delivery / warranty | Client feedback: rework or scope change |
@@ -73,7 +73,8 @@ Say what actually happened (commands and real results), what comes next, and wha
 - `commands/`: one file per subcommand: preconditions, gig commands, files written, approvals needed, what to reply.
 - `references/workflow.md`: the complete workflow and rules, the source of this skill.
 - `references/gig.md`: gig command cheat sheet.
-- `references/codebuild.md`: the AWS CodeBuild runbook used by `build --via codebuild`.
-- `templates/`: files gig renders when scaffolding a project (`JOB.md.j2`, `QUOTE.md.j2`, `AGENTS*.md.j2`, `README.md.j2`, `gitignore`, `NOTES.md.j2`). `templates/build/` holds the build files `build` copies into a project (GitHub Actions workflow, CodeBuild buildspec and script); gig does not render them.
+- `references/codebuild.md`: the AWS CodeBuild runbook used by `build --via codebuild`. `references/vm.md`: the local Windows VM runbook used by `build --via vm`.
+- `scripts/vm-build.sh`: the host-side runner for `build --via vm`; it stays in the skill and is not copied into projects.
+- `templates/`: files gig renders when scaffolding a project (`JOB.md.j2`, `QUOTE.md.j2`, `AGENTS*.md.j2`, `README.md.j2`, `gitignore`, `NOTES.md.j2`). `templates/build/` holds the build files `build` copies into a project (GitHub Actions workflow, CodeBuild buildspec, and the Windows build script that CodeBuild and the VM share); gig does not render them.
 - `CHANGELOG.md`: every change made through `rule`.
 - `TODO-gig.md`: things that need gig code changes; `rule` does not edit code.

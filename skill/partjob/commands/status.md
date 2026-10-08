@@ -8,7 +8,7 @@ For the start of a session, or when JC asks "where are we". Read-only; changes n
 2. Work out the current directory:
    - Inside a project directory (`gig show` succeeds): read `data.order`, `data.next_action`, `data.packages`, then `.gig/JOB.md`, chiefly the "Now" section, the last entries of "Confirmed decisions", the "Client questions" section, and the last two "Status" entries.
    - Not inside a project (for example `~/dev/partjobs`): not an error. Use the `gig ls` result.
-3. Inside a project whose decisions name the CodeBuild channel and whose final build is not recorded yet: run `aws sts get-caller-identity --region us-west-2` (read-only, free). An expired session goes under what waits on JC: "run `! aws login`".
+3. Inside a project whose decisions name the CodeBuild channel and whose final build is not recorded yet: run `aws sts get-caller-identity --region us-west-2` (read-only, free). An expired session goes under what waits on JC: "run `! aws login`". For the `vm` channel, run `virsh -c qemu:///system domstate win11` instead (read-only); `vm-build.sh` starts a shut-off VM itself, so only a missing domain goes under what waits on JC.
 4. From `gig ls` pick out: orders with `unpaid == true` (delivered, not paid, with `days_in_status`), orders whose `next_action` starts with `warranty until`, and `queued` orders.
 
 ## Reply
