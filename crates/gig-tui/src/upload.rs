@@ -6,7 +6,7 @@
 //! callback rides in on a decorating `Uploader` instead of a new argument.
 
 use crate::data::OrderRow;
-use gig_core::delivery::{Progress, UploadOpts, UploadResult, Uploader};
+use gig_core::delivery::{uploader_by_name, Progress, UploadOpts, UploadResult, Uploader};
 use gig_core::models::{OrderStatus, Package, PackageKind, PackageStatus};
 use gig_core::services::{artifacts, packages, Ctx};
 use gig_core::{Error, Result};
@@ -81,6 +81,9 @@ pub struct Uploaded {
     pub url: Option<String>,
     pub short_url: Option<String>,
     pub expires_at: Option<String>,
+    /// The Pan Share extraction code, when the uploader returned one (the
+    /// link already carries it).
+    pub pwd: Option<String>,
     pub warnings: Vec<String>,
 }
 
@@ -111,6 +114,26 @@ impl Uploaded {
         }
         lines
     }
+
+    /// The link block under [`lines`](Self::lines): a blank row, the link
+    /// without its scheme, then the extraction code when there is one.
+    /// Empty without a link.
+    pub fn link_lines(&self) -> Vec<String> {
+        let Some(link) = self.link() else {
+            return Vec::new();
+        };
+        let mut lines = vec![String::new(), crate::text::strip_scheme(link).to_string()];
+        if let Some(pwd) = &self.pwd {
+            lines.push(format!("pwd: {pwd}"));
+        }
+        lines
+    }
+}
+
+/// The uploader a confirmed job names (`delivery::uploader_by_name`); a
+/// secrets or config error is shown verbatim.
+pub fn uploader_for(ctx: &Ctx, job: &UploadJob) -> Result<Box<dyn Uploader>> {
+    uploader_by_name(&ctx.config, &ctx.paths, job.uploader())
 }
 
 /// Packages of the order that can go out: checked and not yet sent.
@@ -249,6 +272,7 @@ pub fn run_job(
                 url: r.url,
                 short_url: r.short_url,
                 expires_at: r.expires_at,
+                pwd: r.pwd,
                 warnings: r.warnings,
             })
         }
@@ -263,6 +287,7 @@ pub fn run_job(
                 url: r.url,
                 short_url: r.short_url,
                 expires_at: r.artifact.and_then(|a| a.expires_at),
+                pwd: r.pwd,
                 warnings: Vec::new(),
             })
         }

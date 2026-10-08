@@ -17,7 +17,6 @@ use crossterm::event::{
     MouseEventKind,
 };
 use gig_core::config::{Config, Tui};
-use gig_core::delivery::uploader_by_name;
 use gig_core::models::Draft;
 use gig_core::services::Ctx;
 use gig_core::Result;
@@ -1322,7 +1321,7 @@ impl App {
     /// copy it. Keys pressed meanwhile are dropped: one upload at a time,
     /// and there is no cancel.
     fn upload(&mut self, job: &UploadJob, term: &mut Term) -> Result<()> {
-        let uploader = match uploader_by_name(&self.ctx.config, &self.ctx.paths, job.uploader()) {
+        let uploader = match upload::uploader_for(&self.ctx, job) {
             Ok(u) => u,
             Err(e) => {
                 self.ui.popup = Some(Popup::error(&e));
@@ -1372,9 +1371,8 @@ impl App {
         match result {
             Ok(done) => {
                 let mut lines = done.lines();
+                lines.extend(done.link_lines());
                 if let Some(link) = done.link() {
-                    lines.push(String::new());
-                    lines.push(crate::text::strip_scheme(link).to_string());
                     lines.push(match self.copy(link.to_string()) {
                         Ok(()) => "copied to clipboard".into(),
                         Err(_) => "clipboard unavailable, link shown above".into(),

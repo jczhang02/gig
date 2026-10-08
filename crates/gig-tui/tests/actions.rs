@@ -540,7 +540,7 @@ fn other_forms_reach_gig_core() {
 
 // ---- uploads (spec 2.1 `u`, `m`, `U`) ----
 
-use gig_core::delivery::{configured_uploader, UploadOpts, UploadResult, Uploader};
+use gig_core::delivery::{UploadOpts, UploadResult, Uploader};
 use gig_core::models::{Channel, PackageKind, PackageStatus};
 use gig_core::services::packages;
 use gig_tui::upload::{self, UploadJob};
@@ -727,6 +727,62 @@ fn tab_switches_the_uploader_of_an_upload_confirm() {
     }
 }
 
+/// The chosen uploader is the one `App::upload` builds and runs: here a fake
+/// bdpan binary, so the package goes out as a Pan Share.
+#[cfg(unix)]
+#[test]
+fn the_job_runs_with_the_chosen_uploader_and_shows_the_pwd() {
+    use gig_core::delivery::bdpan::fake::{self, FakeBdpan};
+    let mut h = Harness::new();
+    let fake = FakeBdpan::install(h._dir.path()).unwrap();
+    with_uploaders(&mut h, &fake.bin());
+    let (id, pkg) = with_checked_package(&mut h, "tk-pan", PackageKind::Full);
+
+    h.key(KeyCode::Char('u'));
+    h.key(KeyCode::Enter);
+    h.key(KeyCode::Tab);
+    h.key(KeyCode::Tab);
+    assert_eq!(uploader_shown(&h), "bdpan");
+    h.key(KeyCode::Char('y'));
+    let job = match h.effects.pop() {
+        Some(Effect::Upload(job)) => job,
+        other => panic!("upload effect expected, got {other:?}"),
+    };
+
+    let uploader = upload::uploader_for(&h.ctx, &job).unwrap();
+    assert_eq!(uploader.name(), "bdpan");
+    let mut ticks = Vec::new();
+    let done = upload::run_on_worker(&mut h.ctx, &job, uploader.as_ref(), |sent, total| {
+        ticks.push((sent, total));
+        std::thread::sleep(Duration::from_millis(1));
+    })
+    .unwrap();
+    h.refresh();
+
+    // bdpan reports once, at the end: until then the popup spins.
+    assert!(
+        ticks.iter().all(|&(sent, total)| total == 0 || sent == total),
+        "{ticks:?}"
+    );
+    assert!(fake.calls().iter().any(|c| c.contains(" upload ")), "{:?}", fake.calls());
+    let link = format!("{}?pwd={}", fake::LINK, fake::PWD);
+    assert_eq!(done.link(), Some(link.as_str()));
+    assert_eq!(done.pwd.as_deref(), Some(fake::PWD));
+    // The extraction code sits right under the link.
+    let shown = done.link_lines();
+    let at = shown
+        .iter()
+        .position(|l| l == gig_tui::text::strip_scheme(&link))
+        .unwrap_or_else(|| panic!("no link in {shown:?}"));
+    assert_eq!(shown[at + 1], format!("pwd: {}", fake::PWD));
+
+    let row = h.ui.data.order(id).unwrap();
+    let p = row.packages.iter().find(|p| p.package_id == pkg).unwrap();
+    assert_eq!(p.channel, Some(Channel::Pan));
+    assert_eq!(p.uploader.as_deref(), Some("bdpan"));
+    assert_eq!(p.short_url, None);
+}
+
 #[test]
 fn an_unset_default_shows_none_and_tab_reaches_the_configured_uploaders() {
     let mut h = Harness::new();
@@ -845,7 +901,13 @@ fn upload_refusals_are_shown_before_confirming() {
 #[test]
 fn no_uploader_configured_is_an_error_not_a_panic() {
     let h = Harness::new();
-    let e = match configured_uploader(&h.ctx.config, &h.ctx.paths) {
+    // A fresh home: the confirmation keeps the unset default.
+    let job = UploadJob::Package {
+        slug: "tk".into(),
+        package_id: "tk-v1".into(),
+        uploader: h.ctx.config.delivery.uploader.clone(),
+    };
+    let e = match upload::uploader_for(&h.ctx, &job) {
         Ok(_) => panic!("a fresh home has no uploader"),
         Err(e) => e,
     };
