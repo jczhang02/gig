@@ -47,8 +47,12 @@ default_currency = "CNY"
 warranty_days = 15
 
 [delivery]
-uploader = "s3:main"
+uploader = "s3:main"          # or "bdpan" (Baidu Netdisk), or "" for no upload
 link_ttl_seconds = 604800
+
+[delivery.bdpan]              # optional, for uploader = "bdpan"
+bin = "bdpan"
+remote_root = "gig"
 
 [delivery.s3.main]
 bucket = "..."
@@ -71,6 +75,12 @@ secret_key = "..."
 [short_link]
 token = "..."
 ```
+
+The `bdpan` uploader drives the official Baidu Netdisk CLI and returns a share
+link with the extraction code in it (`pwd` is also printed on its own). bdpan
+keeps its own login (`bdpan login`); gig stores no Baidu credential, and
+`gig doctor` reports when the login is missing or about to expire. A single
+upload can pick another uploader with `--uploader bdpan` or `--uploader s3:<name>`.
 
 Every config value can be overridden with `GIG_GENERAL_<KEY>` / `GIG_DELIVERY_<KEY>`;
 `GIG_HOME` moves all state under one directory.

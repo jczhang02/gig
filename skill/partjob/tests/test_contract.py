@@ -123,6 +123,23 @@ class SkillShape(unittest.TestCase):
         drop = (COMMANDS_DIR / "drop.md").read_text(encoding="utf-8")
         self.assertIn("would_delete", drop)
 
+    def test_send_offers_pan_first_and_reports_the_extraction_code(self):
+        send = (COMMANDS_DIR / "send.md").read_text(encoding="utf-8")
+        self.assertIn("--via pan|oss|phone", send.splitlines()[0])
+        self.assertIn("`网盘, OSS, or phone?`", send)
+        self.assertIn("--uploader bdpan --yes", send)
+        self.assertIn("--uploader s3:", send)
+        self.assertIn("`pwd`", send)
+        self.assertIn("! bdpan login", send)
+        self.assertIn(r"`send <package-id> [--via pan\|oss\|phone]`", SKILL)
+        self.assertIn(r"`send <id> [--via pan\|oss\|phone]`", WORKFLOW)
+
+    def test_gig_reference_names_the_uploader_override(self):
+        for cmd in ("gig package upload <package-id> [--order <slug>] [--uploader bdpan|s3:<name>] [--yes]",
+                    "gig artifact upload <FILE> [--order <slug>] [--uploader bdpan|s3:<name>] [--yes]"):
+            self.assertIn(cmd, GIG_REF)
+        self.assertIn("`pwd`", GIG_REF)
+
     def test_workflow_doc_has_no_open_items(self):
         self.assertNotIn("[TODO", WORKFLOW)
         for section in ("## 1. Process", "## 2. JOB.md and QUOTE.md", "## 6. Skill subcommands", "## Appendix C. Acceptance criteria"):

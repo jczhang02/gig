@@ -84,8 +84,8 @@ delivery/                          # the whole directory is gitignored
   <slug>-vX.Y.Z-preview/           # previews follow the same rules with kind=preview
 ```
 
-- Sending channels [JC]: usually `gig upload` (object storage, short link); sometimes gsconnect to the phone, with JC forwarding to the client. JC approves; the agent may act: after approval the agent runs the upload or gsconnect and reports the short link or delivery.
-- `gig package upload` re-checks, uploads, shortens the link and records it. Preview and full packages both go this way, distinguished by kind. The phone channel also re-checks and records channel=phone without a remote URL.
+- Sending channels [JC]: usually `gig package upload` to Baidu Netdisk (a Pan Share link with the extraction code; clients are used to it), or to object storage (short link); sometimes gsconnect to the phone, with JC forwarding to the client. JC approves; the agent may act: after approval the agent runs the upload or gsconnect and reports the link or delivery.
+- `gig package upload` re-checks, uploads, shares (Baidu Netdisk) or shortens the link (object storage) and records it. Preview and full packages both go this way, distinguished by kind. The phone channel also re-checks and records channel=phone without a remote URL.
 - Uploading or sending to the phone needs JC's explicit approval, once per send. After approval the agent executes; JC need not run anything.
 - When the client is not satisfied the job returns to 1.2, new decisions go into JOB.md, and a new version is delivered.
 - Before a preview, JC tries the version (`dogfood`): the program run on JC's machine, or the figures and report draft read. Findings become decisions. (2026-10-08, thermal-video-curve: the light theme and the curve drawing both came from JC's own use, not from tests.)
@@ -190,7 +190,7 @@ Project-specific (in the project's AGENTS.md, drafted per type and then complete
 [Decided] A preview convinces the client the work is done while being useless on its own:
 - Included: visual evidence of results (before/after comparisons, screenshots, metrics tables, the report's summary pages), a few processed results from the client's own samples (tk's 19 comparison images are the example), a short video or GIF of the program running.
 - Excluded: source code, executables, the full batch of results, the full report, copyable data files.
-- Form: a `<slug>-vX.Y.Z-preview/` package with the same manifest check and OSS short link; the client views it in a browser. Watermarking is JC's call.
+- Form: a `<slug>-vX.Y.Z-preview/` package with the same manifest check and upload; the client views it in a browser. Watermarking is JC's call.
 - Defaults by type: tool = comparison images and a demo GIF; reproduction / analysis = key figures and summary pages; writing = table of contents and one section.
 
 ### 5.2 Full delivery
@@ -232,7 +232,7 @@ Project-specific (in the project's AGENTS.md, drafted per type and then complete
 | `preview` | delivery | A candidate in `.scratch/preview/` for JC first; then builds `<slug>-vX.Y.Z-preview/` from the type's default list, writes the manifest, runs `gig package check` |
 | `build [targets] [--via actions\|codebuild]` | delivery | Executables for orders whose decisions call for them: GitHub Actions (windows, linux, macos) by default, AWS CodeBuild (windows) when the source must not go to a git host; records commit and run or build id |
 | `pack [id]` | delivery | Builds the full package with manifest and check; the reproduction check happens here |
-| `send <id> [--via oss\|phone]` | delivery | After JC's approval, `gig package upload` or gsconnect; reports the short link or delivery |
+| `send <id> [--via pan\|oss\|phone]` | delivery | After JC's approval, `gig package upload --uploader bdpan` (default), `--uploader s3:<name>` or gsconnect; reports the Pan Share with its code, the short link, or delivery |
 | `revise` | delivery / warranty | Compares client feedback with the decisions: rework or scope change; rework adds decisions, scope changes run `gig change` |
 | `paid [date]` | warranty | `gig paid`, updates QUOTE.md, computes the warranty end |
 | `archive` | warranty | After the warranty: reports the dirty state and deletion list, then `gig archive` after approval |
@@ -252,7 +252,7 @@ The `rule` mechanism:
 - draft: slug, material path, creation date, outcome (promoted / dropped), drop reason, NOTES snapshot.
 - order: slug, title, material_path, platform, external_id (optional), project_type, status, currency, price, cut_ratio, dev_path, archive_path, notes, client words, state timestamps, paid_at, warranty_until (= paid_at + 15 days).
 - requirement_change: order, description, price delta, date.
-- package: order, package_id, kind (preview / full), check time and result, send time, channel (oss / phone), remote URL, short link, expiry.
+- package: order, package_id, kind (preview / full), check time and result, send time, channel (pan / oss / phone), remote URL, short link, expiry.
 - artifact (single files sent outside a package): as in the v1 delivery_artifacts table.
 - No longer needed: quote draft pricing fields, order_workflow, clients, sources, tags, templates.
 
