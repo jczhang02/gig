@@ -9,8 +9,9 @@ use crate::config::Delivery;
 use crate::delivery::{UploadOpts, UploadResult, Uploader};
 use crate::{Error, Result};
 use serde_json::Value;
+use std::ffi::OsString;
 use std::io::{self, Read};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
@@ -38,6 +39,42 @@ pub fn share_period_days(ttl_seconds: u32) -> u32 {
         .into_iter()
         .find(|d| u64::from(*d) * DAY_SECONDS >= u64::from(ttl_seconds))
         .unwrap_or(30)
+}
+
+/// True when `bin` names an executable file: a path as given, or a bare
+/// name found on PATH (what running it would find).
+pub fn bin_resolves(bin: &str) -> bool {
+    find_bin(bin, std::env::var_os("PATH")).is_some()
+}
+
+/// The executable `bin` names: a path with a separator as given, a bare
+/// name in the first directory of `path` that holds it.
+fn find_bin(bin: &str, path: Option<OsString>) -> Option<PathBuf> {
+    if bin.is_empty() {
+        return None;
+    }
+    let given = Path::new(bin);
+    if given.components().count() > 1 {
+        return is_executable(given).then(|| given.to_path_buf());
+    }
+    std::env::split_paths(&path?)
+        .map(|dir| dir.join(bin))
+        .find(|candidate| is_executable(candidate))
+}
+
+fn is_executable(path: &Path) -> bool {
+    let Ok(meta) = std::fs::metadata(path) else {
+        return false;
+    };
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        meta.is_file() && meta.permissions().mode() & 0o111 != 0
+    }
+    #[cfg(not(unix))]
+    {
+        meta.is_file()
+    }
 }
 
 /// What `bdpan whoami` says about the login, without any token value.
@@ -423,6 +460,30 @@ fn redact(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn the_bin_is_found_as_a_path_or_on_path() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let exe = dir.path().join("bdpan");
+        std::fs::write(&exe, "#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let plain = dir.path().join("plain");
+        std::fs::write(&plain, "").unwrap();
+        let path = Some(std::env::join_paths(["/nonexistent-gig-dir".as_ref(), dir.path()]).unwrap());
+
+        assert_eq!(find_bin("bdpan", path.clone()), Some(exe.clone()));
+        assert_eq!(find_bin(exe.to_str().unwrap(), None), Some(exe.clone()));
+        // Not executable, missing, empty, or no PATH at all: not found.
+        assert_eq!(find_bin("plain", path.clone()), None);
+        assert_eq!(find_bin(plain.to_str().unwrap(), path.clone()), None);
+        assert_eq!(find_bin("nope", path.clone()), None);
+        assert_eq!(find_bin("", path), None);
+        assert_eq!(find_bin("bdpan", None), None);
+        // A directory of that name is not the binary.
+        assert_eq!(find_bin(dir.path().to_str().unwrap(), None), None);
+    }
 
     #[test]
     fn share_period_is_the_smallest_baidu_period_that_covers_the_ttl() {

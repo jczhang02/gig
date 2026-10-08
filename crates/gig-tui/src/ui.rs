@@ -705,6 +705,16 @@ mod tests {
                 assert!(text.contains(s), "{w}x{h}: {s}\n{text}");
             }
         }
+        // The upload confirm's Tab closes the orders column (scrolled to at 80x24).
+        let state = UiState {
+            help_open: true,
+            ..UiState::default()
+        };
+        let text = all(&render(200, 50, &state, true));
+        assert!(
+            text.contains("Tab  uploader   in the upload confirm"),
+            "{text}"
+        );
         // Mockup 17.4: a 4-cell key column; `Enter` reaches into the padding.
         let state = UiState {
             help_open: true,
@@ -722,13 +732,14 @@ mod tests {
         let mut state = state;
         let text = all(&render(60, 16, &state, true));
         assert!(text.contains("\u{2193} 7 more"), "{text}");
+        assert!(text.contains("\u{2193} 10 more"), "{text}");
         assert!(!text.contains("above"), "{text}");
         state.help_scroll.offset = 99;
         let text = all(&render(60, 16, &state, true));
-        assert!(text.contains("\u{2191} 9 above"), "{text}");
+        assert!(text.contains("\u{2191} 10 above"), "{text}");
         assert!(text.contains("PgDn  scroll detail"), "{text}");
         assert!(!text.contains("more"), "{text}");
-        // Money has 4 rows of keys: its column says 4, not 9.
+        // Money has 4 rows of keys: its column says 4, not 10.
         state.view = View::Money;
         let text = all(&render(60, 16, &state, true));
         assert!(text.contains("\u{2191} 4 above"), "{text}");

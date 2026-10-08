@@ -6,7 +6,7 @@
 //! callback rides in on a decorating `Uploader` instead of a new argument.
 
 use crate::data::OrderRow;
-use gig_core::delivery::{Progress, UploadOpts, UploadResult, Uploader};
+use gig_core::delivery::{uploader_by_name, Progress, UploadOpts, UploadResult, Uploader};
 use gig_core::models::{OrderStatus, Package, PackageKind, PackageStatus};
 use gig_core::services::{artifacts, packages, Ctx};
 use gig_core::{Error, Result};
@@ -15,16 +15,46 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread;
 
-/// One upload the app runs after a confirmed popup.
+/// One upload the app runs after a confirmed popup, through the uploader
+/// called `uploader` (`delivery::uploader_by_name`; "" is the unset
+/// default, which that refuses).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UploadJob {
     /// `packages::upload(yes=true)`.
-    Package { slug: String, package_id: String },
+    Package {
+        slug: String,
+        package_id: String,
+        uploader: String,
+    },
     /// `artifacts::upload(yes=true)`.
-    Artifact { slug: String, path: PathBuf },
+    Artifact {
+        slug: String,
+        path: PathBuf,
+        uploader: String,
+    },
 }
 
 impl UploadJob {
+    pub fn uploader(&self) -> &str {
+        match self {
+            UploadJob::Package { uploader, .. } | UploadJob::Artifact { uploader, .. } => uploader,
+        }
+    }
+
+    /// `Tab` in the confirmation: the uploader after the current one in
+    /// `choices`, wrapping; the first when the current one is not there.
+    pub fn next_uploader(&mut self, choices: &[String]) {
+        let at = choices.iter().position(|c| c == self.uploader());
+        let next = at.map_or(0, |i| i + 1) % choices.len().max(1);
+        if let Some(name) = choices.get(next) {
+            match self {
+                UploadJob::Package { uploader, .. } | UploadJob::Artifact { uploader, .. } => {
+                    uploader.clone_from(name)
+                }
+            }
+        }
+    }
+
     pub fn title(&self) -> String {
         match self {
             UploadJob::Package { package_id, .. } => format!("uploading {package_id}"),
@@ -51,6 +81,9 @@ pub struct Uploaded {
     pub url: Option<String>,
     pub short_url: Option<String>,
     pub expires_at: Option<String>,
+    /// The Pan Share extraction code, when the uploader returned one (the
+    /// link already carries it).
+    pub pwd: Option<String>,
     pub warnings: Vec<String>,
 }
 
@@ -81,6 +114,26 @@ impl Uploaded {
         }
         lines
     }
+
+    /// The link block under [`lines`](Self::lines): a blank row, the link
+    /// without its scheme, then the extraction code when there is one.
+    /// Empty without a link.
+    pub fn link_lines(&self) -> Vec<String> {
+        let Some(link) = self.link() else {
+            return Vec::new();
+        };
+        let mut lines = vec![String::new(), crate::text::strip_scheme(link).to_string()];
+        if let Some(pwd) = &self.pwd {
+            lines.push(format!("pwd: {pwd}"));
+        }
+        lines
+    }
+}
+
+/// The uploader a confirmed job names (`delivery::uploader_by_name`); a
+/// secrets or config error is shown verbatim.
+pub fn uploader_for(ctx: &Ctx, job: &UploadJob) -> Result<Box<dyn Uploader>> {
+    uploader_by_name(&ctx.config, &ctx.paths, job.uploader())
 }
 
 /// Packages of the order that can go out: checked and not yet sent.
@@ -208,7 +261,9 @@ pub fn run_job(
         None => uploader,
     };
     match job {
-        UploadJob::Package { slug, package_id } => {
+        UploadJob::Package {
+            slug, package_id, ..
+        } => {
             let r = packages::upload(ctx, Some(slug), package_id, true, uploader)?;
             Ok(Uploaded {
                 what: package_id.clone(),
@@ -217,10 +272,11 @@ pub fn run_job(
                 url: r.url,
                 short_url: r.short_url,
                 expires_at: r.expires_at,
+                pwd: r.pwd,
                 warnings: r.warnings,
             })
         }
-        UploadJob::Artifact { slug, path } => {
+        UploadJob::Artifact { slug, path, .. } => {
             let r = artifacts::upload(ctx, Some(slug), path, true, uploader)?;
             Ok(Uploaded {
                 what: path
@@ -231,6 +287,7 @@ pub fn run_job(
                 url: r.url,
                 short_url: r.short_url,
                 expires_at: r.artifact.and_then(|a| a.expires_at),
+                pwd: r.pwd,
                 warnings: Vec::new(),
             })
         }
@@ -307,11 +364,13 @@ mod tests {
         let p = UploadJob::Package {
             slug: "a".into(),
             package_id: "a-v1".into(),
+            uploader: "bdpan".into(),
         };
         assert_eq!(p.title(), "uploading a-v1");
         let a = UploadJob::Artifact {
             slug: "a".into(),
             path: "/tmp/x/report.pdf".into(),
+            uploader: String::new(),
         };
         assert_eq!(a.title(), "uploading report.pdf");
     }
