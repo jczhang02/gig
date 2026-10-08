@@ -153,6 +153,12 @@ pub struct SendResult {
     pub url: Option<String>,
     pub short_url: Option<String>,
     pub expires_at: Option<String>,
+    /// The uploader used, or the one a dry run would use.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub uploader: Option<String>,
+    /// The Pan Share extraction code, when the uploader returned one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pwd: Option<String>,
     pub size: u64,
     pub dry_run: bool,
     pub warnings: Vec<String>,
@@ -256,12 +262,20 @@ pub fn upload(
             url: None,
             short_url: None,
             expires_at: None,
+            uploader: Some(uploader.name().to_string()),
+            pwd: None,
             size: checked.zip_size,
             dry_run: true,
             warnings: checked.warnings,
         });
     }
     require_yes(yes, "upload package")?;
+    let channel = Channel::for_uploader(uploader.name()).ok_or_else(|| {
+        Error::Config(format!(
+            "uploader {:?} records no channel; use bdpan or s3:<name>",
+            uploader.name()
+        ))
+    })?;
     let now = clock::now();
     let result = uploader.upload(
         &checked.layout.zip_path,
@@ -284,7 +298,7 @@ pub fn upload(
         previous.id,
         &repo::Sent {
             sent_at: &now,
-            channel: Channel::Oss,
+            channel,
             uploader: Some(uploader.name()),
             remote_url: Some(&result.url),
             short_url: result.short_url.as_deref(),
@@ -299,6 +313,8 @@ pub fn upload(
         url: Some(result.url),
         short_url: result.short_url,
         expires_at,
+        uploader: Some(uploader.name().to_string()),
+        pwd: result.pwd,
         size: result.file_size,
         dry_run: false,
         warnings: checked.warnings,
@@ -313,10 +329,10 @@ pub fn sent(
     note: Option<&str>,
     yes: bool,
 ) -> Result<SendResult> {
-    if channel == Channel::Oss {
-        return Err(Error::InvalidInput(
-            "use gig package upload for the oss channel".into(),
-        ));
+    if matches!(channel, Channel::Oss | Channel::Pan) {
+        return Err(Error::InvalidInput(format!(
+            "use gig package upload for the {channel} channel"
+        )));
     }
     let order = context::resolve_key_or_cwd(&ctx.conn, key)?;
     let (checked, previous) = ready_to_send(ctx, &order, package_id)?;
@@ -327,6 +343,8 @@ pub fn sent(
             url: None,
             short_url: None,
             expires_at: None,
+            uploader: None,
+            pwd: None,
             size: checked.zip_size,
             dry_run: true,
             warnings: checked.warnings,
@@ -362,6 +380,8 @@ pub fn sent(
         url: None,
         short_url: None,
         expires_at: None,
+        uploader: None,
+        pwd: None,
         size: checked.zip_size,
         dry_run: false,
         warnings: checked.warnings,
@@ -497,6 +517,40 @@ mod tests {
             1
         );
         assert!(sent(&ctx, Some("pv"), "pv-preview-1", Channel::Oss, None, true).is_err());
+        assert!(sent(&ctx, Some("pv"), "pv-preview-1", Channel::Pan, None, true).is_err());
+    }
+
+    struct PanUploader;
+    impl Uploader for PanUploader {
+        fn name(&self) -> &str {
+            "bdpan"
+        }
+        fn upload(&self, _local: &Path, _opts: &UploadOpts) -> Result<UploadResult> {
+            Ok(UploadResult {
+                url: "https://pan.example.test/s/1x?pwd=ab12".into(),
+                short_url: None,
+                expires_at: Some(1_900_000_000),
+                provider: "bdpan".into(),
+                file_size: 3,
+                pwd: Some("ab12".into()),
+            })
+        }
+    }
+
+    #[test]
+    fn bdpan_upload_records_channel_pan_and_returns_pwd() {
+        let root = tempfile::tempdir().unwrap();
+        let ctx = Ctx::for_test(root.path());
+        with_package(&ctx, "pan", "pan-v1");
+        build_package(&ctx, Some("pan"), "pan-v1", PackageKind::Full, true, &[]).unwrap();
+        let dry = upload(&ctx, Some("pan"), "pan-v1", false, &PanUploader).unwrap();
+        assert_eq!(dry.uploader.as_deref(), Some("bdpan"));
+        let s = upload(&ctx, Some("pan"), "pan-v1", true, &PanUploader).unwrap();
+        assert_eq!(s.package.channel, Some(Channel::Pan));
+        assert_eq!(s.package.uploader.as_deref(), Some("bdpan"));
+        assert_eq!(s.uploader.as_deref(), Some("bdpan"));
+        assert_eq!(s.pwd.as_deref(), Some("ab12"));
+        assert_eq!(s.short_url, None);
     }
 
     #[test]
