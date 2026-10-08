@@ -658,3 +658,137 @@ fn config_set_accepts_the_bdpan_uploader() {
         "bdpan"
     );
 }
+
+#[cfg(unix)]
+mod doctor_bdpan {
+    use super::Env;
+    use gig_core::delivery::bdpan::fake::{self, FakeBdpan, Reply};
+    use serde_json::Value;
+    use std::fs;
+    use std::path::Path;
+
+    /// Make `bin` the configured bdpan and the default uploader.
+    fn use_bdpan(env: &Env, bin: &Path) {
+        let cfg = env.root.path().join("config/config.toml");
+        let mut text = fs::read_to_string(&cfg).unwrap();
+        text.push_str(&format!(
+            "[delivery]\nuploader = \"bdpan\"\n[delivery.bdpan]\nbin = {bin:?}\n"
+        ));
+        fs::write(&cfg, text).unwrap();
+    }
+
+    /// `scope: message` for each entry of `data.<key>` in a doctor report.
+    fn entries(report: &Value, key: &str) -> Vec<String> {
+        report[key]
+            .as_array()
+            .unwrap_or_else(|| panic!("no {key} in {report}"))
+            .iter()
+            .map(|p| {
+                format!(
+                    "{}: {}",
+                    p["scope"].as_str().unwrap(),
+                    p["message"].as_str().unwrap()
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_logged_in_bdpan_is_healthy_and_doctor_only_asks_whoami() {
+        let env = Env::new();
+        let fake = FakeBdpan::install(env.root.path()).unwrap();
+        use_bdpan(&env, &fake.bin());
+
+        let r = env.ok(&["doctor"]);
+
+        assert!(entries(&r, "problems").is_empty(), "{r}");
+        assert!(entries(&r, "warnings").is_empty(), "{r}");
+        assert_eq!(fake.calls(), vec!["--json --no-check-update whoami"]);
+    }
+
+    #[test]
+    fn a_missing_bdpan_binary_is_a_problem() {
+        let env = Env::new();
+        use_bdpan(&env, &env.root.path().join("no-such-bdpan"));
+
+        let r = env.ok(&["doctor"]);
+
+        let problems = entries(&r, "problems");
+        assert_eq!(problems.len(), 1, "{r}");
+        assert!(problems[0].contains("not found"), "{r}");
+        assert!(problems[0].contains("delivery.bdpan.bin"), "{r}");
+    }
+
+    #[test]
+    fn a_bdpan_binary_that_is_not_executable_is_a_problem() {
+        use std::os::unix::fs::PermissionsExt;
+        let env = Env::new();
+        let fake = FakeBdpan::install(env.root.path()).unwrap();
+        fs::set_permissions(fake.bin(), fs::Permissions::from_mode(0o644)).unwrap();
+        use_bdpan(&env, &fake.bin());
+
+        let r = env.ok(&["doctor"]);
+
+        let problems = entries(&r, "problems");
+        assert_eq!(problems.len(), 1, "{r}");
+        assert!(problems[0].contains("not executable"), "{r}");
+        assert!(problems[0].contains("delivery.bdpan.bin"), "{r}");
+    }
+
+    #[test]
+    fn a_logged_out_or_expired_bdpan_is_a_problem_that_says_bdpan_login() {
+        for reply in [
+            Reply::whoami(false, false, "2099-01-01T00:00:00Z"),
+            Reply::whoami(true, false, "2099-01-01T00:00:00Z"),
+        ] {
+            let env = Env::new();
+            let fake = FakeBdpan::install(env.root.path()).unwrap();
+            fake.reply("whoami", reply).unwrap();
+            use_bdpan(&env, &fake.bin());
+
+            let r = env.ok(&["doctor"]);
+
+            let problems = entries(&r, "problems");
+            assert_eq!(problems.len(), 1, "{r}");
+            assert!(problems[0].contains("! bdpan login"), "{r}");
+        }
+    }
+
+    #[test]
+    fn a_token_that_expires_within_7_days_is_a_warning_with_the_date() {
+        let env = Env::new();
+        let fake = FakeBdpan::install(env.root.path()).unwrap();
+        let expires_at = fake::days_from_now(3);
+        fake.reply("whoami", Reply::whoami(true, true, &expires_at))
+            .unwrap();
+        use_bdpan(&env, &fake.bin());
+
+        let (ok, v) = env.run(&["doctor"]);
+
+        assert!(ok, "{v}");
+        assert!(entries(&v["data"], "problems").is_empty(), "{v}");
+        let warnings = entries(&v["data"], "warnings");
+        assert_eq!(warnings.len(), 1, "{v}");
+        assert!(warnings[0].contains(&expires_at[..10]), "{v}");
+        assert!(warnings[0].contains("! bdpan login"), "{v}");
+        assert!(v["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w.as_str().unwrap().contains(&expires_at[..10])));
+    }
+
+    #[test]
+    fn a_token_valid_for_8_days_or_more_is_fine() {
+        let env = Env::new();
+        let fake = FakeBdpan::install(env.root.path()).unwrap();
+        fake.reply("whoami", Reply::whoami(true, true, &fake::days_from_now(8)))
+            .unwrap();
+        use_bdpan(&env, &fake.bin());
+
+        let r = env.ok(&["doctor"]);
+
+        assert!(entries(&r, "problems").is_empty(), "{r}");
+        assert!(entries(&r, "warnings").is_empty(), "{r}");
+    }
+}

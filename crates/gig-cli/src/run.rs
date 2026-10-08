@@ -327,6 +327,7 @@ fn run_with_db(ctx: &Ctx, cmd: Command) -> Result<Output> {
             let w: Vec<String> = r
                 .problems
                 .iter()
+                .chain(&r.warnings)
                 .map(|p| format!("{}: {}", p.scope, p.message))
                 .collect();
             out_with(r, w)

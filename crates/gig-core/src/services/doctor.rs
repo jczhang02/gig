@@ -1,5 +1,7 @@
 //! Consistency checks over paths, packages, project files, config and secrets.
 
+use crate::config::Delivery;
+use crate::delivery::bdpan::{BdpanUploader, LoginStatus, LOGIN_HINT, NOT_LOGGED_IN};
 use crate::models::{OrderStatus, PackageStatus};
 use crate::package::validate::gitignore_covers_delivery;
 use crate::repo::{orders as repo_orders, packages};
@@ -7,10 +9,16 @@ use crate::services::Ctx;
 use crate::{secrets, templates, Result};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
+use time::{Duration, OffsetDateTime};
+
+/// Warn when the bdpan login token expires sooner than this.
+const BDPAN_TOKEN_WARN: Duration = Duration::days(7);
 
 #[derive(Debug, Serialize)]
 pub struct Report {
     pub problems: Vec<Problem>,
+    /// Not wrong yet, but soon will be (e.g. a bdpan login about to expire).
+    pub warnings: Vec<Problem>,
     pub fixed: Vec<String>,
     /// Orders migrated from v1 that are closed and have no directory on disk; expected, not checked.
     pub legacy_closed_without_dir: Vec<String>,
@@ -31,6 +39,7 @@ fn problem(out: &mut Vec<Problem>, scope: impl Into<String>, message: impl Into<
 
 pub fn run(ctx: &Ctx, fix: bool) -> Result<Report> {
     let mut problems = Vec::new();
+    let mut warnings = Vec::new();
     let mut fixed = Vec::new();
     let mut legacy_closed_without_dir = Vec::new();
 
@@ -138,14 +147,14 @@ pub fn run(ctx: &Ctx, fix: bool) -> Result<Report> {
             );
         }
     }
-    if ctx.config.s3_uploader_name().is_none() && !ctx.config.delivery.uploader.is_empty() {
+    let uploader = ctx.config.delivery.uploader.as_str();
+    if uploader == "bdpan" {
+        check_bdpan(&ctx.config.delivery, &mut problems, &mut warnings);
+    } else if ctx.config.s3_uploader_name().is_none() && !uploader.is_empty() {
         problem(
             &mut problems,
             "config",
-            format!(
-                "delivery.uploader {:?} is not s3:<name>",
-                ctx.config.delivery.uploader
-            ),
+            format!("delivery.uploader {uploader:?} is not s3:<name> or bdpan"),
         );
     }
     for m in secrets::availability(&ctx.config, &ctx.paths) {
@@ -163,9 +172,27 @@ pub fn run(ctx: &Ctx, fix: bool) -> Result<Report> {
     }
     Ok(Report {
         problems,
+        warnings,
         fixed,
         legacy_closed_without_dir,
     })
+}
+
+/// bdpan owns its login: ask `whoami` and report, never fix.
+fn check_bdpan(delivery: &Delivery, problems: &mut Vec<Problem>, warnings: &mut Vec<Problem>) {
+    match BdpanUploader::new(delivery).login_status() {
+        Err(e) => problem(problems, "bdpan", e.to_string()),
+        Ok(s) if !s.logged_in => problem(problems, "bdpan", NOT_LOGGED_IN),
+        Ok(LoginStatus {
+            expires_at: Some(t),
+            ..
+        }) if t - OffsetDateTime::now_utc() < BDPAN_TOKEN_WARN => problem(
+            warnings,
+            "bdpan",
+            format!("the login token expires on {}; {LOGIN_HINT}", t.date()),
+        ),
+        Ok(_) => {}
+    }
 }
 
 /// v1 stored some package paths relative to the project directory.
