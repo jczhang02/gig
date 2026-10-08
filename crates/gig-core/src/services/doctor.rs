@@ -2,6 +2,7 @@
 
 use crate::config::Delivery;
 use crate::delivery::bdpan::{BdpanUploader, LoginStatus, LOGIN_HINT, NOT_LOGGED_IN};
+use crate::delivery::UploaderName;
 use crate::models::{OrderStatus, PackageStatus};
 use crate::package::validate::gitignore_covers_delivery;
 use crate::repo::{orders as repo_orders, packages};
@@ -148,14 +149,16 @@ pub fn run(ctx: &Ctx, fix: bool) -> Result<Report> {
         }
     }
     let uploader = ctx.config.delivery.uploader.as_str();
-    if uploader == "bdpan" {
-        check_bdpan(&ctx.config.delivery, &mut problems, &mut warnings);
-    } else if ctx.config.s3_uploader_name().is_none() && !uploader.is_empty() {
-        problem(
+    match UploaderName::parse(uploader) {
+        Ok(UploaderName::Bdpan) => check_bdpan(&ctx.config.delivery, &mut problems, &mut warnings),
+        Ok(UploaderName::S3(_)) => {}
+        // No default uploader: uploads are off, which is allowed.
+        Err(_) if uploader.is_empty() => {}
+        Err(e) => problem(
             &mut problems,
             "config",
-            format!("delivery.uploader {uploader:?} is not s3:<name> or bdpan"),
-        );
+            format!("delivery.uploader: {}", message(e)),
+        ),
     }
     for m in secrets::availability(&ctx.config, &ctx.paths) {
         problem(&mut problems, "secrets", m);
@@ -178,15 +181,19 @@ pub fn run(ctx: &Ctx, fix: bool) -> Result<Report> {
     })
 }
 
+/// The message of `e` alone: the scope already says what failed, and
+/// "upload failed: ..." would misread a doctor check.
+fn message(e: Error) -> String {
+    match e {
+        Error::Upload(m) | Error::Config(m) | Error::Secrets(m) => m,
+        other => other.to_string(),
+    }
+}
+
 /// bdpan owns its login: ask `whoami` and report, never fix.
 fn check_bdpan(delivery: &Delivery, problems: &mut Vec<Problem>, warnings: &mut Vec<Problem>) {
     match BdpanUploader::new(delivery).login_status() {
-        // The message alone: the scope already says bdpan, and "upload
-        // failed: ..." would misread a doctor check.
-        Err(Error::Upload(m) | Error::Config(m) | Error::Secrets(m)) => {
-            problem(problems, "bdpan", m)
-        }
-        Err(e) => problem(problems, "bdpan", e.to_string()),
+        Err(e) => problem(problems, "bdpan", message(e)),
         Ok(s) if !s.logged_in => problem(problems, "bdpan", NOT_LOGGED_IN),
         Ok(LoginStatus {
             expires_at: Some(t),

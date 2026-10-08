@@ -740,7 +740,10 @@ pub fn run(ctx: &Ctx, action: &Action) -> Result<Option<Popup>> {
                     package_id: package_id.clone(),
                     uploader: ctx.config.delivery.uploader.clone(),
                 },
-                delivery::uploader_choices(&ctx.config.delivery),
+                delivery::uploader_choices(&ctx.config.delivery)
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect(),
             )))
         }
         Action::SentPreview(m) => {
@@ -814,7 +817,10 @@ pub fn run(ctx: &Ctx, action: &Action) -> Result<Option<Popup>> {
                     path: dry.local_path.into(),
                     uploader: ctx.config.delivery.uploader.clone(),
                 },
-                delivery::uploader_choices(&ctx.config.delivery),
+                delivery::uploader_choices(&ctx.config.delivery)
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect(),
             )))
         }
         Action::NewOrder(n) => {

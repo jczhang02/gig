@@ -9,6 +9,7 @@ pub use bdpan::BdpanUploader;
 pub use s3::S3Uploader;
 
 use crate::config::{Config, Delivery, Paths};
+use crate::models::Channel;
 use crate::secrets;
 use crate::{Error, Result};
 use serde::{Deserialize, Serialize};
@@ -173,33 +174,69 @@ pub fn configured_uploader(config: &Config, paths: &Paths) -> Result<Box<dyn Upl
     uploader_by_name(config, paths, &config.delivery.uploader)
 }
 
-/// Check that `name` is an uploader the config can build, without building
-/// it or running anything: `bdpan`, or `s3:<name>` with its
-/// `[delivery.s3.<name>]` table. Anything else is a config error.
-pub fn check_uploader_name(config: &Config, name: &str) -> Result<()> {
-    if name == "bdpan" {
-        return Ok(());
+/// An uploader's name. Its text form (`bdpan`, or `s3:<name>` for a
+/// `[delivery.s3.<name>]` table) is what `delivery.uploader`, `--uploader`
+/// and the database hold.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UploaderName {
+    Bdpan,
+    S3(String),
+}
+
+impl UploaderName {
+    /// Read the text form. Anything else, also "", is a config error.
+    pub fn parse(name: &str) -> Result<Self> {
+        if name == bdpan::NAME {
+            return Ok(Self::Bdpan);
+        }
+        match name.strip_prefix("s3:") {
+            Some(s3) if !s3.is_empty() => Ok(Self::S3(s3.to_string())),
+            _ => Err(Error::Config(if name.is_empty() {
+                "no uploader is set (delivery.uploader is empty); use bdpan or s3:<name>".into()
+            } else {
+                format!("unknown uploader {name:?}; use bdpan or s3:<name>")
+            })),
+        }
     }
-    let Some(s3_name) = name.strip_prefix("s3:").filter(|n| !n.is_empty()) else {
-        return Err(Error::Config(if name.is_empty() {
-            "delivery.uploader is not set; use bdpan or s3:<name>".into()
-        } else {
-            format!("unknown uploader {name:?}; use bdpan or s3:<name>")
-        }));
-    };
-    config.s3_table(s3_name).map(|_| ())
+
+    /// The channel an upload through this uploader records.
+    pub fn channel(&self) -> Channel {
+        match self {
+            Self::Bdpan => Channel::Pan,
+            Self::S3(_) => Channel::Oss,
+        }
+    }
+}
+
+impl fmt::Display for UploaderName {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Bdpan => f.write_str(bdpan::NAME),
+            Self::S3(name) => write!(f, "s3:{name}"),
+        }
+    }
+}
+
+/// Check that `name` is an uploader the config can build, without building
+/// it or running anything: an `s3:<name>` also needs its
+/// `[delivery.s3.<name>]` table. Anything else is a config error.
+pub fn check_uploader_name(config: &Config, name: &str) -> Result<UploaderName> {
+    let parsed = UploaderName::parse(name)?;
+    if let UploaderName::S3(s3) = &parsed {
+        config.s3_table(s3)?;
+    }
+    Ok(parsed)
 }
 
 /// Build the uploader called `name` (see [`check_uploader_name`]). Only S3
 /// is wrapped with the short linker (when short links are enabled); a Pan
 /// Share is never shortened.
 pub fn uploader_by_name(config: &Config, paths: &Paths, name: &str) -> Result<Box<dyn Uploader>> {
-    check_uploader_name(config, name)?;
-    if name == "bdpan" {
-        return Ok(Box::new(BdpanUploader::new(&config.delivery)));
-    }
-    let s3_name = &name["s3:".len()..];
-    let resolved = secrets::resolve_s3_named(config, paths, s3_name)?;
+    let s3_name = match check_uploader_name(config, name)? {
+        UploaderName::Bdpan => return Ok(Box::new(BdpanUploader::new(&config.delivery))),
+        UploaderName::S3(s3) => s3,
+    };
+    let resolved = secrets::resolve_s3_named(config, paths, &s3_name)?;
     let s3 = S3Uploader::new(&resolved)?;
     match secrets::resolve_short_link_token(config, paths)? {
         Some(token) => {
@@ -217,19 +254,22 @@ pub fn uploader_by_name(config: &Config, paths: &Paths, name: &str) -> Result<Bo
 /// order: `bdpan` when `delivery.uploader` names it, `[delivery.bdpan]`
 /// changes its defaults, or its binary resolves; then `s3:<name>` for each
 /// `[delivery.s3.<name>]` table.
-pub fn uploader_choices(delivery: &Delivery) -> Vec<String> {
+pub fn uploader_choices(delivery: &Delivery) -> Vec<UploaderName> {
     uploader_choices_with(delivery, bdpan::bin_resolves)
 }
 
 /// [`uploader_choices`] with the binary lookup passed in.
-fn uploader_choices_with(delivery: &Delivery, resolves: impl Fn(&str) -> bool) -> Vec<String> {
-    let bdpan = delivery.uploader == "bdpan"
+fn uploader_choices_with(
+    delivery: &Delivery,
+    resolves: impl Fn(&str) -> bool,
+) -> Vec<UploaderName> {
+    let bdpan = UploaderName::parse(&delivery.uploader).ok() == Some(UploaderName::Bdpan)
         || delivery.bdpan != crate::config::Bdpan::default()
         || resolves(&delivery.bdpan.bin);
     bdpan
-        .then(|| "bdpan".to_string())
+        .then_some(UploaderName::Bdpan)
         .into_iter()
-        .chain(delivery.s3.keys().map(|name| format!("s3:{name}")))
+        .chain(delivery.s3.keys().cloned().map(UploaderName::S3))
         .collect()
 }
 
@@ -442,6 +482,13 @@ mod tests {
         let (cfg, _) = config_with_s3_and_short_links(dir.path());
         let found = |_: &str| true;
         let missing = |_: &str| false;
+        // The choices as text, the way the TUI shows them.
+        fn uploader_choices_with(d: &Delivery, resolves: impl Fn(&str) -> bool) -> Vec<String> {
+            super::uploader_choices_with(d, resolves)
+                .iter()
+                .map(ToString::to_string)
+                .collect()
+        }
         // Default bdpan settings, binary not found, not the default: S3 only.
         assert_eq!(
             uploader_choices_with(&cfg.delivery, missing),
@@ -472,6 +519,27 @@ mod tests {
         assert_eq!(asked.into_inner(), ["bdpan"]);
         // Nothing configured, nothing found.
         assert!(uploader_choices_with(&Config::default().delivery, missing).is_empty());
+    }
+
+    #[test]
+    fn uploader_names_round_trip_and_pick_the_channel() {
+        for (text, name, channel) in [
+            ("bdpan", UploaderName::Bdpan, Channel::Pan),
+            (
+                "s3:aliyun-bj",
+                UploaderName::S3("aliyun-bj".into()),
+                Channel::Oss,
+            ),
+        ] {
+            assert_eq!(UploaderName::parse(text).unwrap(), name);
+            assert_eq!(name.to_string(), text);
+            assert_eq!(name.channel(), channel);
+        }
+        for text in ["", "s3:", "nope", "bdpan:x", "BDPAN"] {
+            let err = UploaderName::parse(text).unwrap_err();
+            assert_eq!(err.code(), "config", "{text}");
+            assert!(err.to_string().contains("use bdpan or s3:<name>"), "{err}");
+        }
     }
 
     #[test]

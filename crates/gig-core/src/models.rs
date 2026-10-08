@@ -89,18 +89,6 @@ text_enum!(Channel {
     Other => "other",
 });
 
-impl Channel {
-    /// The channel an upload through `uploader` records: `s3:<name>` is
-    /// `oss`, `bdpan` is `pan`. None for any other name.
-    pub fn for_uploader(uploader: &str) -> Option<Self> {
-        match uploader.strip_prefix("s3:") {
-            Some(name) if !name.is_empty() => Some(Channel::Oss),
-            Some(_) => None,
-            None => (uploader == "bdpan").then_some(Channel::Pan),
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Order {
     pub id: i64,
@@ -250,13 +238,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn channel_follows_the_uploader() {
-        assert_eq!(Channel::for_uploader("s3:aliyun-bj"), Some(Channel::Oss));
-        assert_eq!(Channel::for_uploader("bdpan"), Some(Channel::Pan));
+    fn channel_pan_parses() {
         assert_eq!(Channel::parse("pan").unwrap(), Channel::Pan);
-        for name in ["", "s3:", "nope", "bdpan:x"] {
-            assert_eq!(Channel::for_uploader(name), None, "{name}");
-        }
     }
 
     #[test]

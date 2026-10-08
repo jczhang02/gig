@@ -18,6 +18,9 @@ use std::time::{Duration, Instant};
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
+/// The uploader name (`delivery.uploader = "bdpan"`) and result provider.
+pub const NAME: &str = "bdpan";
+
 const DAY_SECONDS: u64 = 86_400;
 
 /// Timeout for `whoami` and `share`. `upload` has none.
@@ -225,7 +228,7 @@ impl BdpanUploader {
 
 impl Uploader for BdpanUploader {
     fn name(&self) -> &str {
-        "bdpan"
+        NAME
     }
 
     fn upload(&self, local: &Path, opts: &UploadOpts) -> Result<UploadResult> {
@@ -259,7 +262,7 @@ impl Uploader for BdpanUploader {
             url,
             short_url: None,
             expires_at,
-            provider: "bdpan".into(),
+            provider: NAME.into(),
             file_size,
             pwd: Some(share.pwd),
         })

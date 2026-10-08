@@ -1,6 +1,7 @@
 //! Secrets: environment first, then `secrets.toml` (0600). Never config.toml.
 
 use crate::config::{Config, Paths, S3};
+use crate::delivery::UploaderName;
 use crate::{Error, Result};
 use serde::Deserialize;
 use std::collections::BTreeMap;
@@ -159,7 +160,7 @@ pub fn availability(config: &Config, paths: &Paths) -> Vec<String> {
         }
     }
     // Short links wrap S3 only; a bdpan default never needs the token.
-    if config.delivery.uploader != "bdpan" {
+    if UploaderName::parse(&config.delivery.uploader).ok() != Some(UploaderName::Bdpan) {
         if let Err(e) = resolve_short_link_token(config, paths) {
             problems.push(e.to_string());
         }

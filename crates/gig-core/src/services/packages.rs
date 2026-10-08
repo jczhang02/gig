@@ -1,7 +1,7 @@
 //! Package commands: build, check, upload, sent, ls.
 
 use crate::context;
-use crate::delivery::{UploadOpts, Uploader};
+use crate::delivery::{UploadOpts, Uploader, UploaderName};
 use crate::models::{Channel, Order, OrderStatus, Package, PackageKind, PackageStatus};
 use crate::package::{build, validate, Layout};
 use crate::repo::{events, orders as repo_orders, packages as repo};
@@ -270,12 +270,7 @@ pub fn upload(
         });
     }
     require_yes(yes, "upload package")?;
-    let channel = Channel::for_uploader(uploader.name()).ok_or_else(|| {
-        Error::Config(format!(
-            "uploader {:?} records no channel; use bdpan or s3:<name>",
-            uploader.name()
-        ))
-    })?;
+    let channel = UploaderName::parse(uploader.name())?.channel();
     let now = clock::now();
     let result = uploader.upload(
         &checked.layout.zip_path,
