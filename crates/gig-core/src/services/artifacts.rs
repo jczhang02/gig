@@ -1,7 +1,7 @@
 //! Single files shared outside a package.
 
 use crate::context;
-use crate::delivery::{UploadOpts, Uploader};
+use crate::delivery::{self, UploadOpts, Uploader};
 use crate::models::Artifact;
 use crate::package::rules;
 use crate::repo::artifacts as repo;
@@ -17,8 +17,10 @@ pub struct ArtifactUpload {
     pub size: u64,
     pub url: Option<String>,
     pub short_url: Option<String>,
-    /// The uploader used, or the one a dry run would use.
-    pub uploader: String,
+    /// The uploader used, or the one a dry run would use; left out when a
+    /// dry run has none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub uploader: Option<String>,
     /// The Pan Share extraction code, when the uploader returned one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pwd: Option<String>,
@@ -58,7 +60,7 @@ pub fn upload(
             size: meta.len(),
             url: None,
             short_url: None,
-            uploader: uploader.name().to_string(),
+            uploader: delivery::output_name(uploader),
             pwd: None,
             dry_run: true,
         });
@@ -103,7 +105,7 @@ pub fn upload(
         size: result.file_size,
         url: Some(result.url),
         short_url: result.short_url,
-        uploader: uploader.name().to_string(),
+        uploader: delivery::output_name(uploader),
         pwd: result.pwd,
         dry_run: false,
     })

@@ -228,6 +228,47 @@ pub fn check_uploader_name(config: &Config, name: &str) -> Result<UploaderName> 
     Ok(parsed)
 }
 
+/// Stands in for the uploader of a dry run (`yes = false`), which checks
+/// everything an upload would check and uploads nothing. Its
+/// [`name`](Uploader::name) is the uploader a real run would use, or ""
+/// when none is set ([`DryRunUploader::default`]).
+#[derive(Debug, Default)]
+pub struct DryRunUploader {
+    name: String,
+}
+
+impl DryRunUploader {
+    /// The dry run of an upload through `name` (`--uploader`, else
+    /// `delivery.uploader`), checked as a real run checks it
+    /// ([`check_uploader_name`]); "" names no uploader.
+    pub fn new(config: &Config, name: &str) -> Result<Self> {
+        if name.is_empty() {
+            return Ok(Self::default());
+        }
+        Ok(Self {
+            name: check_uploader_name(config, name)?.to_string(),
+        })
+    }
+}
+
+impl Uploader for DryRunUploader {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn upload(&self, _local: &Path, _opts: &UploadOpts) -> Result<UploadResult> {
+        Err(Error::Upload("a dry run uploads nothing".into()))
+    }
+}
+
+/// The name of `uploader` for command output: None for a dry run that
+/// names no uploader.
+pub(crate) fn output_name(uploader: &dyn Uploader) -> Option<String> {
+    Some(uploader.name())
+        .filter(|n| !n.is_empty())
+        .map(str::to_string)
+}
+
 /// Build the uploader called `name` (see [`check_uploader_name`]). Only S3
 /// is wrapped with the short linker (when short links are enabled); a Pan
 /// Share is never shortened.

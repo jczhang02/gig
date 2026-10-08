@@ -1,7 +1,7 @@
 //! Package commands: build, check, upload, sent, ls.
 
 use crate::context;
-use crate::delivery::{UploadOpts, Uploader, UploaderName};
+use crate::delivery::{self, UploadOpts, Uploader, UploaderName};
 use crate::models::{Channel, Order, OrderStatus, Package, PackageKind, PackageStatus};
 use crate::package::{build, validate, Layout};
 use crate::repo::{events, orders as repo_orders, packages as repo};
@@ -153,7 +153,8 @@ pub struct SendResult {
     pub url: Option<String>,
     pub short_url: Option<String>,
     pub expires_at: Option<String>,
-    /// The uploader used, or the one a dry run would use.
+    /// The uploader used, or the one a dry run would use; left out when
+    /// there is none (`sent`, or a dry run with no uploader set).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub uploader: Option<String>,
     /// The Pan Share extraction code, when the uploader returned one.
@@ -262,7 +263,7 @@ pub fn upload(
             url: None,
             short_url: None,
             expires_at: None,
-            uploader: Some(uploader.name().to_string()),
+            uploader: delivery::output_name(uploader),
             pwd: None,
             size: checked.zip_size,
             dry_run: true,
@@ -308,7 +309,7 @@ pub fn upload(
         url: Some(result.url),
         short_url: result.short_url,
         expires_at,
-        uploader: Some(uploader.name().to_string()),
+        uploader: delivery::output_name(uploader),
         pwd: result.pwd,
         size: result.file_size,
         dry_run: false,

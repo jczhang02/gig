@@ -185,19 +185,6 @@ pub fn expand_home(typed: &str) -> PathBuf {
     }
 }
 
-/// Stand-in for dry runs (`yes=false`), which validate but never upload.
-pub struct NoUploader;
-
-impl Uploader for NoUploader {
-    fn name(&self) -> &str {
-        "none"
-    }
-
-    fn upload(&self, _local: &Path, _opts: &UploadOpts) -> Result<UploadResult> {
-        Err(Error::Upload("no uploader in a dry run".into()))
-    }
-}
-
 /// Bytes sent and total, written by the uploader's callback on the worker
 /// thread and read by the drawing thread. Total 0 means no report yet.
 #[derive(Debug, Default)]

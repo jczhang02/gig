@@ -9,9 +9,9 @@
 use crate::app::{UiState, View};
 use crate::data::{self, OrderRow};
 use crate::popup::{Field, Form, Pick, PickFor, Popup, PopupKey};
-use crate::upload::{self, NoUploader, UploadJob};
+use crate::upload::{self, UploadJob};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use gig_core::delivery;
+use gig_core::delivery::{self, DryRunUploader};
 use gig_core::models::{Channel, Draft, ProjectType};
 use gig_core::money::{format_minor, parse_amount};
 use gig_core::services::{archive, artifacts, drafts, orders, packages, Ctx};
@@ -714,7 +714,7 @@ pub fn run(ctx: &Ctx, action: &Action) -> Result<Option<Popup>> {
             Ok(Some(archive_popup(&report)))
         }
         Action::UploadPreview { slug, package_id } => {
-            let dry = packages::upload(ctx, Some(slug), package_id, false, &NoUploader)?;
+            let dry = packages::upload(ctx, Some(slug), package_id, false, &DryRunUploader::default())?;
             let kind = dry.package.kind;
             let mut lines = vec![
                 format!("Upload package {package_id} of {slug}?"),
@@ -799,7 +799,7 @@ pub fn run(ctx: &Ctx, action: &Action) -> Result<Option<Popup>> {
                 return Err(Error::InvalidInput("path is empty".into()));
             }
             let file = upload::expand_home(path);
-            let dry = artifacts::upload(ctx, Some(slug), &file, false, &NoUploader)?;
+            let dry = artifacts::upload(ctx, Some(slug), &file, false, &DryRunUploader::default())?;
             Ok(Some(Popup::confirm_upload(
                 format!("upload artifact {slug}"),
                 vec![

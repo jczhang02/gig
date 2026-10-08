@@ -682,6 +682,13 @@ fn a_dry_run_refuses_an_unknown_uploader() {
     fs::write(&cfg, text).unwrap();
     assert_eq!(env.err(&package), "config");
     assert_eq!(env.err(&artifact), "config");
+    // With no default, a dry run names no uploader and still succeeds.
+    let text = fs::read_to_string(&cfg)
+        .unwrap()
+        .replace("uploader = \"nope\"", "uploader = \"\"");
+    fs::write(&cfg, text).unwrap();
+    assert_eq!(env.ok(&package).get("uploader"), None);
+    assert_eq!(env.ok(&artifact).get("uploader"), None);
     assert!(bdpan.calls().is_empty(), "{:?}", bdpan.calls());
 }
 
