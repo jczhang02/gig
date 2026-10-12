@@ -15,6 +15,9 @@ dist-cloud/
 data/samples/
 data/raw/
 
+# Downloaded papers are large and copyrighted; they live in Zotero too
+references/papers/
+
 # Client packages are built by gig package build; never committed
 delivery/
 

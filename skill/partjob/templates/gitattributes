@@ -1,0 +1,7 @@
+# Project records stay out of `git archive`, so source.zip and remote builds carry none of them.
+.gig export-ignore
+.gitattributes export-ignore
+AGENTS.md export-ignore
+CLAUDE.md export-ignore
+docs/agents export-ignore
+reports/internal export-ignore

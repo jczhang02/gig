@@ -10,6 +10,6 @@
 
 Client words:
 
-> {{ client_words if client_words else "(to fill)" }}
+> {{ client_words | replace("\n", "\n> ") if client_words else "(to fill)" }}
 
 Not agreed: delivery date, payment milestones.
