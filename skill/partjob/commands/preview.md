@@ -7,6 +7,7 @@ After JC is satisfied, show the client evidence, not the product. A preview conv
 - Tool jobs: a few processed results from the client's own samples (before/after comparisons), a GIF or screenshots of the program running.
 - Reproduction / analysis jobs: the key figures, the report's summary pages (first one or two pages as images or a separate PDF).
 - Writing jobs: watermarked results pages: the abstract, key tables and figures.
+- Setup jobs (`custom` orders that configure the client's tools): screenshots or a recording of the configured setup running; nothing the client could install from.
 - Any job: a one-page metrics table.
 
 Never: source code, executables, the full batch of results, the full report, copyable data files, material written for JC (an install manual meant for JC, internal notes). Watermarking is JC's call.

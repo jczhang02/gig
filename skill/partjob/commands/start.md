@@ -4,8 +4,8 @@ The client placed the order; the job officially begins. Register the order, crea
 
 ## Preconditions
 
-- From JC: the agreed price (major units, e.g. 800), the client's words confirming the deal (verbatim), the project type (`tool`, `cv_ml`, `data_processing`, `research_writing`, `custom`), the material path (not needed again if the draft has it).
-- Ask once, in one message: whether the price is what the client pays or what JC receives after the platform's cut (pass the client's payment as `--price` and JC's share as `--cut-ratio`: 480 received of 800 paid is `--price 800 --cut-ratio 0.6`); whether the client already paid or put the money in escrow; whether the words are the client's own or JC's summary or plan (a summary is passed as words but labelled "(JC's summary)").
+- From JC: the agreed price (major units, e.g. 800), the client's words confirming the deal (verbatim), the project type (`tool`, `cv_ml`, `data_processing`, `research_writing`, `custom`; setup or service orders that configure the client's tools are `custom`), the material path (not needed again if the draft has it).
+- Ask once, in one message: whether the price is what the client pays or what JC receives after the platform's cut (pass the client's payment as `--price` and JC's share as `--cut-ratio`: 480 received of 800 paid is `--price 800 --cut-ratio 0.6`); the date the client paid into the platform's escrow (the normal case), or that the client has not paid yet; whether the words are the client's own or JC's summary or plan (a summary is passed as words but labelled "(JC's summary)").
 - A draft with the same slug exists: use `--from-draft`; its notes land in JOB.md under "Pre-order notes".
 - The directory already exists (a project set up by hand earlier): follow "Adopting a project set up by hand" below instead of the steps.
 
@@ -15,7 +15,7 @@ The client placed the order; the job officially begins. Register the order, crea
 2. `gig new <slug> --title "<title>" --price <amount> --type <type> --material <path> [--platform <platform>] --client-words ... [--from-draft]`.
    The result lists `created_files` and `warnings` (git being unavailable shows here). The directory is `~/dev/partjobs/<slug>/` with `.gig/JOB.md`, `.gig/QUOTE.md`, `AGENTS.md`, `README.md`, `.gitignore`, `.gitattributes`, `data/`, `references/`.
    Claude Code only: if the session's working directory is not `~/dev/partjobs/<slug>/`, stop and ask JC to run `/cd ~/dev/partjobs/<slug>`; continue from step 3 after the move. Other agents skip this.
-3. Read the generated `.gig/JOB.md` and `.gig/QUOTE.md` and fill each "(to fill)" with a fact JC stated; the rest stays "(to fill)" and goes into one question. The price and words in QUOTE.md must match what JC said. A prepaid order gets "Payment: received YYYY-MM-DD (prepaid)" with the date JC gives; `gig paid` still runs after delivery (see TODO-gig.md).
+3. Read the generated `.gig/JOB.md` and `.gig/QUOTE.md` and fill each "(to fill)" with a fact JC stated; the rest stays "(to fill)" and goes into one question. The price and words in QUOTE.md must match what JC said. "Payment" in QUOTE.md records the escrow ("in escrow since YYYY-MM-DD") and changes no gig state; `gig paid` runs later, when the client confirms (see `paid.md`).
 4. Judge whether the project is large: several modules or deliverables, work expected to span many sessions, or a route that needs CONTEXT.md and ADRs. State the judgement and the reason to JC in one line; JC may overrule. The same judgement picks the grill in step 7.
    Large: in the project directory run the `setup-matt-pocock-skills` skill (issue tracker, triage labels, domain docs). It appends an "Agent skills" section to AGENTS.md; keep the template content.
    Large, in Claude Code: the skill is user-only. Ask JC to run `/mattpocock-skills:setup-matt-pocock-skills` and continue from step 5 when it finishes.

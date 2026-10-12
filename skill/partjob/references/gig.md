@@ -10,7 +10,7 @@ The full spec is `docs/v2/SPEC.md` in the gig repository (`~/Documents/dev-tools
 - Money is a decimal in major units, at most two fractional digits (`800`, `800.50`). Dates are `YYYY-MM-DD`. `--cut-ratio` is JC's share of the price after the platform's cut (0.6 means 480 of 800).
 - Error codes: `not_found`, `invalid_state`, `invalid_input`, `unsafe_package`, `needs_check`, `needs_yes`, `config`, `secrets`, `upload`, `legacy_db`, `io`, `db`.
 - Uploads: `--uploader` overrides `delivery.uploader` for one upload. `bdpan` uploads to Baidu Netdisk and records channel `pan`; its `url` is the share link with the extraction code in it (`?pwd=`), `pwd` repeats the code, there is no `short_url`, and a `secrets` error means JC must run `! bdpan login` (an `upload` error from `whoami` carries bdpan's own message). A dry run already refuses with `config` an unknown uploader name or a bdpan binary that does not resolve (the fix is `delivery.bdpan.bin`). `s3:<name>` uploads to object storage, records channel `oss` and shortens the link when short links are on.
-- States: `queued -> in_progress -> delivered -> paid -> archived`, plus `cancelled`. A preview changes no state. Packages may still be sent during the warranty (`paid`).
+- States: `queued -> in_progress -> delivered -> paid -> archived`, plus `cancelled`. `paid` means the client confirmed on the platform; the platform's payout is `received_at` (`--received`, also on a `paid` or `archived` order), and `awaiting_payout` in `ls` and `show` flags confirmed orders still waiting for it. A preview changes no state. Packages may still be sent during the warranty (`paid`).
 
 ## Commands
 
@@ -27,7 +27,7 @@ gig start [--order <slug>]
 gig change [--order <slug>] --desc TEXT [--price-delta 200]
 gig price [--order <slug>] --amount 1000 --reason TEXT
 gig note [--order <slug>] TEXT
-gig paid [--order <slug>] [--date YYYY-MM-DD] [--amount 800]
+gig paid [--order <slug>] [--date YYYY-MM-DD] [--amount 800] [--warranty-start YYYY-MM-DD] [--received YYYY-MM-DD]
 gig scorecard [--order <slug>] --decisions N --repeat-questions N --cleanups N --report-reworks N --score 1..5 [--note TEXT]
 gig archive [--order <slug>] [--yes] [--before-warranty-end] [--no-scorecard] [--purge]
 gig cancel [--order <slug>] --reason TEXT [--yes]

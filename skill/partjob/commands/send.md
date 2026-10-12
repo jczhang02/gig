@@ -18,7 +18,7 @@ Send a checked package out. JC approves; the agent acts. Without JC's explicit "
    - Always pass `--uploader` for pan and oss, so the channel does not depend on the configured default. A `secrets` or `config` error otherwise means the environment is not set up; stop and say so, never work around it (`gig doctor` names what is missing). `bdpan binary "bdpan" not found` usually means the Claude Code shell lacks the mise shims on PATH; the fix is JC's: `gig config set delivery.bdpan.bin <absolute path>`.
    - phone: first run the `gsconnect-send` skill on `delivery/<package-id>.zip`, with bash (its script uses bash arrays; the Claude Code shell may be zsh); once delivered, `gig package sent <package-id> --channel phone --yes --note "gsconnect"`.
 3. JOB.md "Status": time sent, channel, link (for pan the full `url`, which carries the code) or "sent to phone", expiry. Replace "not sent out yet".
-4. After a full package the order is `delivered` and the next step is payment; a package sent during the warranty (`paid`) changes no state and only records a warranty revision.
+4. After a full package the order is `delivered` and the next step is the client's confirmation on the platform (`paid`); a package sent during the warranty (`paid`) changes no state and only records a warranty revision.
 
 ## Sent by JC
 

@@ -19,7 +19,7 @@ Later in the same session, a request that maps to a subcommand ("make a preview"
 
 | Subcommand | Phase | One line |
 |---|---|---|
-| `status` | any | Where things stand, the next step, what waits on JC, unpaid and in-warranty orders |
+| `status` | any | Where things stand, the next step, what waits on JC, orders awaiting confirmation or payout, in-warranty orders |
 | `draft <slug> [material path]` | pre-order | Create the draft directory and NOTES.md, survey the materials, list questions and effort |
 | `drop <slug> [reason]` | pre-order | Give up: notes go into gig, directory removed |
 | `start <slug>` | kickoff | Register the order, scaffold the project, set up agent rules, go to grill |
@@ -32,7 +32,7 @@ Later in the same session, a request that maps to a subcommand ("make a preview"
 | `pack [version]` | delivery | Build the full package, run the reproduction check, validate |
 | `send <package-id> [--via pan\|oss\|phone]` | delivery | Upload to Baidu Netdisk (default) or object storage, or send to the phone, after JC approves |
 | `revise` | delivery / warranty | Client feedback: rework or scope change |
-| `paid [date] [amount]` | warranty | Record payment, compute the warranty end |
+| `paid [date] [amount]` | warranty | The client confirmed on the platform (warranty starts), or the platform paid out |
 | `archive` | warranty | Scorecard, report the dirty state, archive after approval |
 | `handoff` | any | Hand over to the next session |
 | `rule <one sentence>` | any | Change this skill itself |

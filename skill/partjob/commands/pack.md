@@ -7,6 +7,7 @@ The full package, sent after the client accepts the work.
 - Any job: the delivery report PDF (installation, usage, results, known limitations, warranty terms), source code (`git archive`, without `.gig/`, `.scratch/` and client samples), README.
 - Tool jobs add: the executables the order's decisions call for, produced by `/partjob build` (no `program/` directory when the order needs no program), this batch's processed results, a sample configuration file.
 - Reproduction / analysis jobs add: configurations, result data, figures, the differences or blockers report.
+- Setup jobs (`custom` orders that configure the client's tools, often finished in a remote session) add: an install manual written for the client, the scripts and configuration files it uses; no `source.zip` unless a decision asks for it. Their reproduction check (step 2) is an end-to-end install and uninstall by the manual in a clean environment (a fresh user, VM or container).
 - Writing jobs add: PDF plus sources. A full delivery of a single PDF is still a full package sent with `send`, never `gig artifact upload`, so the order moves to delivered.
 - Never: copies of the client's originals, intermediates (content.json, html, md, -visual directories, build scripts), internal audit files, `reports/internal/`, data beyond test data.
 

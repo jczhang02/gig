@@ -224,7 +224,7 @@ class TemplatesRenderThroughGig(unittest.TestCase):
             self.assertIn("Not sent out yet", job)
             quote = (project / ".gig/QUOTE.md").read_text(encoding="utf-8")
             self.assertIn("CNY 800.00", quote)
-            self.assertIn("not received", quote)
+            self.assertIn("in escrow since", quote)
             self.assertIn("Warranty: 15 days after payment", quote)
             self.assertIn("Not agreed", quote)
             agents = (project / "AGENTS.md").read_text(encoding="utf-8")

@@ -99,7 +99,7 @@ delivery/                          # the whole directory is gitignored
 - Client not satisfied: JC keeps revising until they are.
 
 [Decided]
-- Payment: `gig paid <slug>` records the date and updates the payment line in QUOTE.md. The warranty ends on the payment date plus 15 days; gig computes it and `gig ls` lists orders still in warranty.
+- Payment: the client pays into the platform's escrow when ordering; QUOTE.md records it and gig state does not change. `gig paid <slug>` records the client's confirmation on the platform and updates the payment line in QUOTE.md. The warranty ends on that date (or `--warranty-start`) plus 15 days; gig computes it and `gig ls` lists orders still in warranty. The platform pays JC out later on its own schedule; `gig paid --received` records it, and `gig ls` keeps showing orders awaiting payout, archived ones included.
 - Changes during the warranty: recorded as decisions in JOB.md; the order stays `paid` and a new package is delivered. No new order is opened during the warranty.
 - After the warranty: `gig archive <slug>`. It first reports uncommitted changes, large files and unsent packages; after JC's approval the project moves to archive_root. Whether large files (checkpoints, data) are removed follows the bllc precedent of 2026-09-27: an explicit deletion list, explicit approval, git history kept.
 - States:
@@ -110,7 +110,7 @@ draft -> queued -> in_progress -> delivered -> paid -> archived
   +-dropped +-cancelled +-------------+ (rework or warranty work)
 ```
 
-  `cancelled` is reachable from `queued` or `in_progress` (after delivery there is no cancellation, only rework). `draft` before the order; `queued` registered but not started; `in_progress` work under way; `delivered` full package sent; `paid` paid and in warranty (warranty_until = paid_at + 15 days); `archived` archived. Sending a preview changes no state; it is only a package record with kind=preview.
+  `cancelled` is reachable from `queued` or `in_progress` (after delivery there is no cancellation, only rework). `draft` before the order; `queued` registered but not started; `in_progress` work under way; `delivered` full package sent; `paid` the client confirmed and the warranty runs (warranty_until = paid_at or the warranty start + 15 days); `archived` archived. Sending a preview changes no state; it is only a package record with kind=preview.
 
 ## 2. JOB.md and QUOTE.md
 
