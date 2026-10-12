@@ -61,7 +61,21 @@ pub fn run(ctx: &Ctx, fix: bool) -> Result<Report> {
         };
         match root.map(Path::new) {
             Some(p) if p.is_dir() => {
-                // Orders migrated from v1 predate the v2 file rules and are not retrofitted.
+                // Orders migrated from v1 predate the v2 file rules and are not retrofitted,
+                // but a live one without JOB.md is easy to miss, so it is a warning.
+                if order.status.is_active()
+                    && order.legacy_id.is_some()
+                    && !p.join(".gig/JOB.md").is_file()
+                {
+                    problem(
+                        &mut warnings,
+                        &scope,
+                        format!(
+                            "{} order has no .gig/JOB.md: a legacy order not adopted into the workflow",
+                            order.status
+                        ),
+                    );
+                }
                 if order.status.is_active() && order.legacy_id.is_none() {
                     for f in [".gig/JOB.md", ".gig/QUOTE.md"] {
                         if !p.join(f).is_file() {
@@ -214,5 +228,34 @@ pub fn resolve_relative(path: &str, root: Option<&str>) -> PathBuf {
         p
     } else {
         root.map(|r| Path::new(r).join(&p)).unwrap_or(p)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::services::orders::tests::make;
+
+    #[test]
+    fn a_live_legacy_order_without_job_md_is_a_warning() {
+        let root = tempfile::tempdir().unwrap();
+        let ctx = Ctx::for_test(root.path());
+        let o = make(&ctx, "old");
+        ctx.conn
+            .execute("UPDATE orders SET legacy_id = 7 WHERE id = ?1", [o.id])
+            .unwrap();
+        let dev = PathBuf::from(o.dev_path.unwrap());
+        let job_warnings = |r: &Report| {
+            r.warnings
+                .iter()
+                .filter(|w| w.message.contains(".gig/JOB.md"))
+                .count()
+        };
+        std::fs::remove_file(dev.join(".gig/JOB.md")).unwrap();
+        let r = run(&ctx, false).unwrap();
+        assert_eq!(job_warnings(&r), 1, "{:?}", r.warnings);
+        assert!(r.problems.iter().all(|p| !p.message.contains("JOB.md")));
+        std::fs::write(dev.join(".gig/JOB.md"), "x").unwrap();
+        assert_eq!(job_warnings(&run(&ctx, false).unwrap()), 0);
     }
 }
