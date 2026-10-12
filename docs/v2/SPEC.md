@@ -211,7 +211,7 @@ paid -> archived, then (any time after paid): payout recorded with --received
 - `cancel`: queued | in_progress -> cancelled. `archive` is also allowed from cancelled (moves or purges the directory).
 - Anything else is `invalid_state`.
 
-`next_action` is computed, never stored: queued -> `start`; in_progress -> `preview or pack`; delivered -> `collect payment`; paid before warranty end -> `warranty until <date>`; paid after -> `archive`; archived/cancelled -> none.
+`next_action` is computed, never stored: queued -> `start`; in_progress -> `preview or pack`; delivered -> `await client confirmation`; paid before warranty end -> `warranty until <date>`; paid after -> `archive` (also while the payout is open; `awaiting_payout` flags it); archived/cancelled -> none.
 
 ## 5. Commands
 

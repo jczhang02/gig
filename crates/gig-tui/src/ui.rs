@@ -843,11 +843,7 @@ mod tests {
             for part in ["delivered", "59d", "0.01"] {
                 assert!(row7.contains(part), "{w}x{h}: {part:?} in {row7:?}");
             }
-            assert_eq!(
-                row7.contains("collect payment"),
-                w >= 160,
-                "{w}: next column"
-            );
+            assert_eq!(row7.contains("await confirm"), w >= 160, "{w}: next column");
             let below = &list[y + 1];
             assert!(below.contains("09-20  预览已发送"), "{w}x{h}: {below:?}");
             assert!(!list.iter().any(|l| l.contains("(no status entry")));
@@ -1027,7 +1023,10 @@ mod tests {
         ] {
             assert!(text.contains(s), "{s:?}\n{text}");
         }
-        let next = rows.iter().find(|l| l.contains("collect payment")).unwrap();
+        let next = rows
+            .iter()
+            .find(|l| l.contains("await client confirmation"))
+            .unwrap();
         assert!(next.ends_with("p paid"), "{next:?}");
         // Headings bold, link underlined.
         let (hy, _) = rows

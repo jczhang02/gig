@@ -791,12 +791,12 @@ Annotations: `gig` bold; `1 Orders` word bold with accent underline; `owed 1,600
                                                                                sers-colitis-analysis ·  cv_ml · xianyu 
    owed  2                                         1,600                        delivered · 34 days in status          
  ▎  sers-colitis-analysis    delivered     34d     800  小鼠结肠炎 SERS 光…                                           
- ▎   collect payment  ·  sent 08-26  go.jczhang.cc/a30bd870                    price          800 CNY                   
+ ▎   await client confirmation  ·  sent 08-26  go.jczhang.cc/a30bd870          price          800 CNY                   
     tk-dtf-compact           delivered      0d     800  TK DTF 生产图纵向…   cut             60%                      
                                                                                take-home      480 CNY                   
    paid  1                                         2,800                                                                
     point-cloud-registrat…   paid         167d   2,800  point-cloud-regist…  Next                                     
-                                                                                 collect payment                 p paid 
+                                                                                 await client confirmation       p paid 
    in progress  2                                  2,000                                                                
     bllc-reproduction        in progress    0d   2,000  BLLC 论文模型复现…   Packages  1                              
     high-value-patent-rev…   in progress    0d       ·  高价值专利识别论文…    sers-colitis-analysis-deliv…2026-08-26 
@@ -832,7 +832,7 @@ Annotations: `gig` bold; `1 Orders` word bold with accent underline; `owed 1,600
                                                                                 
    owed  2                                         1,600                        
  ▎  sers-colitis-analysis    delivered     34d     800  小鼠结肠炎 SERS 光谱… 
- ▎   collect payment  ·  sent 08-26  go.jczhang.cc/a30bd870                     
+ ▎   await client confirmation  ·  sent 08-26  go.jczhang.cc/a30bd870           
     tk-dtf-compact           delivered      0d     800  TK DTF 生产图纵向压…  
                                                                                 
    paid  1                                         2,800                        

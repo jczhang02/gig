@@ -607,7 +607,7 @@ pub(crate) mod tests {
         let r = s.order(order.id).unwrap();
         assert_eq!(r.group, Group::Unpaid);
         assert_eq!(r.days_in_status, Some(7));
-        assert_eq!(r.next_action, "collect payment");
+        assert_eq!(r.next_action, "await client confirmation");
         assert!(r.job.found);
         assert_eq!(r.job.latest_status(), Some("2026-09-21: 预览完成."));
         assert_eq!(r.job.open_questions, vec!["2026-09-20: 输出 PNG 吗?"]);

@@ -140,7 +140,7 @@ impl Order {
         match self.status {
             OrderStatus::Queued => "start".into(),
             OrderStatus::InProgress => "preview or pack".into(),
-            OrderStatus::Delivered => "collect payment".into(),
+            OrderStatus::Delivered => "await client confirmation".into(),
             OrderStatus::Paid => match &self.warranty_until {
                 Some(until) if until.as_str() > today => format!("warranty until {until}"),
                 _ => "archive".into(),

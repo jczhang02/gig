@@ -226,7 +226,7 @@ fn full_lifecycle_with_phone_delivery() {
     let ls = env.ok(&["ls"]);
     let row = &ls["orders"][0];
     assert_eq!(row["unpaid"], true);
-    assert_eq!(row["next_action"], "collect payment");
+    assert_eq!(row["next_action"], "await client confirmation");
 
     // paid, scorecard, archive
     let paid = env.ok(&["paid", "pdf-tool", "--date", "2026-01-01"]);

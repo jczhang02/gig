@@ -234,10 +234,12 @@ fn heading_line(cx: &RenderCx, c: &Columns, h: Heading, rows: &[&OrderRow]) -> L
     ])
 }
 
-/// `warranty until 2026-10-05` shortened to `until 10-05` for the column.
+/// `warranty until 2026-10-05` shortened to `until 10-05` for the column,
+/// `await client confirmation` to `await confirm`.
 fn next_short(next: &str) -> String {
     match next.strip_prefix("warranty until ") {
         Some(d) => format!("until {}", d.get(5..).unwrap_or(d)),
+        None if next == "await client confirmation" => "await confirm".into(),
         None => next.to_string(),
     }
 }
@@ -459,6 +461,6 @@ mod tests {
         );
         assert_eq!(split_dated("no date"), (None, "no date"));
         assert_eq!(next_short("warranty until 2026-10-05"), "until 10-05");
-        assert_eq!(next_short("collect payment"), "collect payment");
+        assert_eq!(next_short("await client confirmation"), "await confirm");
     }
 }
