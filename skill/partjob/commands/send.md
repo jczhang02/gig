@@ -20,4 +20,4 @@ Send a checked package out. JC approves; the agent acts. Without JC's explicit "
 
 ## Reply
 
-The full link (easy to copy) and its expiry date; for pan also the extraction code `pwd` on its own line, in case the client types it by hand. Or "sent to the phone": GSConnect accepted the transfer, whether the phone received it is not known, JC checks. The order's current state. If this session has already been compacted, suggest `/partjob handoff` and a fresh session that starts with `/partjob status`. Do not dress anything beyond the link up as a message for the client; client communication is JC's.
+The full link (easy to copy) and its expiry date; for pan also the extraction code `pwd` on its own line, in case the client types it by hand. Or "sent to the phone": GSConnect accepted the transfer, whether the phone received it is not known, JC checks. The order's current state. Do not dress anything beyond the link up as a message for the client; client communication is JC's.
