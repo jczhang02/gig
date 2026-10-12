@@ -11,4 +11,4 @@ Something came up that the client has to answer. The agent never contacts the cl
 
 ## Reply
 
-One block JC can copy and forward whole, plus one sentence on what continues under which assumption meanwhile.
+One block of plain numbered lines JC can copy and forward whole, plus one sentence on what continues under which assumption meanwhile.

@@ -191,7 +191,7 @@ Project-specific (in the project's AGENTS.md, drafted per type and then complete
 - Included: visual evidence of results (before/after comparisons, screenshots, metrics tables, the report's summary pages), a few processed results from the client's own samples (tk's 19 comparison images are the example), a short video or GIF of the program running.
 - Excluded: source code, executables, the full batch of results, the full report, copyable data files.
 - Form: a `<slug>-vX.Y.Z-preview/` package with the same manifest check and upload; the client views it in a browser. Watermarking is JC's call.
-- Defaults by type: tool = comparison images and a demo GIF; reproduction / analysis = key figures and summary pages; writing = table of contents and one section.
+- Defaults by type: tool = comparison images and a demo GIF; reproduction / analysis = key figures and summary pages; writing = watermarked results pages (abstract, key tables and figures).
 
 ### 5.2 Full delivery
 
@@ -275,7 +275,7 @@ The v1 database `~/.local/share/gig/gig.db`:
 
 The OSS access key, secret and short-link token from `~/.config/gig/config.toml` moved to `secrets.toml`; the old file was deleted.
 
-Migration touched only the database and configuration. v2's project rules apply to new orders; the existing four project directories were not retrofitted.
+Migration touched only the database and configuration. v2's project rules apply to new orders; the existing four project directories were not retrofitted at migration. `start` has an adopt checklist for such orders (bllc-reproduction was adopted on 2026-10-08).
 
 ## Appendix C. Acceptance criteria (agreed with JC 2026-09-29)
 

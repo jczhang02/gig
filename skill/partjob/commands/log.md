@@ -11,10 +11,11 @@ At the end of a phase, or before a session ends, append one entry to "Status" in
 - Where the outputs are: result directories, delivery directory.
 - What is not done or not verified (for example "Windows interaction not tested on a real desktop").
 - Whether anything was sent out (default "not sent out yet").
+- How many questions the agent asked in this phase that JC had already answered ("repeat questions: N"); `archive` sums them.
 
 ## Also
 
-- Overwrite the "Now" section of JOB.md: at most five lines (phase and latest version, last thing sent out, what waits on JC, next step). It is the only part of JOB.md that is rewritten, not appended. A JOB.md without it gets it under the title.
+- Overwrite the "Now" section of JOB.md: at most five lines (phase and latest version with the absolute path of its package, last thing sent out, what waits on JC, next step). It is the only part of JOB.md that is rewritten, not appended. A JOB.md without it gets it under the title.
 - Report the size of `.scratch/` (`du -sh .scratch`) and ask JC once whether to clear it. Clearing is deleting: without JC's yes it stays.
 - Anything worth remembering across orders (a platform habit, a pitfall in a type of client material) goes to gig with `gig note "<one sentence>"`, where `status` will show it later.
 - List the commits made during the phase; explain any uncommitted changes.

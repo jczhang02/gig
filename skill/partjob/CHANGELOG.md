@@ -2,6 +2,17 @@
 
 One line per change made through `/partjob rule`: date (source), one sentence.
 
+- 2026-10-12 (retro): later requests in a session re-read the command file; the Skill tool cannot load partjob; `~/dev/partjobs/AGENTS.md` and every AGENTS template point sessions started without `/partjob` to the skill.
+- 2026-10-12 (retro): `.gitattributes` template marks `.gig`, AGENTS.md and other project records `export-ignore`; pack relies on it and gig's package check scans nested zips.
+- 2026-10-12 (retro): start asks once about client payment vs JC's share (`--cut-ratio`), prepayment, and whose words they are; QUOTE.md holds only facts JC stated; a new "Adopting a project set up by hand" checklist.
+- 2026-10-12 (retro): new `AGENTS.research_writing.md.j2` (terms from the manuscript and literature only, field reporting conventions, grill first, Zotero first, private LaTeX build); writing previews are watermarked results pages.
+- 2026-10-12 (retro): project-record rules (failures visible, aggregation stated) do not govern client text; manuscripts follow the journal's punctuation; notes for JC alone may be Markdown, JC-only material goes in `reports/internal/`.
+- 2026-10-12 (retro): send gets "Sent by JC" (`--channel other`), a second rehearsal with the chosen `--uploader`, and the `delivery.bdpan.bin` fix; status lists legacy orders and full packages never recorded as sent.
+- 2026-10-12 (retro): pack lists top-level entries with sizes before building, checks Windows reproduction on the same VM (vm.md "Reproduction check") and output metadata, edits a patch report in place, runs the humanizer skill itself, and reports paths and the `.scratch/` size.
+- 2026-10-12 (retro): replies use JC's language, absolute paths, and plain numbered lines for forwardable text; a pending question goes into "Now" once; a client unknown that blocks twice becomes an `ask` item.
+- 2026-10-12 (retro): gig defects go into TODO-gig.md at once and are committed; rule deletes a rule when JC asks instead of adding its opposite (rule.md limit deleted).
+- 2026-10-12 (retro): other agents run outside `~/dev/partjobs` with their own HOME; metered calls name the provider; long jobs use one background waiter; archive checks `git ls-files` before deleting; decide lists data of a superseded route; log counts repeat questions for the scorecard.
+- 2026-10-12 (retro): CodeBuild runbook gets a TLS EOF row and a one-time credit question; gig.md documents `--cut-ratio`, `--currency`, output shapes, the full banned-name list and the gig source path.
 - 2026-10-12 (retro): build defaults to `--via vm`; CodeBuild when the VM cannot be used; GitHub Actions only when JC decides it (for example macOS), and naming that channel does not approve the push.
 - 2026-10-12 (retro): an "ok" to a plan item does not approve an action whose object did not exist yet; show the object and ask again (thermal-video-curve send).
 - 2026-10-12 (retro): a yes to a numbered list approves only the items and content shown; unshown values such as QUOTE.md defaults stay "(to fill)" (bllc-reproduction adopt).

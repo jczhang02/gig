@@ -6,10 +6,10 @@ After JC is satisfied, show the client evidence, not the product. A preview conv
 
 - Tool jobs: a few processed results from the client's own samples (before/after comparisons), a GIF or screenshots of the program running.
 - Reproduction / analysis jobs: the key figures, the report's summary pages (first one or two pages as images or a separate PDF).
-- Writing jobs: the table of contents plus one section.
+- Writing jobs: watermarked results pages: the abstract, key tables and figures.
 - Any job: a one-page metrics table.
 
-Never: source code, executables, the full batch of results, the full report, copyable data files. Watermarking is JC's call.
+Never: source code, executables, the full batch of results, the full report, copyable data files, material written for JC (an install manual meant for JC, internal notes). Watermarking is JC's call.
 
 ## Preconditions
 
@@ -18,7 +18,7 @@ Never: source code, executables, the full batch of results, the full report, cop
 ## Steps
 
 1. The version defaults to the latest vX.Y.Z in JOB.md "Status", else v1.0.0. The package id is `<slug>-vX.Y.Z-preview`.
-2. Candidate first: put the preview files under `.scratch/preview/<package-id>/` with English names and show them to JC. Change them there until JC says this is the version to send. Nothing is registered in gig yet, so a superseded candidate leaves no package record.
+2. Candidate first: put the preview files under `.scratch/preview/<package-id>/` with English names and show them to JC. Change them there until JC says this is the version to send. Nothing is registered in gig yet, so a superseded candidate leaves no package record. A preview registered and never sent is removed with `gig package drop <package-id>` (dry run first; deleting needs JC's approval).
 3. Move the agreed files to `delivery/<package-id>/` (client-named originals may stay under `results/`, see step 4).
 4. `gig package build <package-id> --kind preview --write-manifest`. Client-named files (Chinese, spaces) go in one subdirectory, declared with `--client-named results/`.
 5. On failure (`unsafe_package`) fix what the message names: usually hidden files, non-ASCII names outside a `--client-named` directory, key-like files.

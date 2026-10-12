@@ -32,7 +32,7 @@ From the skill's `templates/build/`: `buildspec.yml` at the project root, `build
 
 ## Each build
 
-Prerequisite: `aws login` not expired. Set the region explicitly on every command; the default in `~/.aws/config` has been an invalid availability-zone name before (fixing it once with `aws configure set region us-west-2` is better than carrying the workaround).
+Prerequisite: `aws login` not expired, and, before an order's first paid build, JC's answer to one question: does the AWS account have credit? Set the region explicitly on every command; the default in `~/.aws/config` has been an invalid availability-zone name before (fixing it once with `aws configure set region us-west-2` is better than carrying the workaround).
 
 ```bash
 export AWS_REGION=us-west-2
@@ -82,6 +82,7 @@ Billing is per build minute, rounded up. Windows medium is about 0.018 USD per m
 |---|---|
 | `SSL validation failed for https://sts.<zone>.amazonaws.com/` | The default region is an availability-zone name. `export AWS_REGION=us-west-2`, or fix `~/.aws/config` |
 | `Your session has expired` | Run `aws login` |
+| TLS EOF or connection reset with the region already correct | AWS-side network trouble, or the account cannot be charged. Retry once, then report and stop; JC uses no proxy, so local network probes find nothing |
 | Stuck in QUEUED | Cold Windows container, or another build is running (concurrency 1). Cancelled after 30 minutes |
 | BUILD fails within seconds | Read the log (step 4). Usually the exit-code check or the file encoding, see above |
 | `no matching artifact paths found` | An earlier step failed, or the artifact path in `buildspec.yml` is wrong |

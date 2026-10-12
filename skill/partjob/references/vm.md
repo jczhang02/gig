@@ -56,6 +56,10 @@ Options: `--keep` leaves the work directory after success too. `PARTJOB_VM` sele
 
 A failed build leaves `C:\pj\<slug>` in place. Look at it with `ssh win11`; the next build of the same project removes it.
 
+## Reproduction check
+
+`pack` compares the delivered exe with a source run on the same VM, never with a Linux run. Start the VM first (`virsh -c qemu:///system start win11`) so the script leaves it running, run `vm-build.sh --keep`, copy this batch's inputs into the kept work directory over `ssh win11`, run the source (`uv run ...`) and the exe from `dist\` on them into two output directories, and compare their sha256 lists. Remove the inputs and outputs afterwards: they are client data. Record the result in JOB.md, and shut the VM down when it was off before.
+
 ## Time
 
 Measured with thermal-video-curve: upload 1 s, uv, Python and dependencies 16 s cold or 1 s warm, tests 8 s, PyInstaller 53 to 60 s, smoke test 4 s, zip 9 s (`tar.exe`), fetch of a 113 MB zip about 1 s. The same project took 196 s on GitHub Actions (PyInstaller alone 112 s); CodeBuild took 136 s for the smaller tk-dtf-compact. The VM shares the workstation CPU, so builds slow down when the host is busy.
