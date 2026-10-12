@@ -240,13 +240,18 @@ pub struct DryRunUploader {
 impl DryRunUploader {
     /// The dry run of an upload through `name` (`--uploader`, else
     /// `delivery.uploader`), checked as a real run checks it
-    /// ([`check_uploader_name`]); "" names no uploader.
+    /// ([`check_uploader_name`]); "" names no uploader. A bdpan binary that
+    /// does not resolve is the same config error a real run gives.
     pub fn new(config: &Config, name: &str) -> Result<Self> {
         if name.is_empty() {
             return Ok(Self::default());
         }
+        let parsed = check_uploader_name(config, name)?;
+        if parsed == UploaderName::Bdpan && !bdpan::bin_resolves(&config.delivery.bdpan.bin) {
+            return Err(bdpan::not_found(&config.delivery.bdpan.bin));
+        }
         Ok(Self {
-            name: check_uploader_name(config, name)?.to_string(),
+            name: parsed.to_string(),
         })
     }
 }
@@ -479,6 +484,17 @@ mod tests {
             Ok(u) => panic!("{name} should be refused, built {}", u.name()),
             Err(e) => e,
         }
+    }
+
+    #[test]
+    fn dry_run_needs_the_bdpan_binary_to_resolve() {
+        let mut cfg = Config::default();
+        cfg.delivery.bdpan.bin = "/nonexistent-gig-dir/bdpan".into();
+        let err = DryRunUploader::new(&cfg, "bdpan").unwrap_err();
+        assert_eq!(err.code(), "config");
+        assert!(err.to_string().contains("not found"), "{err}");
+        cfg.delivery.bdpan.bin = "sh".into();
+        assert_eq!(DryRunUploader::new(&cfg, "bdpan").unwrap().name(), "bdpan");
     }
 
     #[test]

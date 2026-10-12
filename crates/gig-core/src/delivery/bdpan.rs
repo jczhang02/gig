@@ -58,6 +58,13 @@ pub fn share_period_days(ttl_seconds: u32) -> u32 {
         .unwrap_or(LONGEST_SHARE_PERIOD)
 }
 
+/// The config error for a bdpan binary that does not resolve.
+pub(crate) fn not_found(bin: &str) -> Error {
+    Error::Config(format!(
+        "bdpan binary {bin:?} not found; install bdpan or set delivery.bdpan.bin"
+    ))
+}
+
 /// True when `bin` names an executable file: a path as given, or a bare
 /// name found on PATH (what running it would find).
 pub fn bin_resolves(bin: &str) -> bool {
@@ -303,9 +310,7 @@ impl CallError {
 
     fn into_error(self, bin: &str, subcommand: &str) -> Error {
         match self {
-            CallError::NotFound => Error::Config(format!(
-                "bdpan binary {bin:?} not found; install bdpan or set delivery.bdpan.bin"
-            )),
+            CallError::NotFound => not_found(bin),
             CallError::NotExecutable => Error::Config(format!(
                 "bdpan binary {bin:?} is not executable; fix its mode or set delivery.bdpan.bin"
             )),
