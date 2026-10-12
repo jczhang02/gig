@@ -263,6 +263,8 @@ Layout is fixed: `<dev_path>/delivery/<package-id>/`, `<dev_path>/delivery/<pack
   Data: `{ package, order_status, url, short_url, expires_at, uploader, pwd, size, dry_run, warnings }`; `uploader` is also set on a dry run; `uploader` is left out when no uploader is known (a dry run with an empty default) and `pwd` when the uploader returned none.
 - `gig package sent [<slug>] <package-id> --channel phone|other [--note TEXT] [--yes]`
   For packages JC sends by hand (gsconnect to phone, then forwarded). Same re-validation and state change as upload, no remote URL.
+- `gig package drop [<slug>] <package-id> [--yes]`
+  Removes a package that was never sent, typically an abandoned preview candidate that stays listed as `unsent`: its database row and, when they exist, `delivery/<package-id>/`, `delivery/<package-id>.manifest.toml` and `delivery/<package-id>.zip`. Without `--yes` it is a dry run. A sent package is refused (`invalid_state`); a package with neither row nor files is `not_found`. Data: `{ package_id, package, removed: [...], dry_run }`; `package` is null when only files were left, `removed` lists the row and the paths removed, or on a dry run what would be.
 - `gig package ls [<slug>]`
 
 Validation rules (ported and extended):

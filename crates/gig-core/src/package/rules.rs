@@ -221,7 +221,9 @@ mod tests {
 
     #[test]
     fn banned_component_error_names_the_set() {
-        let e = check_path("codex-config/prompts", &[]).unwrap_err().to_string();
+        let e = check_path("codex-config/prompts", &[])
+            .unwrap_err()
+            .to_string();
         assert!(e.contains("node_modules") && e.contains("rename"), "{e}");
     }
 

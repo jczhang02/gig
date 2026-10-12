@@ -119,3 +119,8 @@ pub fn mark_sent(conn: &Connection, id: i64, s: &Sent<'_>) -> Result<()> {
     )?;
     Ok(())
 }
+
+pub fn delete(conn: &Connection, id: i64) -> Result<()> {
+    conn.execute("DELETE FROM packages WHERE id = ?1", [id])?;
+    Ok(())
+}

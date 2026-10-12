@@ -455,7 +455,12 @@ mod tests {
     fn nested_zip_entries_follow_the_hard_rules() {
         let (_d, dev) = with_source_zip(&[("src/main.py", b"x"), ("pkg/__init__.py", b"")]);
         build::build(&dev, "p-v1", PackageKind::Full, true, &[]).unwrap();
-        for bad in [".gig/QUOTE.md", ".scratch/a.md", "prompts/x.md", "a/.git/config"] {
+        for bad in [
+            ".gig/QUOTE.md",
+            ".scratch/a.md",
+            "prompts/x.md",
+            "a/.git/config",
+        ] {
             let (_d, dev) = with_source_zip(&[("src/main.py", b"x"), (bad, b"q")]);
             let e = build::build(&dev, "p-v1", PackageKind::Full, true, &[]).unwrap_err();
             assert_eq!(e.code(), "unsafe_package", "{bad}");
@@ -465,7 +470,10 @@ mod tests {
         let inner = zip_bytes(&[(".gig/JOB.md", b"j")]);
         let (_d, dev) = with_source_zip(&[("deep.zip", &inner)]);
         let e = build::build(&dev, "p-v1", PackageKind::Full, true, &[]).unwrap_err();
-        assert!(e.to_string().contains("source.zip!/deep.zip!/.gig/JOB.md"), "{e}");
+        assert!(
+            e.to_string().contains("source.zip!/deep.zip!/.gig/JOB.md"),
+            "{e}"
+        );
     }
 
     #[test]

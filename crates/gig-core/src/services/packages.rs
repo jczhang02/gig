@@ -147,6 +147,84 @@ pub fn list(ctx: &Ctx, key: Option<&str>) -> Result<Vec<Package>> {
 }
 
 #[derive(Debug, Serialize)]
+pub struct DropResult {
+    pub package_id: String,
+    /// The database row; None when only files were left on disk.
+    pub package: Option<Package>,
+    /// What was removed, or on a dry run what would be: the row, then the
+    /// package directory, manifest and zip that exist.
+    pub removed: Vec<String>,
+    pub dry_run: bool,
+}
+
+/// Remove a package that was never sent: its row and its files under
+/// `delivery/`. A sent package is refused.
+pub fn drop_package(
+    ctx: &Ctx,
+    key: Option<&str>,
+    package_id: &str,
+    yes: bool,
+) -> Result<DropResult> {
+    crate::package::rules::validate_package_id(package_id)?;
+    let order = context::resolve_key_or_cwd(&ctx.conn, key)?;
+    let dev = order
+        .dev_path
+        .as_deref()
+        .map(PathBuf::from)
+        .ok_or_else(|| Error::InvalidState("order has no dev_path".into()))?;
+    let row = repo::find(&ctx.conn, order.id, package_id)?;
+    if row
+        .as_ref()
+        .is_some_and(|p| p.status == PackageStatus::Sent)
+    {
+        return Err(Error::InvalidState(format!(
+            "{package_id} was sent; a sent package is not dropped"
+        )));
+    }
+    let layout = Layout::new(&dev, package_id);
+    let on_disk: Vec<&PathBuf> = [&layout.package_dir, &layout.manifest_path, &layout.zip_path]
+        .into_iter()
+        .filter(|p| std::fs::symlink_metadata(p).is_ok())
+        .collect();
+    if row.is_none() && on_disk.is_empty() {
+        return Err(Error::NotFound(format!("package {package_id}")));
+    }
+    let mut removed = Vec::new();
+    if row.is_some() {
+        removed.push(format!("database row {package_id}"));
+    }
+    removed.extend(on_disk.iter().map(|p| p.display().to_string()));
+    if !yes {
+        return Ok(DropResult {
+            package_id: package_id.to_string(),
+            package: row,
+            removed,
+            dry_run: true,
+        });
+    }
+    for p in on_disk {
+        let meta =
+            std::fs::symlink_metadata(p).map_err(|e| Error::PathUnavailable(p.clone(), e))?;
+        // remove_dir_all follows no symlinks; a symlinked entry is unlinked.
+        let res = if meta.is_dir() {
+            std::fs::remove_dir_all(p)
+        } else {
+            std::fs::remove_file(p)
+        };
+        res.map_err(|e| Error::PathUnavailable(p.clone(), e))?;
+    }
+    if let Some(p) = &row {
+        repo::delete(&ctx.conn, p.id)?;
+    }
+    Ok(DropResult {
+        package_id: package_id.to_string(),
+        package: row,
+        removed,
+        dry_run: false,
+    })
+}
+
+#[derive(Debug, Serialize)]
 pub struct SendResult {
     pub package: Package,
     pub order_status: OrderStatus,
@@ -425,6 +503,47 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("manual.pdf"), "pdf").unwrap();
         o
+    }
+
+    #[test]
+    fn drop_removes_an_unsent_package_and_refuses_a_sent_one() {
+        let root = tempfile::tempdir().unwrap();
+        let ctx = Ctx::for_test(root.path());
+        let o = with_package(&ctx, "dropme", "p-v1");
+        let delivery = Path::new(o.dev_path.as_ref().unwrap()).join("delivery");
+        let build = |id: &str| {
+            build_package(&ctx, Some("dropme"), id, PackageKind::Preview, true, &[]).unwrap()
+        };
+        build("p-v1");
+        let dry = drop_package(&ctx, Some("dropme"), "p-v1", false).unwrap();
+        assert!(dry.dry_run && dry.package.is_some());
+        assert_eq!(dry.removed.len(), 4, "{:?}", dry.removed);
+        assert!(delivery.join("p-v1.zip").exists());
+        assert_eq!(list(&ctx, Some("dropme")).unwrap().len(), 1);
+        let done = drop_package(&ctx, Some("dropme"), "p-v1", true).unwrap();
+        assert!(!done.dry_run);
+        assert!(!delivery.join("p-v1").exists());
+        assert!(!delivery.join("p-v1.zip").exists());
+        assert!(!delivery.join("p-v1.manifest.toml").exists());
+        assert!(list(&ctx, Some("dropme")).unwrap().is_empty());
+        assert_eq!(
+            drop_package(&ctx, Some("dropme"), "p-v1", true)
+                .unwrap_err()
+                .code(),
+            "not_found"
+        );
+        // sent: refused
+        std::fs::create_dir_all(delivery.join("p-v2")).unwrap();
+        std::fs::write(delivery.join("p-v2/manual.pdf"), "pdf").unwrap();
+        build("p-v2");
+        sent(&ctx, Some("dropme"), "p-v2", Channel::Phone, None, true).unwrap();
+        assert_eq!(
+            drop_package(&ctx, Some("dropme"), "p-v2", true)
+                .unwrap_err()
+                .code(),
+            "invalid_state"
+        );
+        assert!(delivery.join("p-v2.zip").exists());
     }
 
     #[test]

@@ -297,6 +297,12 @@ fn run_with_db(ctx: &Ctx, cmd: Command) -> Result<Output> {
                 let w = r.warnings.clone();
                 out_with(r, w)
             }
+            PackageCmd::Drop(a) => out(packages::drop_package(
+                ctx,
+                a.order.as_deref(),
+                &a.package_id,
+                a.yes,
+            )?),
             PackageCmd::Ls(a) => out(packages::list(ctx, a.get())?),
         },
         Command::Artifact(ar) => match ar {

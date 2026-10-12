@@ -380,6 +380,8 @@ pub enum PackageCmd {
     Upload(PackageUploadArgs),
     /// Record a package sent by hand (phone, other)
     Sent(PackageSentArgs),
+    /// Remove a package that was never sent (row, directory, manifest, zip)
+    Drop(PackageDropArgs),
     /// Packages of an order
     Ls(KeyArg),
 }
@@ -391,6 +393,7 @@ impl PackageCmd {
             PackageCmd::Check(_) => "check",
             PackageCmd::Upload(_) => "upload",
             PackageCmd::Sent(_) => "sent",
+            PackageCmd::Drop(_) => "drop",
             PackageCmd::Ls(_) => "ls",
         }
     }
@@ -441,6 +444,15 @@ pub struct PackageUploadArgs {
     /// Uploader for this upload: bdpan or s3:<name> (default: delivery.uploader)
     #[arg(long)]
     pub uploader: Option<String>,
+    #[arg(long)]
+    pub yes: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct PackageDropArgs {
+    #[arg(long)]
+    pub order: Option<String>,
+    pub package_id: String,
     #[arg(long)]
     pub yes: bool,
 }
