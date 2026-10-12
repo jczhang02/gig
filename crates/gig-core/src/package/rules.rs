@@ -67,7 +67,7 @@ pub fn check_path(path: &str, client_named: &[String]) -> Result<Convention> {
         }
     }
     Err(Error::UnsafePackage(format!(
-        "{path:?} does not follow the naming convention (ASCII letters, digits, '.', '_', '-', '/'; components start with a letter or digit); list its directory in manifest client_named to allow client-derived names"
+        "{path:?} does not follow the naming convention (ASCII letters, digits, '.', '_', '-', '/'; components start with a letter, digit or '_'); list its directory in manifest client_named to allow client-derived names"
     )))
 }
 
@@ -107,7 +107,13 @@ pub(crate) fn hard(path: &str) -> Result<()> {
         }
         let lower = c.to_ascii_lowercase();
         if BANNED_COMPONENTS.contains(&lower.as_str()) {
-            return unsafe_path(path, &format!("internal or workflow component {c:?}"));
+            return unsafe_path(
+                path,
+                &format!(
+                    "internal or workflow component {c:?}; banned directory names: {}; rename or exclude the directory (e.g. prompts -> agent-notes) or leave it out of the package",
+                    BANNED_COMPONENTS.join(", ")
+                ),
+            );
         }
     }
     let base = components
@@ -115,10 +121,22 @@ pub(crate) fn hard(path: &str) -> Result<()> {
         .expect("non-empty split")
         .to_ascii_lowercase();
     if BANNED_SUFFIXES.iter().any(|s| base.ends_with(s)) {
-        return unsafe_path(path, "looks like a private key");
+        return unsafe_path(
+            path,
+            &format!(
+                "looks like a private key (banned suffixes: {}); rename or leave it out of the package",
+                BANNED_SUFFIXES.join(", ")
+            ),
+        );
     }
     if BANNED_PREFIXES.iter().any(|p| base.starts_with(p)) {
-        return unsafe_path(path, "looks like a secret or credential file");
+        return unsafe_path(
+            path,
+            &format!(
+                "looks like a secret or credential file (banned name prefixes: {}); rename the file or leave it out of the package",
+                BANNED_PREFIXES.join(", ")
+            ),
+        );
     }
     if base == "config.toml" && components.iter().any(|c| c.eq_ignore_ascii_case("gig")) {
         return unsafe_path(path, "gig config file");
@@ -128,7 +146,9 @@ pub(crate) fn hard(path: &str) -> Result<()> {
 
 fn conforms(path: &str) -> bool {
     path.split('/').all(|c| {
-        c.as_bytes().first().is_some_and(u8::is_ascii_alphanumeric)
+        c.as_bytes()
+            .first()
+            .is_some_and(|b| b.is_ascii_alphanumeric() || *b == b'_')
             && c.bytes()
                 .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
     })
@@ -160,6 +180,8 @@ mod tests {
             "results/1-234.png",
             "a/b/c.txt",
             "v1.2_x-y.zip",
+            "bllc/__init__.py",
+            "bllc/__main__.py",
         ] {
             ok(p);
         }
@@ -181,6 +203,8 @@ mod tests {
             "internal/notes.md",
             "prompts/x.md",
             "a/node_modules/b",
+            "a/__pycache__/x.pyc",
+            "src/venv/bin/x",
             "id_rsa",
             "keys/server.pem",
             "secrets.toml",
@@ -193,6 +217,12 @@ mod tests {
         ] {
             bad(p);
         }
+    }
+
+    #[test]
+    fn banned_component_error_names_the_set() {
+        let e = check_path("codex-config/prompts", &[]).unwrap_err().to_string();
+        assert!(e.contains("node_modules") && e.contains("rename"), "{e}");
     }
 
     #[test]
