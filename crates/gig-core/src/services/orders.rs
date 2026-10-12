@@ -543,6 +543,24 @@ pub(crate) mod tests {
         assert!(dev.join(".git").exists() || created.warnings.iter().any(|w| w.contains("git")));
     }
 
+    #[test]
+    fn scaffold_renders_the_optional_gitattributes_template() {
+        let root = tempfile::tempdir().unwrap();
+        let ctx = Ctx::for_test(root.path());
+        make(&ctx, "plain");
+        assert!(!root.path().join("dev/plain/.gitattributes").exists());
+        std::fs::write(
+            ctx.config.general.templates_dir.join("gitattributes"),
+            ".gig export-ignore\n",
+        )
+        .unwrap();
+        make(&ctx, "attrs");
+        assert_eq!(
+            std::fs::read_to_string(root.path().join("dev/attrs/.gitattributes")).unwrap(),
+            ".gig export-ignore\n"
+        );
+    }
+
     fn make_result(ctx: &Ctx, slug: &str) -> Result<OrderCreated> {
         new(
             ctx,

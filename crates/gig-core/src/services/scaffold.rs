@@ -78,13 +78,17 @@ pub fn create(config: &Config, order: &Order, draft_notes: Option<&str>) -> Resu
     }
     let ctx = template_context(order, draft_notes, config.general.warranty_days);
     let agents = templates::agents_template(tdir, order.project_type.as_str());
-    let files: [(&str, PathBuf); 5] = [
+    let mut files = vec![
         (".gig/JOB.md", PathBuf::from("JOB.md.j2")),
         (".gig/QUOTE.md", PathBuf::from("QUOTE.md.j2")),
         ("AGENTS.md", agents),
         ("README.md", PathBuf::from("README.md.j2")),
         (".gitignore", PathBuf::from("gitignore")),
     ];
+    // Optional, like the typed AGENTS template.
+    if tdir.join("gitattributes").is_file() {
+        files.push((".gitattributes", PathBuf::from("gitattributes")));
+    }
     let mut created = Vec::new();
     std::fs::create_dir_all(dev_path.join(".gig"))
         .map_err(|e| Error::PathUnavailable(dev_path.join(".gig"), e))?;
