@@ -210,10 +210,11 @@ fn check_zip(zip_path: &Path, files: &[String]) -> Result<()> {
     let allowed: HashSet<&str> = files.iter().map(String::as_str).collect();
     let mut seen = HashSet::new();
     for i in 0..archive.len() {
-        let entry = archive
+        let mut entry = archive
             .by_index(i)
             .map_err(|e| Error::UnsafePackage(format!("invalid zip entry #{i} ({e})")))?;
-        let raw = entry.name();
+        let raw = entry.name().to_string();
+        let raw = raw.as_str();
         let name = raw.trim_end_matches('/');
         rules::hard(name)?;
         if let Some(mode) = entry.unix_mode() {
@@ -230,6 +231,13 @@ fn check_zip(zip_path: &Path, files: &[String]) -> Result<()> {
                 )));
             }
         } else {
+            if name.to_ascii_lowercase().ends_with(".zip") {
+                let mut bytes = Vec::new();
+                entry.read_to_end(&mut bytes).map_err(|e| {
+                    Error::UnsafePackage(format!("cannot read zip entry {name:?} ({e})"))
+                })?;
+                check_inner_zip(name, bytes, 1)?;
+            }
             if !allowed.contains(name) {
                 return Err(Error::UnsafePackage(format!(
                     "zip entry {name:?} is not in the manifest"
@@ -247,6 +255,40 @@ fn check_zip(zip_path: &Path, files: &[String]) -> Result<()> {
             return Err(Error::UnsafePackage(format!(
                 "manifest file {f:?} is missing from the zip"
             )));
+        }
+    }
+    Ok(())
+}
+
+/// Longest chain of zips inside zips that is opened.
+const MAX_ZIP_DEPTH: usize = 3;
+
+/// Apply the hard rules to the entries of a zip inside the package. Paths
+/// are reported as `outer.zip!/inner/path`; zips inside it are opened too.
+fn check_inner_zip(label: &str, bytes: Vec<u8>, depth: usize) -> Result<()> {
+    if depth > MAX_ZIP_DEPTH {
+        return Err(Error::UnsafePackage(format!(
+            "{label:?}: zips nested more than {MAX_ZIP_DEPTH} deep"
+        )));
+    }
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes))
+        .map_err(|e| Error::UnsafePackage(format!("invalid zip {label:?} ({e})")))?;
+    for i in 0..archive.len() {
+        let mut entry = archive
+            .by_index(i)
+            .map_err(|e| Error::UnsafePackage(format!("invalid entry #{i} in {label:?} ({e})")))?;
+        let name = entry.name().trim_end_matches('/').to_string();
+        let full = format!("{label}!/{name}");
+        rules::hard(&full)?;
+        if entry.unix_mode().is_some_and(|m| m & 0o170000 == 0o120000) {
+            return Err(Error::UnsafePackage(format!("{full:?} is a symlink")));
+        }
+        if !entry.is_dir() && name.to_ascii_lowercase().ends_with(".zip") {
+            let mut inner = Vec::new();
+            entry
+                .read_to_end(&mut inner)
+                .map_err(|e| Error::UnsafePackage(format!("cannot read {full:?} ({e})")))?;
+            check_inner_zip(&full, inner, depth + 1)?;
         }
     }
     Ok(())
@@ -391,6 +433,39 @@ mod tests {
         assert!(c.warnings.iter().any(|w| w.contains("client-named")));
         let m = Manifest::read(&dev.join("delivery/p-v1.manifest.toml")).unwrap();
         assert_eq!(m.client_named, vec!["results/"]);
+    }
+
+    fn zip_bytes(entries: &[(&str, &[u8])]) -> Vec<u8> {
+        let mut w = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        for (name, data) in entries {
+            w.start_file(*name, zip::write::FileOptions::default())
+                .unwrap();
+            w.write_all(data).unwrap();
+        }
+        w.finish().unwrap().into_inner()
+    }
+
+    fn with_source_zip(entries: &[(&str, &[u8])]) -> (tempfile::TempDir, PathBuf) {
+        let (d, dev) = project(&[("manual.pdf", "x")]);
+        fs::write(dev.join("delivery/p-v1/source.zip"), zip_bytes(entries)).unwrap();
+        (d, dev)
+    }
+
+    #[test]
+    fn nested_zip_entries_follow_the_hard_rules() {
+        let (_d, dev) = with_source_zip(&[("src/main.py", b"x"), ("pkg/__init__.py", b"")]);
+        build::build(&dev, "p-v1", PackageKind::Full, true, &[]).unwrap();
+        for bad in [".gig/QUOTE.md", ".scratch/a.md", "prompts/x.md", "a/.git/config"] {
+            let (_d, dev) = with_source_zip(&[("src/main.py", b"x"), (bad, b"q")]);
+            let e = build::build(&dev, "p-v1", PackageKind::Full, true, &[]).unwrap_err();
+            assert_eq!(e.code(), "unsafe_package", "{bad}");
+            assert!(e.to_string().contains(&format!("source.zip!/{bad}")), "{e}");
+        }
+        // a zip inside the nested zip is opened too
+        let inner = zip_bytes(&[(".gig/JOB.md", b"j")]);
+        let (_d, dev) = with_source_zip(&[("deep.zip", &inner)]);
+        let e = build::build(&dev, "p-v1", PackageKind::Full, true, &[]).unwrap_err();
+        assert!(e.to_string().contains("source.zip!/deep.zip!/.gig/JOB.md"), "{e}");
     }
 
     #[test]
