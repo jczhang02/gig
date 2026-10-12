@@ -26,7 +26,7 @@ When the arguments are not a subcommand name (JC speaks plainly: `/partjob the c
 | `log` | kickoff | End of a phase: append a status entry |
 | `dogfood [version]` | delivery | JC tries the work before any preview; findings become decisions |
 | `preview [version]` | delivery | Show JC a preview candidate, then build and check the package |
-| `build [targets] [--via actions\|codebuild\|vm]` | delivery | Executables, only for orders whose decisions call for them; GitHub Actions by default, CodeBuild or the local Windows VM when the source must not go to a git host |
+| `build [targets] [--via actions\|codebuild\|vm]` | delivery | Executables, only for orders whose decisions call for them; the local Windows VM by default, CodeBuild when the VM cannot be used, GitHub Actions only when JC decides it (for example macOS) |
 | `pack [version]` | delivery | Build the full package, run the reproduction check, validate |
 | `send <package-id> [--via pan\|oss\|phone]` | delivery | Upload to Baidu Netdisk (default) or object storage, or send to the phone, after JC approves |
 | `revise` | delivery / warranty | Client feedback: rework or scope change |
@@ -38,6 +38,9 @@ When the arguments are not a subcommand name (JC speaks plainly: `/partjob the c
 ## Actions only JC can approve
 
 Silence, "continue", or an "ok" with no specific object is not approval. Approval covers one action, once.
+
+- An "ok" to a plan item approves the plan, not an action whose object did not exist yet. Once the package, the push or the file list exists, show it and ask again.
+- One yes to a numbered list approves each listed item with the content the list showed. Values the list did not show (for example QUOTE.md fields filled from defaults) are not approved: write "(to fill)" and ask.
 
 1. Sending anything out: uploading a package, sending to the phone, sharing a link.
 2. Pushing to a remote repository.

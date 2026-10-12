@@ -158,7 +158,7 @@ QUOTE.md: project, material id, acceptance date, currency and total, commercial 
 [Practice] Choices that recur across the four projects:
 - Python: uv, pyproject.toml, ruff, pytest, `.python-version`.
 - Configuration: Hydra with YAML (research) or ini plus command line (tools for non-technical clients). Every configuration item can be overridden on the command line (JC's hard requirement).
-- Cross-platform: develop and verify on Linux; clients mostly use Windows. No Windows-only technology. Deliverable programs are PyInstaller onefile builds from GitHub Actions (windows-latest and ubuntu-latest) in a private repository, with the run id and commit recorded.
+- Cross-platform: develop and verify on Linux; clients mostly use Windows. No Windows-only technology. Deliverable programs are PyInstaller onefile builds, by default on the local Windows VM (`build --via vm`); GitHub Actions in a private repository only when JC decides it (for example macOS); the commit and the build reference are recorded.
 - Documents: client documents in Chinese, Kami PDFs with screenshots; a separate developer README.
 - Projects without a local Python use Node/shell locally and run Python remotely.
 - Training and heavy computation on the remote GPU server, environments and caches on the data disk (shanhe-computing-server skill).
@@ -230,7 +230,7 @@ Project-specific (in the project's AGENTS.md, drafted per type and then complete
 | `log` | kickoff | Appends a status entry at the end of a phase (commands, figures, commit, remaining), rewrites "Now", reports the `.scratch/` size |
 | `dogfood [version]` | delivery | JC tries the version before any preview; a run command or local build, a checklist from the decisions; findings become decisions |
 | `preview` | delivery | A candidate in `.scratch/preview/` for JC first; then builds `<slug>-vX.Y.Z-preview/` from the type's default list, writes the manifest, runs `gig package check` |
-| `build [targets] [--via actions\|codebuild\|vm]` | delivery | Executables for orders whose decisions call for them: GitHub Actions (windows, linux, macos) by default, AWS CodeBuild or the local Windows VM (windows) when the source must not go to a git host; records commit and run id, build id or VM log time |
+| `build [targets] [--via actions\|codebuild\|vm]` | delivery | Executables for orders whose decisions call for them: the local Windows VM (windows) by default, AWS CodeBuild (windows) when the VM cannot be used, GitHub Actions (windows, linux, macos) only when JC decides it; records commit and run id, build id or VM log time |
 | `pack [id]` | delivery | Builds the full package with manifest and check; the reproduction check happens here |
 | `send <id> [--via pan\|oss\|phone]` | delivery | After JC's approval, `gig package upload --uploader bdpan` (default), `--uploader s3:<name>` or gsconnect; reports the Pan Share with its code, the short link, or delivery |
 | `revise` | delivery / warranty | Compares client feedback with the decisions: rework or scope change; rework adds decisions, scope changes run `gig change` |

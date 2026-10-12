@@ -2,6 +2,9 @@
 
 One line per change made through `/partjob rule`: date (source), one sentence.
 
+- 2026-10-12 (retro): build defaults to `--via vm`; CodeBuild when the VM cannot be used; GitHub Actions only when JC decides it (for example macOS), and naming that channel does not approve the push.
+- 2026-10-12 (retro): an "ok" to a plan item does not approve an action whose object did not exist yet; show the object and ask again (thermal-video-curve send).
+- 2026-10-12 (retro): a yes to a numbered list approves only the items and content shown; unshown values such as QUOTE.md defaults stay "(to fill)" (bllc-reproduction adopt).
 - 2026-10-12 (thermal-video-curve): send no longer suggests handoff or a fresh session after a compacted session; the sentence is deleted at JC's explicit request (removes part of the 2026-10-08 send rule).
 - 2026-10-08 (chat): build gets `--via vm`, a free Windows channel on the local libvirt VM `win11` run by `scripts/vm-build.sh` (runbook in references/vm.md; a VM it started is shut down afterwards); `codebuild.ps1` becomes the shared `build-windows.ps1` (UTF-8 console, uv installed once, onedir zips with tar.exe); status checks the VM for vm orders.
 - 2026-10-08 (bdpan-uploader): send gets `--via pan` (Baidu Netdisk, the default) beside oss and phone, asks `网盘, OSS, or phone?`, passes `--uploader` explicitly and reports the Pan Share link with its code and `pwd`.

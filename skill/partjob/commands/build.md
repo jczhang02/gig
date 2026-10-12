@@ -13,9 +13,9 @@ Produce the executables an order delivers. Only orders whose confirmed decisions
 
 | Channel | When | Approval | Targets |
 |---|---|---|---|
-| `actions` (default) | A private GitHub repository for the order is acceptable | Pushing to the remote (approval item 2), once per push | windows, linux, macos |
-| `codebuild` | The client's source must not go to any git host, or JC wants no repository for this order | Paid remote resources (approval item 4), once per build | windows only; Linux options in `references/codebuild.md` |
-| `vm` | Same as `codebuild`, built on the local Windows 11 VM `win11` instead: free, and the source never leaves JC's machine. Requires the VM on this workstation | None: local and unpaid; the script deletes only its own VM work directory | windows only |
+| `vm` (default) | Windows targets, on the local Windows 11 VM `win11`: free, and the source never leaves JC's machine. Requires the VM on this workstation | None: local and unpaid; the script deletes only its own VM work directory | windows only |
+| `codebuild` | Windows targets when the VM cannot be used | Paid remote resources (approval item 4), once per build | windows only; Linux options in `references/codebuild.md` |
+| `actions` | Only when JC decides it, for example for macOS. Needs a private GitHub repository for the order | Pushing to the remote (approval item 2), once per push. Naming the channel is not that approval: before the first push, list what goes up (every tracked file, `.gig/QUOTE.md` included) and ask | windows, linux, macos |
 
 macOS builds go through `actions` only (`macos-latest`). CodeBuild macOS needs a reserved Mac fleet with a 24-hour minimum charge and is not used. A macOS binary is unsigned unless JC decides to pay for an Apple Developer account; unsigned is the default and goes into the manual's known limitations (the client opens it once with right-click, Open). `macos-latest` runs on Apple Silicon, so the binary is arm64 and does not run on Intel Macs unless JC decides on an Intel or universal build; the architecture is recorded in JOB.md and in the known limitations next to "unsigned".
 
