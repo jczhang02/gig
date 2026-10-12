@@ -276,18 +276,6 @@ fn ready_to_send(
     Ok((checked, previous))
 }
 
-/// Order status after a package goes out, as `after_send` sets it. A
-/// prepaid order in progress goes straight to paid on a full package.
-pub fn status_after(order: &Order, kind: PackageKind) -> OrderStatus {
-    match (kind, order.status) {
-        (PackageKind::Full, OrderStatus::InProgress) if order.is_prepaid() => OrderStatus::Paid,
-        (PackageKind::Full, OrderStatus::InProgress | OrderStatus::Delivered) => {
-            OrderStatus::Delivered
-        }
-        (_, s) => s,
-    }
-}
-
 fn after_send(
     ctx: &Ctx,
     order: &Order,
@@ -307,21 +295,6 @@ fn after_send(
             Ok(order.status)
         }
         PackageKind::Full => match order.status {
-            OrderStatus::InProgress if order.is_prepaid() => {
-                let until =
-                    clock::date_plus_days(&clock::date_of(now)?, ctx.config.general.warranty_days)?;
-                repo_orders::set_text(&ctx.conn, order.id, "delivered_at", Some(now))?;
-                repo_orders::set_text(&ctx.conn, order.id, "warranty_until", Some(&until))?;
-                repo_orders::set_status(&ctx.conn, order.id, OrderStatus::Paid)?;
-                events::insert(
-                    &ctx.conn,
-                    order.id,
-                    events::PAID_ON_DELIVERY,
-                    Some(package_id),
-                    now,
-                )?;
-                Ok(OrderStatus::Paid)
-            }
             OrderStatus::InProgress | OrderStatus::Delivered => {
                 repo_orders::set_text(&ctx.conn, order.id, "delivered_at", Some(now))?;
                 repo_orders::set_status(&ctx.conn, order.id, OrderStatus::Delivered)?;
@@ -719,7 +692,7 @@ mod tests {
         let o = with_package(&ctx, "wr", "wr-v1");
         build_package(&ctx, Some("wr"), "wr-v1", PackageKind::Full, true, &[]).unwrap();
         sent(&ctx, Some("wr"), "wr-v1", Channel::Phone, None, true).unwrap();
-        orders::paid(&ctx, Some("wr"), None, None, None).unwrap();
+        orders::paid(&ctx, Some("wr"), None, None, None, None).unwrap();
         let dir = Path::new(o.dev_path.as_ref().unwrap()).join("delivery/wr-v1.1");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("manual.pdf"), "fixed").unwrap();
@@ -729,58 +702,5 @@ mod tests {
         let shown = orders::show(&ctx, Some("wr")).unwrap();
         assert!(shown.order.notes.contains("warranty revision: wr-v1.1"));
         assert_eq!(shown.packages.len(), 2);
-    }
-
-    #[test]
-    fn prepaid_order_is_paid_by_full_package() {
-        let root = tempfile::tempdir().unwrap();
-        let ctx = Ctx::for_test(root.path());
-        let o = with_package(&ctx, "pp", "pp-v1");
-        build_package(&ctx, Some("pp"), "pp-v1", PackageKind::Full, true, &[]).unwrap();
-        let p = orders::paid(&ctx, Some("pp"), Some("2026-01-01"), None, None).unwrap();
-        assert!(p.prepaid);
-        assert_eq!(p.order.status, OrderStatus::InProgress);
-        assert_eq!(p.order.warranty_until, None);
-        let order = orders::show(&ctx, Some("pp")).unwrap();
-        assert!(order.prepaid);
-        assert_eq!(order.next_action, "preview or pack");
-        assert_eq!(
-            status_after(&order.order, PackageKind::Full),
-            OrderStatus::Paid
-        );
-        // a dry run changes nothing
-        let dry = sent(&ctx, Some("pp"), "pp-v1", Channel::Phone, None, false).unwrap();
-        assert!(dry.dry_run);
-        assert_eq!(
-            orders::show(&ctx, Some("pp")).unwrap().order.status,
-            OrderStatus::InProgress
-        );
-        let s = sent(&ctx, Some("pp"), "pp-v1", Channel::Phone, None, true).unwrap();
-        assert_eq!(s.order_status, OrderStatus::Paid);
-        let shown = orders::show(&ctx, Some("pp")).unwrap();
-        assert_eq!(shown.order.status, OrderStatus::Paid);
-        assert_eq!(shown.order.paid_at.as_deref(), Some("2026-01-01"));
-        assert!(shown.order.delivered_at.is_some());
-        let expected = clock::date_plus_days(&clock::today(), 15).unwrap();
-        assert_eq!(
-            shown.order.warranty_until.as_deref(),
-            Some(expected.as_str())
-        );
-        assert!(!shown.prepaid);
-        let kinds: Vec<_> = shown.events.iter().map(|e| e.kind.as_str()).collect();
-        assert_eq!(kinds, ["prepaid", "paid_on_delivery"]);
-        assert_eq!(o.id, shown.order.id);
-    }
-
-    #[test]
-    fn prepaid_order_keeps_status_on_preview() {
-        let root = tempfile::tempdir().unwrap();
-        let ctx = Ctx::for_test(root.path());
-        with_package(&ctx, "pv", "pv-v1");
-        build_package(&ctx, Some("pv"), "pv-v1", PackageKind::Preview, true, &[]).unwrap();
-        orders::paid(&ctx, Some("pv"), None, None, None).unwrap();
-        let s = sent(&ctx, Some("pv"), "pv-v1", Channel::Phone, None, true).unwrap();
-        assert_eq!(s.order_status, OrderStatus::InProgress);
-        assert!(orders::show(&ctx, Some("pv")).unwrap().prepaid);
     }
 }

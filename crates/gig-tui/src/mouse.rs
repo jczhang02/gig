@@ -727,7 +727,7 @@ mod events {
         s.view = View::Money;
         for r in &mut s.data.orders {
             if r.order.id == 8 {
-                r.order.paid_at = Some("2026-08-15".into());
+                r.order.received_at = Some("2026-08-15".into());
             }
         }
         let orders: Vec<_> = s.data.orders.iter().map(|r| r.order.clone()).collect();

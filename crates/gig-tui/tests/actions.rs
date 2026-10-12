@@ -215,9 +215,7 @@ fn refusals_are_shown_verbatim_and_change_nothing() {
     h.key(KeyCode::Enter);
     let text = h.popup_text();
     assert!(
-        text.contains(
-            "invalid_state\ninvalid state: paid needs delivered or in_progress, order is queued"
-        ),
+        text.contains("invalid_state\ninvalid state: paid needs delivered, order is queued"),
         "{text}"
     );
     assert_eq!(h.order("tk-queued").status, OrderStatus::Queued);

@@ -1331,6 +1331,28 @@ mod tests {
     }
 
     #[test]
+    fn money_lists_confirmed_orders_awaiting_payout_apart_from_received() {
+        let mut state = money_state();
+        state.data.money.awaiting_orders = 2;
+        state.data.money.awaiting.gross = 150_000;
+        state.data.money.awaiting.take_home = 90_000;
+        let buf = render(120, 36, &state, true);
+        let rows: Vec<String> = (0..36)
+            .map(|y| row(&buf, y).trim_end().to_string())
+            .collect();
+        let line = rows
+            .iter()
+            .find(|r| r.contains("Confirmed, awaiting platform payout"))
+            .expect("awaiting line");
+        assert!(
+            line.contains("1,500") && line.contains("take-home 900"),
+            "{line}"
+        );
+        // The received tiles are not touched.
+        assert!(rows[3].contains("29,550 CNY"));
+    }
+
+    #[test]
     fn money_matches_mockup_17_3() {
         let state = money_state();
         let buf = render(120, 36, &state, true);

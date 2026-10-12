@@ -30,6 +30,8 @@ pub struct ArchiveReport {
     pub unsent_packages: Vec<String>,
     pub missing_scorecard: bool,
     pub blockers: Vec<String>,
+    /// Worth knowing, never a reason to refuse (e.g. the platform payout is open).
+    pub warnings: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -59,6 +61,13 @@ pub fn archive(ctx: &Ctx, key: Option<&str>, opts: &ArchiveOptions) -> Result<Ar
         scorecards::find(&ctx.conn, order.id)?.is_none() && order.status == OrderStatus::Paid;
     if missing_scorecard && !opts.no_scorecard {
         blockers.push("no scorecard; run gig scorecard first or pass --no-scorecard".into());
+    }
+    let mut warnings = Vec::new();
+    if order.awaiting_payout() {
+        warnings.push(
+            "platform payout not recorded; archive keeps it in gig ls until gig paid --received"
+                .into(),
+        );
     }
     let source = order.dev_path.as_deref().map(PathBuf::from);
     let destination = ctx.config.general.archive_root.join(&order.slug);
@@ -104,6 +113,7 @@ pub fn archive(ctx: &Ctx, key: Option<&str>, opts: &ArchiveOptions) -> Result<Ar
         unsent_packages: unsent_packages.clone(),
         missing_scorecard,
         blockers: blockers.clone(),
+        warnings: warnings.clone(),
         order,
         dry_run,
     };
@@ -241,13 +251,30 @@ mod tests {
     }
 
     #[test]
+    fn open_payout_is_a_warning_not_a_blocker() {
+        let root = tempfile::tempdir().unwrap();
+        let ctx = Ctx::for_test(root.path());
+        let o = make(&ctx, "pw");
+        orders::start(&ctx, Some("pw")).unwrap();
+        repo_orders::set_status(&ctx.conn, o.id, OrderStatus::Delivered).unwrap();
+        orders::paid(&ctx, Some("pw"), Some("2020-01-01"), None, None, None).unwrap();
+        let mut o = opts(false);
+        o.no_scorecard = true;
+        let r = archive(&ctx, Some("pw"), &o).unwrap();
+        assert!(r.blockers.is_empty(), "{:?}", r.blockers);
+        assert_eq!(r.warnings.len(), 1);
+        orders::paid(&ctx, Some("pw"), None, None, None, Some("2020-02-01")).unwrap();
+        assert!(archive(&ctx, Some("pw"), &o).unwrap().warnings.is_empty());
+    }
+
+    #[test]
     fn archive_moves_after_warranty_and_scorecard() {
         let root = tempfile::tempdir().unwrap();
         let ctx = Ctx::for_test(root.path());
         let o = make(&ctx, "ar");
         orders::start(&ctx, Some("ar")).unwrap();
         repo_orders::set_status(&ctx.conn, o.id, OrderStatus::Delivered).unwrap();
-        orders::paid(&ctx, Some("ar"), Some("2020-01-01"), None, None).unwrap();
+        orders::paid(&ctx, Some("ar"), Some("2020-01-01"), None, None, None).unwrap();
 
         let r = archive(&ctx, Some("ar"), &opts(false)).unwrap();
         assert!(r.dry_run);
@@ -288,7 +315,7 @@ mod tests {
         let ctx = Ctx::for_test(root.path());
         let o = make(&ctx, "wb");
         repo_orders::set_status(&ctx.conn, o.id, OrderStatus::Delivered).unwrap();
-        orders::paid(&ctx, Some("wb"), None, None, None).unwrap();
+        orders::paid(&ctx, Some("wb"), None, None, None, None).unwrap();
         let r = archive(
             &ctx,
             Some("wb"),

@@ -112,6 +112,8 @@ pub struct Order {
     pub started_at: Option<String>,
     pub delivered_at: Option<String>,
     pub paid_at: Option<String>,
+    /// Date the platform paid JC out; `paid_at` is the client's confirmation.
+    pub received_at: Option<String>,
     pub warranty_until: Option<String>,
     pub archived_at: Option<String>,
     pub cancelled_at: Option<String>,
@@ -125,10 +127,12 @@ impl Order {
         self
     }
 
-    /// Paid before delivery: in progress with a payment date. A delivered
-    /// order only gets `paid_at` together with the paid status.
-    pub fn is_prepaid(&self) -> bool {
-        self.status == OrderStatus::InProgress && self.paid_at.is_some()
+    /// Confirmed by the client but not yet paid out by the platform. Orders
+    /// that were never paid (cancelled, then archived) are not waiting.
+    pub fn awaiting_payout(&self) -> bool {
+        matches!(self.status, OrderStatus::Paid | OrderStatus::Archived)
+            && self.paid_at.is_some()
+            && self.received_at.is_none()
     }
 
     /// What the skill should do next. Computed, never stored.
@@ -293,6 +297,7 @@ mod tests {
             started_at: None,
             delivered_at: None,
             paid_at: None,
+            received_at: None,
             warranty_until: None,
             archived_at: None,
             cancelled_at: None,

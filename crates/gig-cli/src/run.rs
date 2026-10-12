@@ -202,6 +202,7 @@ fn run_with_db(ctx: &Ctx, cmd: Command) -> Result<Output> {
                 a.date.as_deref(),
                 amount,
                 a.warranty_start.as_deref(),
+                a.received.as_deref(),
             )?)
         }
         Command::Scorecard(a) => out(orders::scorecard(

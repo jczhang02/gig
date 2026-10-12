@@ -54,6 +54,7 @@ pub struct MappedOrder {
     pub started_at: Option<String>,
     pub delivered_at: Option<String>,
     pub paid_at: Option<String>,
+    pub received_at: Option<String>,
     pub warranty_until: Option<String>,
     pub archived_at: Option<String>,
     pub cancelled_at: Option<String>,
@@ -499,6 +500,8 @@ pub fn plan(opts: &Options) -> Result<Report> {
             created_at,
             started_at,
             delivered_at: stamp_or_warn(row, "delivered_at", &label, &mut warnings),
+            // v1 had no payout step: a paid order there means the money arrived.
+            received_at: paid_date.clone(),
             paid_at: paid_date,
             warranty_until,
             archived_at: stamp_or_warn(row, "archived_at", &label, &mut warnings),
@@ -618,6 +621,7 @@ pub fn run(opts: &Options) -> Result<Report> {
                 started_at: o.started_at.as_deref(),
                 delivered_at: o.delivered_at.as_deref(),
                 paid_at: o.paid_at.as_deref(),
+                received_at: o.received_at.as_deref(),
                 warranty_until: o.warranty_until.as_deref(),
                 archived_at: o.archived_at.as_deref(),
                 cancelled_at: o.cancelled_at.as_deref(),
@@ -793,6 +797,7 @@ INSERT INTO order_workflow (order_id, gig_dir, created_at, updated_at) VALUES (7
         assert_eq!(paid.external_id.as_deref(), Some("EXT-1"));
         assert_eq!(paid.paid_at.as_deref(), Some("2026-04-15"));
         assert_eq!(paid.warranty_until.as_deref(), Some("2026-04-30"));
+        assert_eq!(paid.received_at.as_deref(), Some("2026-04-15"));
         assert_eq!(paid.created_at, "2026-04-08T00:00:00Z");
         assert!(paid.notes.contains("hello") && paid.notes.contains("tags: urgent"));
         assert_eq!(paid.price_history.len(), 1);

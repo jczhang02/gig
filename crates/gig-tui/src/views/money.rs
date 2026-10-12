@@ -411,6 +411,31 @@ fn centred(bx: u16, b: u16, w: u16) -> u16 {
 /// The outstanding table (section 11.3).
 fn outstanding(frame: &mut Frame, area: Rect, cx: &RenderCx, class: WidthClass) {
     let t = cx.theme;
+    // Confirmed orders waiting for the platform payout get a line of their own
+    // under the table, apart from received money.
+    let m = &cx.state.data.money;
+    let area = if m.awaiting_orders > 0 && area.height >= 5 {
+        let line = Line::from(vec![
+            Span::styled("Confirmed, awaiting platform payout", t.title()),
+            Span::styled(
+                format!(
+                    "  {}  {}  take-home {}",
+                    m.awaiting_orders,
+                    text::money(m.awaiting.gross),
+                    text::money(m.awaiting.take_home)
+                ),
+                t.text().fg(t.warranty),
+            ),
+        ]);
+        let foot = Rect::new(area.x, area.bottom() - 1, area.width, 1);
+        frame.render_widget(Paragraph::new(line), foot);
+        Rect {
+            height: area.height - 2,
+            ..area
+        }
+    } else {
+        area
+    };
     let owed = &cx.state.data.money.owed;
     let icon = if cx.icons.enabled { 2 } else { 0 };
     let price_end = 2 + icon + SLUG + GAP + PRICE;
@@ -618,7 +643,7 @@ fn month_orders(frame: &mut Frame, area: Rect, cx: &RenderCx, class: WidthClass,
         spans.push(price_cell(o.price_minor, PRICE, ink, t));
         spans.push(gap(GAP));
         let day = o
-            .paid_at
+            .received_at
             .as_deref()
             .and_then(day_part)
             .and_then(|d| d.get(5..));

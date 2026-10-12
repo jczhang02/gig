@@ -368,6 +368,7 @@ pub(crate) mod tests {
             started_at: None,
             delivered_at: None,
             paid_at: None,
+            received_at: None,
             warranty_until: None,
             archived_at: None,
             cancelled_at: None,
@@ -408,10 +409,12 @@ pub(crate) mod tests {
         v.push(q_new);
         let mut w = order(3, OrderStatus::Paid, 1);
         w.paid_at = Some("2026-09-25".into());
+        w.received_at = Some("2026-09-25".into());
         w.warranty_until = Some("2026-10-10".into());
         v.push(w);
         let mut due = order(4, OrderStatus::Paid, 1);
         due.paid_at = Some("2026-08-01".into());
+        due.received_at = Some("2026-08-01".into());
         due.warranty_until = Some("2026-08-16".into());
         v.push(due);
         let mut p = order(5, OrderStatus::InProgress, 1);
@@ -580,6 +583,7 @@ pub(crate) mod tests {
                 started_at: None,
                 delivered_at: Some("2026-09-22T00:00:00Z"),
                 paid_at: None,
+                received_at: None,
                 warranty_until: None,
                 archived_at: None,
                 cancelled_at: None,

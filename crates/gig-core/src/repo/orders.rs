@@ -2,7 +2,7 @@ use crate::models::{Order, OrderStatus, ProjectType};
 use crate::{Error, Result};
 use rusqlite::{params, Connection, OptionalExtension, Row};
 
-const COLS: &str = "id, slug, title, material_path, platform, external_id, project_type, status, currency, price_minor, cut_ratio, dev_path, archive_path, client_words, notes, created_at, started_at, delivered_at, paid_at, warranty_until, archived_at, cancelled_at, cancel_reason, legacy_id";
+const COLS: &str = "id, slug, title, material_path, platform, external_id, project_type, status, currency, price_minor, cut_ratio, dev_path, archive_path, client_words, notes, created_at, started_at, delivered_at, paid_at, received_at, warranty_until, archived_at, cancelled_at, cancel_reason, legacy_id";
 
 fn from_row(r: &Row<'_>) -> rusqlite::Result<Order> {
     let project_type: String = r.get(6)?;
@@ -28,11 +28,12 @@ fn from_row(r: &Row<'_>) -> rusqlite::Result<Order> {
         started_at: r.get(16)?,
         delivered_at: r.get(17)?,
         paid_at: r.get(18)?,
-        warranty_until: r.get(19)?,
-        archived_at: r.get(20)?,
-        cancelled_at: r.get(21)?,
-        cancel_reason: r.get(22)?,
-        legacy_id: r.get(23)?,
+        received_at: r.get(19)?,
+        warranty_until: r.get(20)?,
+        archived_at: r.get(21)?,
+        cancelled_at: r.get(22)?,
+        cancel_reason: r.get(23)?,
+        legacy_id: r.get(24)?,
     }
     .with_price())
 }
@@ -61,6 +62,7 @@ pub struct NewOrder<'a> {
     pub started_at: Option<&'a str>,
     pub delivered_at: Option<&'a str>,
     pub paid_at: Option<&'a str>,
+    pub received_at: Option<&'a str>,
     pub warranty_until: Option<&'a str>,
     pub archived_at: Option<&'a str>,
     pub cancelled_at: Option<&'a str>,
@@ -70,13 +72,13 @@ pub struct NewOrder<'a> {
 
 pub fn insert(conn: &Connection, n: &NewOrder<'_>) -> Result<Order> {
     conn.execute(
-        "INSERT INTO orders (id, slug, title, material_path, platform, external_id, project_type, status, currency, price_minor, cut_ratio, dev_path, archive_path, client_words, notes, created_at, started_at, delivered_at, paid_at, warranty_until, archived_at, cancelled_at, cancel_reason, legacy_id)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24)",
+        "INSERT INTO orders (id, slug, title, material_path, platform, external_id, project_type, status, currency, price_minor, cut_ratio, dev_path, archive_path, client_words, notes, created_at, started_at, delivered_at, paid_at, received_at, warranty_until, archived_at, cancelled_at, cancel_reason, legacy_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25)",
         params![
             n.id, n.slug, n.title, n.material_path, n.platform, n.external_id,
             n.project_type.as_str(), n.status.as_str(), n.currency, n.price_minor, n.cut_ratio,
             n.dev_path, n.archive_path, n.client_words, n.notes, n.created_at, n.started_at,
-            n.delivered_at, n.paid_at, n.warranty_until, n.archived_at, n.cancelled_at,
+            n.delivered_at, n.paid_at, n.received_at, n.warranty_until, n.archived_at, n.cancelled_at,
             n.cancel_reason, n.legacy_id
         ],
     )

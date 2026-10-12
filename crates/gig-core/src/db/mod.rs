@@ -89,4 +89,42 @@ mod tests {
         assert_eq!(open(&p).unwrap_err().code(), "legacy_db");
         assert!(open_legacy_readonly(&p).is_ok());
     }
+
+    #[test]
+    fn v002_counts_old_confirmed_orders_as_received() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(include_str!("migrations/V001__v2_schema.sql"))
+            .unwrap();
+        let row = |id: i64, status: &str, paid: Option<&str>| {
+            conn.execute(
+                "INSERT INTO orders (id, slug, title, project_type, status, currency, cut_ratio, notes, created_at, paid_at)
+                 VALUES (?1, ?2, 't', 'tool', ?3, 'CNY', 0.6, '', 'x', ?4)",
+                rusqlite::params![id, format!("o{id}"), status, paid],
+            )
+            .unwrap();
+        };
+        row(1, "paid", Some("2026-03-01"));
+        row(2, "archived", Some("2026-03-05T10:00:00Z"));
+        row(3, "archived", None);
+        row(4, "delivered", None);
+        conn.execute_batch(include_str!("migrations/V002__payout.sql"))
+            .unwrap();
+        let got: Vec<Option<String>> = (1..=4)
+            .map(|id| {
+                conn.query_row("SELECT received_at FROM orders WHERE id = ?1", [id], |r| {
+                    r.get(0)
+                })
+                .unwrap()
+            })
+            .collect();
+        assert_eq!(
+            got,
+            [
+                Some("2026-03-01".into()),
+                Some("2026-03-05".into()),
+                None,
+                None
+            ]
+        );
+    }
 }

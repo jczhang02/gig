@@ -131,7 +131,8 @@ CREATE TABLE orders (
   created_at TEXT NOT NULL,
   started_at TEXT,
   delivered_at TEXT,
-  paid_at TEXT,
+  paid_at TEXT,                   -- date the client confirmed the settlement on the platform
+  received_at TEXT,               -- date the platform paid JC out (migration V002)
   warranty_until TEXT,             -- date
   archived_at TEXT,
   cancelled_at TEXT,
@@ -198,19 +199,19 @@ queued -> in_progress -> delivered -> paid -> archived
   v           v  +----------+   (revision / warranty work: gig start again)
 cancelled   cancelled
 
-prepaid: in_progress --paid--> in_progress (paid_at set) --full package--> paid
+paid -> archived, then (any time after paid): payout recorded with --received
 ```
 
 - `start`: queued -> in_progress, or delivered -> in_progress (records a note "revision").
-- `package upload` / `package sent` with kind=full: in_progress -> delivered, or in_progress -> paid for a prepaid order (below). kind=preview: no change.
-- `paid`: delivered -> paid; sets `warranty_until = paid_date + warranty_days`. `--warranty-start D` counts the warranty from D instead.
-- Prepayment: `paid` on an `in_progress` order records `paid_at` (and the amount) and leaves the status `in_progress`; there is no `warranty_until` yet. An `in_progress` order with a `paid_at` is prepaid (computed, no column). The next full package sent moves it to `paid`, sets `delivered_at` to the send time and `warranty_until = send date + warranty_days`. Events: `prepaid` (detail: payment date) and `paid_on_delivery` (detail: package id).
+- `package upload` / `package sent` with kind=full: in_progress -> delivered. kind=preview: no change.
+- `paid`: delivered -> paid. It means the client confirmed receipt or approved the settlement on the platform (the money normally sits in the platform's escrow from order time, which gig does not track). Sets `paid_at` and `warranty_until = paid_date + warranty_days`; `--warranty-start D` counts the warranty from D instead.
+- Payout: the platform pays JC out later, on its own schedule. `received_at` records that date. It is set by `gig paid --received D`, together with `delivered -> paid` or later on a `paid` or `archived` order, and only once. It changes no status. A paid or archived order with `paid_at` and no `received_at` is awaiting payout (computed; an order archived straight from cancelled has no `paid_at` and never waits).
 - Warranty work: while status is `paid`, `package upload` / `package sent` are allowed and change nothing but the package row (a note "warranty revision: <package-id>" is appended). No state is added for it.
 - `archive`: paid -> archived; refuses before `warranty_until` unless `--before-warranty-end`; refuses without a scorecard unless `--no-scorecard`.
 - `cancel`: queued | in_progress -> cancelled. `archive` is also allowed from cancelled (moves or purges the directory).
 - Anything else is `invalid_state`.
 
-`next_action` is computed, never stored: queued -> `start`; in_progress -> `preview or pack` (also when prepaid); delivered -> `collect payment`; paid before warranty end -> `warranty until <date>`; paid after -> `archive`; archived/cancelled -> none.
+`next_action` is computed, never stored: queued -> `start`; in_progress -> `preview or pack`; delivered -> `collect payment`; paid before warranty end -> `warranty until <date>`; paid after -> `archive`; archived/cancelled -> none.
 
 ## 5. Commands
 
@@ -237,20 +238,20 @@ Error codes: `not_found`, `invalid_state`, `invalid_input`, `unsafe_package`, `n
 
 - `gig new <slug> --title T --price AMOUNT [--currency CNY] [--cut-ratio 0.6] [--type TYPE] [--material PATH] [--platform P] [--external-id X] [--client-words TEXT|@FILE] [--from-draft] [--no-scaffold]`
   Inserts order (queued). If `<dev_root>/<slug>/` already exists the command refuses unless `--adopt` is given: then it registers the order with `dev_path` pointing at the existing directory, touches no file, and warns for each of `.gig/JOB.md`, `.gig/QUOTE.md` that is missing. `--adopt --status S` sets the initial status for a job already under way (used at handover for tk-dtf-compact and bllc-reproduction). Otherwise, unless `--no-scaffold`: creates `<dev_root>/<slug>/` from templates (`JOB.md.j2`, `QUOTE.md.j2`, `AGENTS.md.j2` or `AGENTS.<type>.md.j2`, `README.md.j2`, `gitignore`, and `gitattributes` -> `.gitattributes` when that template exists), runs `git init` if git is available, writes nothing else. With `--from-draft`: the draft's NOTES.md is rendered into JOB.md's intake section, the draft becomes promoted, its directory is removed. `AMOUNT` is a decimal in major units with at most 2 fractional digits ("800", "800.5", "800.00"); anything else is `invalid_input`. Data: order + `created_files`.
-- `gig ls [--all]` Data: orders (active only unless `--all`) with `next_action`, `days_in_status`, `unpaid` flag (delivered, not paid), `prepaid` flag (in progress, paid), `warranty_until`.
-- `gig show [<slug>]` Data: order, packages, artifacts, requirement_changes, price_history, scorecard, `prepaid`, `paths` (dev_path, job_md, quote_md, delivery_dir), `next_action`.
+- `gig ls [--all]` Data: orders with `next_action`, `days_in_status`, `unpaid` flag (delivered, client has not confirmed), `awaiting_payout` flag (confirmed, platform payout not recorded), `warranty_until`. Without `--all` it lists active orders and also archived orders that are awaiting payout.
+- `gig show [<slug>]` Data: order, packages, artifacts, requirement_changes, price_history, scorecard, `awaiting_payout`, `paths` (dev_path, job_md, quote_md, delivery_dir), `next_action`.
 - `gig start [<slug>]` See state machine.
 - `gig change [<slug>] --desc TEXT [--price-delta AMOUNT]` Appends requirement change; when delta != 0 also updates price and price_history.
 - `gig price [<slug>] --amount AMOUNT --reason TEXT`
 - `gig note [--order <slug>] TEXT` Appends a timestamped line to `notes`.
-- `gig paid [<slug>] [--date YYYY-MM-DD] [--amount AMOUNT] [--warranty-start YYYY-MM-DD]` Defaults to today. `--amount` records a final price different from the current one (price_history). Data: the order plus `prepaid`.
-  - `delivered`: -> paid, `prepaid: false`. `--warranty-start` moves the start of the warranty (for a delivery completed in a later session); `paid_at` stays the payment date.
-  - `in_progress`: records a prepayment, `prepaid: true`, status unchanged, `warranty_until` null. A second payment is `invalid_state`. `--warranty-start` is `invalid_input`: the warranty starts at delivery.
-  - `paid`: only with `--warranty-start`; recomputes `warranty_until = D + warranty_days` and records a `warranty_start` event. `--date` or `--amount` on a paid order is `invalid_input`; without `--warranty-start` it is `invalid_state`.
-  - Any other status is `invalid_state`.
+- `gig paid [<slug>] [--date YYYY-MM-DD] [--amount AMOUNT] [--warranty-start YYYY-MM-DD] [--received YYYY-MM-DD]` Records that the client confirmed the settlement on the platform, or the platform payout. `--date` defaults to today. `--amount` records the settled price when it differs from the current one (price_history); it is the order price, not the net amount paid out, and is only valid with the confirmation. Data: the order (`paid_at`, `received_at`, `warranty_until`).
+  - `delivered`: -> paid. `--warranty-start` counts the warranty from that date (for a delivery completed in a later session; event `warranty_start`). `--received` also records the payout date (same-day payout; event `payout_received`).
+  - `paid`: needs `--warranty-start` (recomputes `warranty_until`) and/or `--received`; with neither it is `invalid_state`. `--date` and `--amount` are `invalid_input` here.
+  - `archived`: only `--received` (payout after archive); the warranty cannot move. An order that was never paid has nothing to receive: `invalid_state`.
+  - A second `--received` is `invalid_state`. A malformed date is `invalid_input`. Any other status is `invalid_state`.
 - `gig scorecard [<slug>] --decisions N --repeat-questions N --cleanups N --report-reworks N --score 1..5 [--note TEXT]` Upserts. `days_to_preview` (started_at to the first preview `sent_at`) and `check_rejections` (counted by `package check` failures for this order, stored in a small `events` table: order_id, kind, at) are computed, not supplied.
 - `gig archive [<slug>] [--yes] [--before-warranty-end] [--no-scorecard] [--purge]`
-  Preview (no `--yes`) reports: git dirty files, untracked files, files > 50 MB, packages never sent, missing scorecard. With `--yes`: moves `dev_path` to `<archive_root>/<slug>`, sets archive_path, status archived. `--purge` deletes the directory instead of moving it; requires `--yes`.
+  Preview (no `--yes`) reports: git dirty files, untracked files, files > 50 MB, packages never sent, missing scorecard, and in `warnings` a payout still awaited (never a blocker). With `--yes`: moves `dev_path` to `<archive_root>/<slug>`, sets archive_path, status archived. `--purge` deletes the directory instead of moving it; requires `--yes`.
 - `gig cancel [<slug>] --reason TEXT [--yes]`
 - `gig cd [<slug>]` Data: `{ "path": ... }` (for shell aliases).
 - `gig delete <slug> --yes` Removes the row (not files). For mistakes only.

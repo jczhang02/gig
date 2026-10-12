@@ -231,6 +231,7 @@ fn full_lifecycle_with_phone_delivery() {
     // paid, scorecard, archive
     let paid = env.ok(&["paid", "pdf-tool", "--date", "2026-01-01"]);
     assert_eq!(paid["warranty_until"], "2026-01-16");
+    assert!(paid["received_at"].is_null());
     let sc = env.ok(&[
         "scorecard",
         "pdf-tool",
@@ -252,6 +253,11 @@ fn full_lifecycle_with_phone_delivery() {
         preview["blockers"].as_array().unwrap().is_empty(),
         "{preview}"
     );
+    assert_eq!(
+        preview["warnings"].as_array().unwrap().len(),
+        1,
+        "{preview}"
+    );
     let archived = env.ok(&["archive", "pdf-tool", "--yes"]);
     assert_eq!(archived["order"]["status"], "archived");
     assert!(env
@@ -260,6 +266,18 @@ fn full_lifecycle_with_phone_delivery() {
         .join("archive/pdf-tool/.gig/JOB.md")
         .is_file());
     assert!(!dev.exists());
+    // archived but not paid out yet: still in the default list
+    let ls = env.ok(&["ls"]);
+    assert_eq!(ls["orders"].as_array().unwrap().len(), 1);
+    assert_eq!(ls["orders"][0]["awaiting_payout"], true);
+    assert_eq!(env.ok(&["show", "pdf-tool"])["awaiting_payout"], true);
+    let got = env.ok(&["paid", "pdf-tool", "--received", "2026-02-01"]);
+    assert_eq!(got["received_at"], "2026-02-01");
+    assert_eq!(got["paid_at"], "2026-01-01");
+    assert_eq!(
+        env.err(&["paid", "pdf-tool", "--received", "2026-02-02"]),
+        "invalid_state"
+    );
     assert!(env.ok(&["ls"])["orders"].as_array().unwrap().is_empty());
     assert_eq!(
         env.ok(&["ls", "--all"])["orders"].as_array().unwrap().len(),
@@ -268,58 +286,49 @@ fn full_lifecycle_with_phone_delivery() {
 }
 
 #[test]
-fn prepaid_order_is_paid_by_the_full_package() {
+fn paid_refuses_in_progress_and_takes_received_and_warranty_start() {
     let env = Env::new();
-    env.ok(&["new", "pre", "--title", "Prepaid", "--price", "800"]);
-    env.ok(&["start", "pre"]);
-    let paid = env.ok(&["paid", "pre", "--date", "2026-01-01", "--amount", "900"]);
-    assert_eq!(paid["prepaid"], true);
-    assert_eq!(paid["status"], "in_progress");
-    assert_eq!(paid["paid_at"], "2026-01-01");
-    assert!(paid["warranty_until"].is_null());
-    let row = &env.ok(&["ls"])["orders"][0];
-    assert_eq!(row["unpaid"], false);
-    assert_eq!(row["prepaid"], true);
-    assert_eq!(row["next_action"], "preview or pack");
+    env.ok(&["new", "pay", "--title", "Pay", "--price", "800"]);
+    env.ok(&["start", "pay"]);
+    assert_eq!(env.err(&["paid", "pay"]), "invalid_state");
     assert_eq!(
-        env.err(&["paid", "pre", "--warranty-start", "2026-01-05"]),
-        "invalid_input"
+        env.err(&["paid", "pay", "--received", "2026-01-05"]),
+        "invalid_state"
     );
-
-    let dev = env.dev().join("pre");
-    let pkg = dev.join("delivery/pre-v1");
-    fs::create_dir_all(&pkg).unwrap();
-    fs::write(pkg.join("manual.pdf"), "pdf").unwrap();
+    // a delivered order: same-day payout with the confirmation
+    let dev = env.dev().join("same");
+    fs::create_dir_all(dev.join(".gig")).unwrap();
     env.ok(&[
-        "package",
-        "build",
-        "pre-v1",
-        "--order",
-        "pre",
-        "--write-manifest",
+        "new",
+        "same",
+        "--title",
+        "Same",
+        "--price",
+        "800",
+        "--adopt",
+        "--status",
+        "delivered",
     ]);
-    let args = [
-        "package",
-        "sent",
-        "pre-v1",
-        "--order",
-        "pre",
-        "--channel",
-        "phone",
-    ];
-    assert_eq!(env.ok(&args)["order_status"], "in_progress");
-    let mut yes = args.to_vec();
-    yes.push("--yes");
-    assert_eq!(env.ok(&yes)["order_status"], "paid");
-    let shown = env.ok(&["show", "pre"]);
-    assert_eq!(shown["order"]["status"], "paid");
-    assert_eq!(shown["prepaid"], false);
-    assert!(shown["order"]["warranty_until"].is_string());
-
-    let moved = env.ok(&["paid", "pre", "--warranty-start", "2026-02-01"]);
-    assert_eq!(moved["prepaid"], false);
-    assert_eq!(moved["paid_at"], "2026-01-01");
-    assert_eq!(moved["warranty_until"], "2026-02-16");
+    let r = env.ok(&[
+        "paid",
+        "same",
+        "--date",
+        "2026-01-01",
+        "--received",
+        "2026-01-01",
+        "--warranty-start",
+        "2025-12-20",
+    ]);
+    assert_eq!(r["status"], "paid");
+    assert_eq!(r["received_at"], "2026-01-01");
+    assert_eq!(r["warranty_until"], "2026-01-04");
+    let shown = env.ok(&["show", "same"]);
+    assert_eq!(shown["awaiting_payout"], false);
+    // moving the warranty of a paid order leaves the payout alone
+    let r = env.ok(&["paid", "same", "--warranty-start", "2026-01-10"]);
+    assert_eq!(r["warranty_until"], "2026-01-25");
+    assert_eq!(r["received_at"], "2026-01-01");
+    assert_eq!(env.err(&["paid", "same"]), "invalid_state");
 }
 
 #[test]

@@ -81,7 +81,7 @@ pub enum Command {
     Price(PriceArgs),
     /// Append a timestamped note
     Note(NoteArgs),
-    /// delivered -> paid, or a prepayment while in progress; starts the warranty period
+    /// The client confirmed the settlement (delivered -> paid; starts the warranty), or the platform payout arrived (--received)
     Paid(PaidArgs),
     /// Record the per-order scorecard
     Scorecard(ScorecardArgs),
@@ -305,15 +305,18 @@ pub struct PaidArgs {
     /// Same as the positional, for callers that prefer a flag
     #[arg(long, conflicts_with = "key")]
     pub order: Option<String>,
-    /// YYYY-MM-DD, default today
+    /// YYYY-MM-DD the client confirmed the settlement, default today
     #[arg(long)]
     pub date: Option<String>,
     /// Final amount when it differs from the recorded price
     #[arg(long)]
     pub amount: Option<String>,
-    /// YYYY-MM-DD: count the warranty from this delivery date, not the payment date
+    /// YYYY-MM-DD: count the warranty from this date, not the confirmation date
     #[arg(long)]
     pub warranty_start: Option<String>,
+    /// YYYY-MM-DD: the platform paid JC out on this date (also valid later, on a paid or archived order)
+    #[arg(long)]
+    pub received: Option<String>,
 }
 
 #[derive(Args, Debug)]
