@@ -142,6 +142,8 @@ cargo clippy --workspace --all-targets
 cd skill/partjob && python3 -m unittest discover -s tests
 ```
 
+The pre-commit hook in `scripts/hooks/pre-commit` runs both test suites for staged code or skill changes. Link it once with `ln -s ../../scripts/hooks/pre-commit .git/hooks/pre-commit`.
+
 ## License
 
 MIT

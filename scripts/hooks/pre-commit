@@ -1,0 +1,16 @@
+#!/bin/sh
+# Repository pre-commit hook: cargo tests for code changes, the partjob skill's
+# contract tests for skill or code changes (they run the debug gig binary).
+# Link it once: ln -s ../../scripts/hooks/pre-commit .git/hooks/pre-commit
+# The global dispatcher (core.hooksPath) runs it after its own checks.
+set -e
+staged=$(git diff --cached --name-only)
+code=$(printf '%s\n' "$staged" | grep -E '^(crates/|Cargo\.)' || true)
+skill=$(printf '%s\n' "$staged" | grep -E '^skill/' || true)
+if [ -n "$code" ]; then
+  cargo test --workspace --quiet
+fi
+if [ -n "$code$skill" ]; then
+  cargo build --quiet
+  python3 -I -m unittest discover -s skill/partjob/tests
+fi

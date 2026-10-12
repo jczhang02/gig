@@ -25,7 +25,7 @@ GIG_COMMANDS = {
     "draft new", "draft ls", "draft drop",
     "new", "ls", "show", "start", "change", "price", "note", "paid", "scorecard",
     "archive", "cancel", "cd", "delete",
-    "package build", "package check", "package upload", "package sent", "package ls",
+    "package build", "package check", "package upload", "package sent", "package drop", "package ls",
     "artifact upload", "artifact ls",
     "migrate", "doctor", "config get", "config set", "config path", "config split-secrets",
     "backup", "completion", "version",
@@ -145,6 +145,29 @@ class SkillShape(unittest.TestCase):
         for section in ("## 1. Process", "## 2. JOB.md and QUOTE.md", "## 6. Skill subcommands", "## Appendix C. Acceptance criteria"):
             self.assertIn(section, WORKFLOW)
 
+    def test_every_project_type_has_agents_rules(self):
+        start = (COMMANDS_DIR / "start.md").read_text(encoding="utf-8")
+        types = re.findall(r"`([a-z_]+)`", start.split("the project type (", 1)[1].split(")", 1)[0])
+        self.assertIn("research_writing", types)
+        generic = {"data_processing", "custom"}  # the base AGENTS.md.j2 covers these on purpose
+        for t in types:
+            self.assertTrue(t in generic or (TEMPLATES / f"AGENTS.{t}.md.j2").is_file(), t)
+
+    def test_send_names_every_channel_gig_accepts(self):
+        out = subprocess.run([str(gig_bin()), "package", "sent", "--help"], capture_output=True, text=True).stdout
+        values = re.search(r"possible values: ([a-z, ]+)\]", out).group(1).split(", ")
+        send = (COMMANDS_DIR / "send.md").read_text(encoding="utf-8")
+        for v in values:
+            self.assertIn(f"--channel {v}", send, v)
+
+    def test_source_archive_leaves_project_records_out(self):
+        attrs = (TEMPLATES / "gitattributes").read_text(encoding="utf-8")
+        for line in (".gig export-ignore", "AGENTS.md export-ignore"):
+            self.assertIn(line, attrs.splitlines())
+        pack = (COMMANDS_DIR / "pack.md").read_text(encoding="utf-8")
+        self.assertIn("`.gitattributes`", pack)
+        self.assertIn("export-ignore", pack)
+
     def test_templates_exist(self):
         for name in ("NOTES.md.j2", "JOB.md.j2", "QUOTE.md.j2", "AGENTS.md.j2", "README.md.j2", "gitignore"):
             self.assertTrue((TEMPLATES / name).is_file(), name)
@@ -219,6 +242,37 @@ class TemplatesRenderThroughGig(unittest.TestCase):
             shown = self.run_gig(home, "show", cwd=project)
             self.assertEqual(shown["order"]["slug"], "pdf-tool")
             self.assertEqual(shown["next_action"], "start")
+
+    def test_multiline_client_words_stay_quoted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home, dev = self.fresh_home(tmp)
+            self.run_gig(home, "new", "memo", "--title", "Memo", "--client-words", "line one\nline two")
+            for doc in (".gig/JOB.md", ".gig/QUOTE.md"):
+                text = (dev / "memo" / doc).read_text(encoding="utf-8")
+                self.assertIn("> line one\n> line two", text, doc)
+
+    def test_scaffold_writes_gitattributes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home, dev = self.fresh_home(tmp)
+            self.run_gig(home, "new", "memo", "--title", "Memo")
+            attrs = (dev / "memo" / ".gitattributes").read_text(encoding="utf-8")
+            self.assertIn(".gig export-ignore", attrs)
+
+    def test_research_writing_gets_its_own_agents_template(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home, dev = self.fresh_home(tmp)
+            self.run_gig(home, "new", "thesis", "--title", "Thesis", "--type", "research_writing")
+            agents = (dev / "thesis" / "AGENTS.md").read_text(encoding="utf-8")
+            self.assertIn("## Writing projects", agents)
+            self.assertIn("partjob/SKILL.md", agents)
+
+    def fresh_home(self, tmp):
+        home = Path(tmp) / "home"
+        dev = Path(tmp) / "dev"
+        dev.mkdir()
+        (home / "config").mkdir(parents=True)
+        (home / "config" / "config.toml").write_text(f'[general]\ndev_root = "{dev}"\n', encoding="utf-8")
+        return home, dev
 
     def test_cv_ml_gets_its_own_agents_template(self):
         with tempfile.TemporaryDirectory() as tmp:
