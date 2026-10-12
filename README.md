@@ -20,6 +20,15 @@ cargo install --locked --path crates/gig-cli
 gig version
 ```
 
+With mise, built from the committed `main` of a local clone (uncommitted changes are not built):
+
+```toml
+# ~/.config/mise/config.toml or a conf.d file
+"cargo:file:///home/jc/Documents/dev-tools/gig" = "branch:main"
+```
+
+After new commits, rebuild with `mise install -f "cargo:file:///home/jc/Documents/dev-tools/gig@branch:main"`. A new build migrates the database the first time it runs; `gig backup` first.
+
 Skill:
 
 ```bash
