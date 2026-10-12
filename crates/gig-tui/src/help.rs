@@ -38,7 +38,7 @@ const GLOBAL_KEYS: &[Entry] = &[
 /// Keys that act on the selected order (Orders, or any order detail).
 const ORDER_KEYS: &[Entry] = &[
     ("s", "start", "when queued or delivered"),
-    ("p", "paid", "when delivered"),
+    ("p", "paid", "when delivered or in progress"),
     ("$", "price", ""),
     ("c", "change", "when not archived"),
     ("n", "note", ""),

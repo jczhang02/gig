@@ -247,7 +247,7 @@ mod tests {
         let o = make(&ctx, "ar");
         orders::start(&ctx, Some("ar")).unwrap();
         repo_orders::set_status(&ctx.conn, o.id, OrderStatus::Delivered).unwrap();
-        orders::paid(&ctx, Some("ar"), Some("2020-01-01"), None).unwrap();
+        orders::paid(&ctx, Some("ar"), Some("2020-01-01"), None, None).unwrap();
 
         let r = archive(&ctx, Some("ar"), &opts(false)).unwrap();
         assert!(r.dry_run);
@@ -288,7 +288,7 @@ mod tests {
         let ctx = Ctx::for_test(root.path());
         let o = make(&ctx, "wb");
         repo_orders::set_status(&ctx.conn, o.id, OrderStatus::Delivered).unwrap();
-        orders::paid(&ctx, Some("wb"), None, None).unwrap();
+        orders::paid(&ctx, Some("wb"), None, None, None).unwrap();
         let r = archive(
             &ctx,
             Some("wb"),

@@ -158,6 +158,8 @@ pub struct Listed {
     pub next_action: String,
     pub days_in_status: Option<i64>,
     pub unpaid: bool,
+    /// Paid before delivery; the order is still in progress.
+    pub prepaid: bool,
 }
 
 pub fn list(ctx: &Ctx, all: bool) -> Result<Vec<Listed>> {
@@ -179,6 +181,7 @@ pub fn list(ctx: &Ctx, all: bool) -> Result<Vec<Listed>> {
                 next_action: o.next_action(&today),
                 days_in_status,
                 unpaid: matches!(o.status, OrderStatus::Delivered),
+                prepaid: o.is_prepaid(),
                 order: o,
             })
         })
@@ -189,6 +192,8 @@ pub fn list(ctx: &Ctx, all: bool) -> Result<Vec<Listed>> {
 pub struct Shown {
     pub order: Order,
     pub next_action: String,
+    /// Paid before delivery; the order is still in progress.
+    pub prepaid: bool,
     pub paths: ShownPaths,
     pub packages: Vec<Package>,
     pub artifacts: Vec<Artifact>,
@@ -221,6 +226,7 @@ pub fn show(ctx: &Ctx, key: Option<&str>) -> Result<Shown> {
     };
     Ok(Shown {
         next_action: order.next_action(&clock::today()),
+        prepaid: order.is_prepaid(),
         paths: ShownPaths {
             dev_path: order.dev_path.clone(),
             archive_path: order.archive_path.clone(),
@@ -315,45 +321,99 @@ pub fn note(ctx: &Ctx, key: Option<&str>, text: &str) -> Result<Order> {
     repo_orders::find_by_id(&ctx.conn, o.id)
 }
 
+#[derive(Debug, Serialize)]
+pub struct PaidResult {
+    #[serde(flatten)]
+    pub order: Order,
+    /// True when the payment was recorded before delivery: the order stays
+    /// in progress and has no warranty yet.
+    pub prepaid: bool,
+}
+
 pub fn paid(
     ctx: &Ctx,
     key: Option<&str>,
     date: Option<&str>,
     amount_minor: Option<i64>,
-) -> Result<Order> {
+    warranty_start: Option<&str>,
+) -> Result<PaidResult> {
     let o = context::resolve_key_or_cwd(&ctx.conn, key)?;
-    if o.status != OrderStatus::Delivered {
-        return Err(Error::InvalidState(format!(
-            "paid needs delivered, order is {}",
-            o.status
-        )));
+    if let Some(w) = warranty_start {
+        clock::parse_date(w)?;
     }
-    let date = match date {
-        Some(d) => {
-            clock::parse_date(d)?;
-            d.to_string()
-        }
-        None => clock::today(),
-    };
+    let days = ctx.config.general.warranty_days;
     let now = clock::now();
-    if let Some(a) = amount_minor {
-        if Some(a) != o.price_minor {
-            repo::insert_price_history(
-                &ctx.conn,
-                o.id,
-                o.price_minor,
-                Some(a),
-                Some("final amount paid"),
-                &now,
-            )?;
-            repo_orders::set_price(&ctx.conn, o.id, Some(a))?;
+    match o.status {
+        OrderStatus::InProgress if warranty_start.is_some() => Err(Error::InvalidInput(
+            "the warranty starts at delivery; record the delivery first, then run gig paid --warranty-start"
+                .into(),
+        )),
+        OrderStatus::InProgress if o.paid_at.is_some() => Err(Error::InvalidState(
+            "order is already prepaid; it becomes paid when the full package is sent".into(),
+        )),
+        OrderStatus::InProgress | OrderStatus::Delivered => {
+            let date = match date {
+                Some(d) => {
+                    clock::parse_date(d)?;
+                    d.to_string()
+                }
+                None => clock::today(),
+            };
+            if let Some(a) = amount_minor {
+                if Some(a) != o.price_minor {
+                    repo::insert_price_history(
+                        &ctx.conn,
+                        o.id,
+                        o.price_minor,
+                        Some(a),
+                        Some("final amount paid"),
+                        &now,
+                    )?;
+                    repo_orders::set_price(&ctx.conn, o.id, Some(a))?;
+                }
+            }
+            repo_orders::set_text(&ctx.conn, o.id, "paid_at", Some(&date))?;
+            let prepaid = o.status == OrderStatus::InProgress;
+            if prepaid {
+                events::insert(&ctx.conn, o.id, events::PREPAID, Some(&date), &now)?;
+            } else {
+                let until = clock::date_plus_days(warranty_start.unwrap_or(&date), days)?;
+                repo_orders::set_text(&ctx.conn, o.id, "warranty_until", Some(&until))?;
+                repo_orders::set_status(&ctx.conn, o.id, OrderStatus::Paid)?;
+                if let Some(w) = warranty_start {
+                    events::insert(&ctx.conn, o.id, events::WARRANTY_START, Some(w), &now)?;
+                }
+            }
+            Ok(PaidResult {
+                order: repo_orders::find_by_id(&ctx.conn, o.id)?,
+                prepaid,
+            })
         }
+        OrderStatus::Paid => {
+            let Some(w) = warranty_start else {
+                return Err(Error::InvalidState(
+                    "order is already paid; pass --warranty-start to move the warranty start"
+                        .into(),
+                ));
+            };
+            if date.is_some() || amount_minor.is_some() {
+                return Err(Error::InvalidInput(
+                    "on a paid order --warranty-start only recomputes the warranty; drop --date and --amount"
+                        .into(),
+                ));
+            }
+            let until = clock::date_plus_days(w, days)?;
+            repo_orders::set_text(&ctx.conn, o.id, "warranty_until", Some(&until))?;
+            events::insert(&ctx.conn, o.id, events::WARRANTY_START, Some(w), &now)?;
+            Ok(PaidResult {
+                order: repo_orders::find_by_id(&ctx.conn, o.id)?,
+                prepaid: false,
+            })
+        }
+        s => Err(Error::InvalidState(format!(
+            "paid needs delivered or in_progress, order is {s}"
+        ))),
     }
-    let until = clock::date_plus_days(&date, ctx.config.general.warranty_days)?;
-    repo_orders::set_text(&ctx.conn, o.id, "paid_at", Some(&date))?;
-    repo_orders::set_text(&ctx.conn, o.id, "warranty_until", Some(&until))?;
-    repo_orders::set_status(&ctx.conn, o.id, OrderStatus::Paid)?;
-    repo_orders::find_by_id(&ctx.conn, o.id)
 }
 
 #[derive(Debug, Serialize)]
@@ -660,7 +720,7 @@ pub(crate) mod tests {
         let ctx = Ctx::for_test(root.path());
         let o = make(&ctx, "sm");
         assert_eq!(
-            paid(&ctx, Some("sm"), None, None).unwrap_err().code(),
+            paid(&ctx, Some("sm"), None, None, None).unwrap_err().code(),
             "invalid_state"
         );
         let o2 = start(&ctx, Some(&o.slug)).unwrap();
@@ -669,7 +729,9 @@ pub(crate) mod tests {
         assert_eq!(start(&ctx, Some("sm")).unwrap_err().code(), "invalid_state");
         // deliver by hand for the test
         repo_orders::set_status(&ctx.conn, o.id, OrderStatus::Delivered).unwrap();
-        let o3 = paid(&ctx, Some("sm"), Some("2026-09-28"), Some(75000)).unwrap();
+        let o3 = paid(&ctx, Some("sm"), Some("2026-09-28"), Some(75000), None)
+            .unwrap()
+            .order;
         assert_eq!(o3.status, OrderStatus::Paid);
         assert_eq!(o3.warranty_until.as_deref(), Some("2026-10-13"));
         assert_eq!(o3.price_minor, Some(75000));
@@ -678,6 +740,107 @@ pub(crate) mod tests {
             cancel(&ctx, Some("sm"), "x", true).unwrap_err().code(),
             "invalid_state"
         );
+    }
+
+    #[test]
+    fn prepayment_records_payment_and_keeps_status() {
+        let root = tempfile::tempdir().unwrap();
+        let ctx = Ctx::for_test(root.path());
+        let o = make(&ctx, "pre");
+        start(&ctx, Some("pre")).unwrap();
+        let r = paid(&ctx, Some("pre"), Some("2026-09-01"), Some(75000), None).unwrap();
+        assert!(r.prepaid);
+        assert_eq!(r.order.status, OrderStatus::InProgress);
+        assert_eq!(r.order.paid_at.as_deref(), Some("2026-09-01"));
+        assert_eq!(r.order.warranty_until, None);
+        assert_eq!(r.order.price_minor, Some(75000));
+        assert_eq!(repo::list_price_history(&ctx.conn, o.id).unwrap().len(), 1);
+        let json = serde_json::to_value(&r).unwrap();
+        assert_eq!(json["prepaid"], true);
+        assert!(json["warranty_until"].is_null());
+        let row = &list(&ctx, false).unwrap()[0];
+        assert!(!row.unpaid && row.prepaid);
+        assert_eq!(row.next_action, "preview or pack");
+        // paying twice, or setting a warranty start now, is refused
+        assert_eq!(
+            paid(&ctx, Some("pre"), None, None, None)
+                .unwrap_err()
+                .code(),
+            "invalid_state"
+        );
+        assert_eq!(
+            paid(&ctx, Some("pre"), None, None, Some("2026-09-10"))
+                .unwrap_err()
+                .code(),
+            "invalid_input"
+        );
+        // a queued order cannot be paid
+        make(&ctx, "q");
+        assert_eq!(
+            paid(&ctx, Some("q"), None, None, None).unwrap_err().code(),
+            "invalid_state"
+        );
+    }
+
+    #[test]
+    fn warranty_start_moves_the_warranty() {
+        let root = tempfile::tempdir().unwrap();
+        let ctx = Ctx::for_test(root.path());
+        let o = make(&ctx, "ws");
+        start(&ctx, Some("ws")).unwrap();
+        // not yet paid, in progress: the warranty starts at delivery
+        assert_eq!(
+            paid(&ctx, Some("ws"), None, None, Some("2026-09-10"))
+                .unwrap_err()
+                .code(),
+            "invalid_input"
+        );
+        repo_orders::set_status(&ctx.conn, o.id, OrderStatus::Delivered).unwrap();
+        assert_eq!(
+            paid(&ctx, Some("ws"), None, None, Some("09-10"))
+                .unwrap_err()
+                .code(),
+            "invalid_input"
+        );
+        let r = paid(
+            &ctx,
+            Some("ws"),
+            Some("2026-09-28"),
+            None,
+            Some("2026-09-10"),
+        )
+        .unwrap();
+        assert!(!r.prepaid);
+        assert_eq!(r.order.status, OrderStatus::Paid);
+        assert_eq!(r.order.paid_at.as_deref(), Some("2026-09-28"));
+        assert_eq!(r.order.warranty_until.as_deref(), Some("2026-09-25"));
+        // on a paid order it only recomputes
+        let r = paid(&ctx, Some("ws"), None, None, Some("2026-10-01")).unwrap();
+        assert_eq!(r.order.paid_at.as_deref(), Some("2026-09-28"));
+        assert_eq!(r.order.warranty_until.as_deref(), Some("2026-10-16"));
+        assert_eq!(
+            paid(
+                &ctx,
+                Some("ws"),
+                Some("2026-10-02"),
+                None,
+                Some("2026-10-01")
+            )
+            .unwrap_err()
+            .code(),
+            "invalid_input"
+        );
+        assert_eq!(
+            paid(&ctx, Some("ws"), None, None, None).unwrap_err().code(),
+            "invalid_state"
+        );
+        let kinds: Vec<_> = show(&ctx, Some("ws"))
+            .unwrap()
+            .events
+            .into_iter()
+            .map(|e| e.kind)
+            .collect();
+        assert_eq!(kinds, ["warranty_start", "warranty_start"]);
     }
 
     #[test]

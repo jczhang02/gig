@@ -65,7 +65,8 @@ pub struct Money {
 impl Money {
     /// Aggregate over all orders. `today` is `YYYY-MM-DD`.
     ///
-    /// Received money is every order with a `paid_at` (paid or archived),
+    /// Received money is every order with a `paid_at` (paid, archived, or
+    /// prepaid and still in progress),
     /// keyed by the date part of `paid_at` (a date from `gig paid`, or an
     /// RFC 3339 instant from migrated rows). Cancelled orders are left out
     /// even when they carry a `paid_at`.
@@ -193,6 +194,17 @@ mod tests {
     fn take_home_rounds_per_order() {
         assert_eq!(take_home(80000, 0.6), 48000);
         assert_eq!(take_home(333, 0.5), 167);
+    }
+
+    #[test]
+    fn prepaid_in_progress_counts_as_received_not_owed() {
+        let mut p = order(1, OrderStatus::InProgress, 100000);
+        p.paid_at = Some("2026-09-02".into());
+        let m = Money::compute(&[p], "2026-09-29");
+        assert_eq!(m.outstanding, Amount::default());
+        assert!(m.owed.is_empty());
+        assert_eq!(m.month.gross, 100000);
+        assert_eq!(m.by_month.last().unwrap().order_ids, vec![1]);
     }
 
     #[test]

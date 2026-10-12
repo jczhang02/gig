@@ -81,7 +81,7 @@ pub enum Command {
     Price(PriceArgs),
     /// Append a timestamped note
     Note(NoteArgs),
-    /// delivered -> paid; starts the warranty period
+    /// delivered -> paid, or a prepayment while in progress; starts the warranty period
     Paid(PaidArgs),
     /// Record the per-order scorecard
     Scorecard(ScorecardArgs),
@@ -311,6 +311,9 @@ pub struct PaidArgs {
     /// Final amount when it differs from the recorded price
     #[arg(long)]
     pub amount: Option<String>,
+    /// YYYY-MM-DD: count the warranty from this delivery date, not the payment date
+    #[arg(long)]
+    pub warranty_start: Option<String>,
 }
 
 #[derive(Args, Debug)]

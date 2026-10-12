@@ -125,6 +125,12 @@ impl Order {
         self
     }
 
+    /// Paid before delivery: in progress with a payment date. A delivered
+    /// order only gets `paid_at` together with the paid status.
+    pub fn is_prepaid(&self) -> bool {
+        self.status == OrderStatus::InProgress && self.paid_at.is_some()
+    }
+
     /// What the skill should do next. Computed, never stored.
     pub fn next_action(&self, today: &str) -> String {
         match self.status {

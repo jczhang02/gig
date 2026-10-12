@@ -4,6 +4,12 @@ use rusqlite::{params, Connection};
 
 pub const CHECK_REJECTED: &str = "check_rejected";
 pub const PREVIEW_SENT: &str = "preview_sent";
+/// Payment recorded before delivery; detail is the payment date.
+pub const PREPAID: &str = "prepaid";
+/// A prepaid order became paid when its full package went out; detail is the package id.
+pub const PAID_ON_DELIVERY: &str = "paid_on_delivery";
+/// The warranty start was set by hand; detail is that date.
+pub const WARRANTY_START: &str = "warranty_start";
 
 pub fn insert(
     conn: &Connection,

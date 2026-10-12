@@ -10,7 +10,7 @@ use gig_core::config::Delivery;
 use gig_core::delivery::{
     uploader_choices, Progress, UploadOpts, UploadResult, Uploader, UploaderName,
 };
-use gig_core::models::{OrderStatus, Package, PackageKind, PackageStatus};
+use gig_core::models::{Order, OrderStatus, Package, PackageKind, PackageStatus};
 use gig_core::services::{artifacts, packages, Ctx};
 use gig_core::{Error, Result};
 use std::path::{Path, PathBuf};
@@ -161,17 +161,12 @@ pub fn checked_packages(row: &OrderRow) -> Vec<&Package> {
         .collect()
 }
 
-/// Order status after a package goes out, as gig-core's `after_send` sets
-/// it: a preview changes nothing; a full package delivers an order in
-/// progress (or re-delivers a delivered one) and keeps a paid one paid (a
-/// warranty revision).
-pub fn state_after(status: OrderStatus, kind: PackageKind) -> OrderStatus {
-    match (kind, status) {
-        (PackageKind::Full, OrderStatus::InProgress | OrderStatus::Delivered) => {
-            OrderStatus::Delivered
-        }
-        _ => status,
-    }
+/// Order status after a package goes out, as gig-core sets it: a preview
+/// changes nothing; a full package delivers an order in progress (a prepaid
+/// one goes straight to paid) or re-delivers a delivered one, and keeps a
+/// paid one paid (a warranty revision).
+pub fn state_after(order: &Order, kind: PackageKind) -> OrderStatus {
+    packages::status_after(order, kind)
 }
 
 /// `1.2 MB` style sizes for popups.
@@ -337,11 +332,26 @@ mod tests {
     #[test]
     fn resulting_states() {
         use OrderStatus::*;
-        assert_eq!(state_after(InProgress, PackageKind::Full), Delivered);
-        assert_eq!(state_after(Delivered, PackageKind::Full), Delivered);
-        assert_eq!(state_after(Paid, PackageKind::Full), Paid);
-        assert_eq!(state_after(InProgress, PackageKind::Preview), InProgress);
-        assert_eq!(state_after(Paid, PackageKind::Preview), Paid);
+        let order = |status, paid_at: Option<&str>| {
+            let mut o = crate::data::tests::order(1, status, 80000);
+            o.paid_at = paid_at.map(Into::into);
+            o
+        };
+        let full = PackageKind::Full;
+        assert_eq!(state_after(&order(InProgress, None), full), Delivered);
+        assert_eq!(state_after(&order(Delivered, None), full), Delivered);
+        assert_eq!(state_after(&order(Paid, None), full), Paid);
+        assert_eq!(
+            state_after(&order(InProgress, Some("2026-10-01")), full),
+            Paid
+        );
+        let prev = PackageKind::Preview;
+        assert_eq!(state_after(&order(InProgress, None), prev), InProgress);
+        assert_eq!(
+            state_after(&order(InProgress, Some("2026-10-01")), prev),
+            InProgress
+        );
+        assert_eq!(state_after(&order(Paid, None), prev), Paid);
     }
 
     #[test]

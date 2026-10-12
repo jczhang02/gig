@@ -624,8 +624,12 @@ pub fn run(ctx: &Ctx, action: &Action) -> Result<Option<Popup>> {
         }
         Action::Paid { slug, date, amount } => {
             let amount = opt_amount(amount)?;
-            let o = orders::paid(ctx, Some(slug), non_empty(date), amount)?;
+            let r = orders::paid(ctx, Some(slug), non_empty(date), amount, None)?;
+            let o = r.order;
             let mut lines = vec![format!("{slug} is {}", o.status)];
+            if r.prepaid {
+                lines.push("prepaid: the warranty starts when the full package goes out".into());
+            }
             if let Some(p) = &o.paid_at {
                 lines.push(format!("paid: {p}"));
             }
@@ -722,6 +726,7 @@ pub fn run(ctx: &Ctx, action: &Action) -> Result<Option<Popup>> {
                 &DryRunUploader::default(),
             )?;
             let kind = dry.package.kind;
+            let order = gig_core::context::resolve_key_or_cwd(&ctx.conn, Some(slug))?;
             let mut lines = vec![
                 format!("Upload package {package_id} of {slug}?"),
                 format!("kind: {kind}"),
@@ -733,7 +738,7 @@ pub fn run(ctx: &Ctx, action: &Action) -> Result<Option<Popup>> {
                 format!(
                     "order: {} -> {}",
                     dry.order_status,
-                    upload::state_after(dry.order_status, kind)
+                    upload::state_after(&order, kind)
                 ),
             ];
             lines.extend(dry.warnings.iter().map(|w| format!("warning: {w}")));
@@ -755,6 +760,7 @@ pub fn run(ctx: &Ctx, action: &Action) -> Result<Option<Popup>> {
             let note = non_empty(&m.note);
             let dry = packages::sent(ctx, Some(&m.slug), &m.package_id, channel, note, false)?;
             let kind = dry.package.kind;
+            let order = gig_core::context::resolve_key_or_cwd(&ctx.conn, Some(&m.slug))?;
             let mut lines = vec![
                 format!(
                     "Record {} of {} as sent via {channel}?",
@@ -769,7 +775,7 @@ pub fn run(ctx: &Ctx, action: &Action) -> Result<Option<Popup>> {
                 format!(
                     "order: {} -> {}",
                     dry.order_status,
-                    upload::state_after(dry.order_status, kind)
+                    upload::state_after(&order, kind)
                 ),
                 format!("note: {}", note.unwrap_or("(none)")),
             ];

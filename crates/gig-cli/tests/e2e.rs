@@ -268,6 +268,61 @@ fn full_lifecycle_with_phone_delivery() {
 }
 
 #[test]
+fn prepaid_order_is_paid_by_the_full_package() {
+    let env = Env::new();
+    env.ok(&["new", "pre", "--title", "Prepaid", "--price", "800"]);
+    env.ok(&["start", "pre"]);
+    let paid = env.ok(&["paid", "pre", "--date", "2026-01-01", "--amount", "900"]);
+    assert_eq!(paid["prepaid"], true);
+    assert_eq!(paid["status"], "in_progress");
+    assert_eq!(paid["paid_at"], "2026-01-01");
+    assert!(paid["warranty_until"].is_null());
+    let row = &env.ok(&["ls"])["orders"][0];
+    assert_eq!(row["unpaid"], false);
+    assert_eq!(row["prepaid"], true);
+    assert_eq!(row["next_action"], "preview or pack");
+    assert_eq!(
+        env.err(&["paid", "pre", "--warranty-start", "2026-01-05"]),
+        "invalid_input"
+    );
+
+    let dev = env.dev().join("pre");
+    let pkg = dev.join("delivery/pre-v1");
+    fs::create_dir_all(&pkg).unwrap();
+    fs::write(pkg.join("manual.pdf"), "pdf").unwrap();
+    env.ok(&[
+        "package",
+        "build",
+        "pre-v1",
+        "--order",
+        "pre",
+        "--write-manifest",
+    ]);
+    let args = [
+        "package",
+        "sent",
+        "pre-v1",
+        "--order",
+        "pre",
+        "--channel",
+        "phone",
+    ];
+    assert_eq!(env.ok(&args)["order_status"], "in_progress");
+    let mut yes = args.to_vec();
+    yes.push("--yes");
+    assert_eq!(env.ok(&yes)["order_status"], "paid");
+    let shown = env.ok(&["show", "pre"]);
+    assert_eq!(shown["order"]["status"], "paid");
+    assert_eq!(shown["prepaid"], false);
+    assert!(shown["order"]["warranty_until"].is_string());
+
+    let moved = env.ok(&["paid", "pre", "--warranty-start", "2026-02-01"]);
+    assert_eq!(moved["prepaid"], false);
+    assert_eq!(moved["paid_at"], "2026-01-01");
+    assert_eq!(moved["warranty_until"], "2026-02-16");
+}
+
+#[test]
 fn yes_gates_and_error_envelope() {
     let env = Env::new();
     env.ok(&["draft", "new", "x"]);

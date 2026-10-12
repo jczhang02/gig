@@ -197,17 +197,20 @@ queued -> in_progress -> delivered -> paid -> archived
   |           |  ^          |
   v           v  +----------+   (revision / warranty work: gig start again)
 cancelled   cancelled
+
+prepaid: in_progress --paid--> in_progress (paid_at set) --full package--> paid
 ```
 
 - `start`: queued -> in_progress, or delivered -> in_progress (records a note "revision").
-- `package upload` / `package sent` with kind=full: in_progress -> delivered. kind=preview: no change.
-- `paid`: delivered -> paid; sets `warranty_until = paid_date + warranty_days`.
+- `package upload` / `package sent` with kind=full: in_progress -> delivered, or in_progress -> paid for a prepaid order (below). kind=preview: no change.
+- `paid`: delivered -> paid; sets `warranty_until = paid_date + warranty_days`. `--warranty-start D` counts the warranty from D instead.
+- Prepayment: `paid` on an `in_progress` order records `paid_at` (and the amount) and leaves the status `in_progress`; there is no `warranty_until` yet. An `in_progress` order with a `paid_at` is prepaid (computed, no column). The next full package sent moves it to `paid`, sets `delivered_at` to the send time and `warranty_until = send date + warranty_days`. Events: `prepaid` (detail: payment date) and `paid_on_delivery` (detail: package id).
 - Warranty work: while status is `paid`, `package upload` / `package sent` are allowed and change nothing but the package row (a note "warranty revision: <package-id>" is appended). No state is added for it.
 - `archive`: paid -> archived; refuses before `warranty_until` unless `--before-warranty-end`; refuses without a scorecard unless `--no-scorecard`.
 - `cancel`: queued | in_progress -> cancelled. `archive` is also allowed from cancelled (moves or purges the directory).
 - Anything else is `invalid_state`.
 
-`next_action` is computed, never stored: queued -> `start`; in_progress -> `preview or pack`; delivered -> `collect payment`; paid before warranty end -> `warranty until <date>`; paid after -> `archive`; archived/cancelled -> none.
+`next_action` is computed, never stored: queued -> `start`; in_progress -> `preview or pack` (also when prepaid); delivered -> `collect payment`; paid before warranty end -> `warranty until <date>`; paid after -> `archive`; archived/cancelled -> none.
 
 ## 5. Commands
 
@@ -234,13 +237,17 @@ Error codes: `not_found`, `invalid_state`, `invalid_input`, `unsafe_package`, `n
 
 - `gig new <slug> --title T --price AMOUNT [--currency CNY] [--cut-ratio 0.6] [--type TYPE] [--material PATH] [--platform P] [--external-id X] [--client-words TEXT|@FILE] [--from-draft] [--no-scaffold]`
   Inserts order (queued). If `<dev_root>/<slug>/` already exists the command refuses unless `--adopt` is given: then it registers the order with `dev_path` pointing at the existing directory, touches no file, and warns for each of `.gig/JOB.md`, `.gig/QUOTE.md` that is missing. `--adopt --status S` sets the initial status for a job already under way (used at handover for tk-dtf-compact and bllc-reproduction). Otherwise, unless `--no-scaffold`: creates `<dev_root>/<slug>/` from templates (`JOB.md.j2`, `QUOTE.md.j2`, `AGENTS.md.j2` or `AGENTS.<type>.md.j2`, `README.md.j2`, `gitignore`, and `gitattributes` -> `.gitattributes` when that template exists), runs `git init` if git is available, writes nothing else. With `--from-draft`: the draft's NOTES.md is rendered into JOB.md's intake section, the draft becomes promoted, its directory is removed. `AMOUNT` is a decimal in major units with at most 2 fractional digits ("800", "800.5", "800.00"); anything else is `invalid_input`. Data: order + `created_files`.
-- `gig ls [--all]` Data: orders (active only unless `--all`) with `next_action`, `days_in_status`, `unpaid` flag, `warranty_until`.
-- `gig show [<slug>]` Data: order, packages, artifacts, requirement_changes, price_history, scorecard, `paths` (dev_path, job_md, quote_md, delivery_dir), `next_action`.
+- `gig ls [--all]` Data: orders (active only unless `--all`) with `next_action`, `days_in_status`, `unpaid` flag (delivered, not paid), `prepaid` flag (in progress, paid), `warranty_until`.
+- `gig show [<slug>]` Data: order, packages, artifacts, requirement_changes, price_history, scorecard, `prepaid`, `paths` (dev_path, job_md, quote_md, delivery_dir), `next_action`.
 - `gig start [<slug>]` See state machine.
 - `gig change [<slug>] --desc TEXT [--price-delta AMOUNT]` Appends requirement change; when delta != 0 also updates price and price_history.
 - `gig price [<slug>] --amount AMOUNT --reason TEXT`
 - `gig note [--order <slug>] TEXT` Appends a timestamped line to `notes`.
-- `gig paid [<slug>] [--date YYYY-MM-DD] [--amount AMOUNT]` Defaults to today. `--amount` records a final price different from the current one (price_history).
+- `gig paid [<slug>] [--date YYYY-MM-DD] [--amount AMOUNT] [--warranty-start YYYY-MM-DD]` Defaults to today. `--amount` records a final price different from the current one (price_history). Data: the order plus `prepaid`.
+  - `delivered`: -> paid, `prepaid: false`. `--warranty-start` moves the start of the warranty (for a delivery completed in a later session); `paid_at` stays the payment date.
+  - `in_progress`: records a prepayment, `prepaid: true`, status unchanged, `warranty_until` null. A second payment is `invalid_state`. `--warranty-start` is `invalid_input`: the warranty starts at delivery.
+  - `paid`: only with `--warranty-start`; recomputes `warranty_until = D + warranty_days` and records a `warranty_start` event. `--date` or `--amount` on a paid order is `invalid_input`; without `--warranty-start` it is `invalid_state`.
+  - Any other status is `invalid_state`.
 - `gig scorecard [<slug>] --decisions N --repeat-questions N --cleanups N --report-reworks N --score 1..5 [--note TEXT]` Upserts. `days_to_preview` (started_at to the first preview `sent_at`) and `check_rejections` (counted by `package check` failures for this order, stored in a small `events` table: order_id, kind, at) are computed, not supplied.
 - `gig archive [<slug>] [--yes] [--before-warranty-end] [--no-scorecard] [--purge]`
   Preview (no `--yes`) reports: git dirty files, untracked files, files > 50 MB, packages never sent, missing scorecard. With `--yes`: moves `dev_path` to `<archive_root>/<slug>`, sets archive_path, status archived. `--purge` deletes the directory instead of moving it; requires `--yes`.
@@ -257,7 +264,7 @@ Layout is fixed: `<dev_path>/delivery/<package-id>/`, `<dev_path>/delivery/<pack
 - `gig package check [<slug>] <package-id>`
   Validates and records a package row (status checked, zip sha256). Data: `{ package, files: [...], zip_sha256, warnings }`. Warnings include: `.gitignore` does not ignore `delivery/`.
 - `gig package upload [<slug>] <package-id> [--uploader bdpan|s3:<name>] [--yes]`
-  Re-validates; refuses if not previously checked or if the zip sha256 changed since the check (`needs_check`). Uploads via `--uploader`, or `delivery.uploader` when it is not given (an empty or unknown name, or `s3:<name>` without its `[delivery.s3.<name>]` table, is `config`; a dry run checks the name the same way, builds no uploader and runs nothing, and only an empty default passes it), to object key `<slug>/<package-id>/<sent_at compact UTC>/<package-id>.zip`, records status sent and the uploader name; kind=full moves the order to delivered. A dry run also resolves the `bdpan` binary and fails with the same `config` error a real run gives when it is not found. The channel follows the uploader: `s3:<name>` records `oss`, `bdpan` records `pan`.
+  Re-validates; refuses if not previously checked or if the zip sha256 changed since the check (`needs_check`). Uploads via `--uploader`, or `delivery.uploader` when it is not given (an empty or unknown name, or `s3:<name>` without its `[delivery.s3.<name>]` table, is `config`; a dry run checks the name the same way, builds no uploader and runs nothing, and only an empty default passes it), to object key `<slug>/<package-id>/<sent_at compact UTC>/<package-id>.zip`, records status sent and the uploader name; kind=full moves the order to delivered (a prepaid order goes to paid). A dry run also resolves the `bdpan` binary and fails with the same `config` error a real run gives when it is not found. The channel follows the uploader: `s3:<name>` records `oss`, `bdpan` records `pan`.
   - `s3:<name>`: the presigned URL's basename is the package id; the port keeps the Content-Disposition attachment header. Shortens the link when `delivery.short_link` is enabled.
   - `bdpan`: runs `bdpan whoami` first (`authenticated` or `has_valid_token` false: `secrets`, the message says to run `! bdpan login`; a whoami that fails otherwise, with a non-zero exit, a reply that is not JSON or a timeout, is `upload` with bdpan's own message), uploads to the remote path `<remote_root>/<object key>` (relative to `/apps/bdpan/`; bdpan creates the directories), then `share <remote path> --period <days>`, where days is the smallest of 1, 7, 30 that covers `link_ttl_seconds`, capped at 30. `url` is `<link>?pwd=<code>`, `pwd` is the extraction code on its own, `short_url` is null, `expires_at` is share time plus the `period` days in bdpan's share reply (the requested days when the reply has none; no expiry for a period of 0). A share that fails after the upload, or whose reply has no https link or no non-empty `pwd`, is `upload`, records nothing and names the remote path; the remote file stays and a retry uses a new directory. gig never deletes remote files.
   Data: `{ package, order_status, url, short_url, expires_at, uploader, pwd, size, dry_run, warnings }`; `uploader` is also set on a dry run; `uploader` is left out when no uploader is known (a dry run with an empty default) and `pwd` when the uploader returned none.
