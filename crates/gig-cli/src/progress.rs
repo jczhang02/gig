@@ -66,7 +66,8 @@ where
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
     /// stderr is a terminal: one line redrawn after `\r`, at most 4 times a
-    /// second, the last report always drawn, a newline at the end.
+    /// second, the last report always drawn but 100% only once, a newline
+    /// at the end.
     Terminal,
     /// stderr is a pipe or file (an agent runs gig): a line each time
     /// another 10% is done or 60 s have passed since the last line (since
@@ -91,6 +92,8 @@ pub struct Renderer<W, C> {
     drawn_len: usize,
     /// Terminal: the last report's line when it was not drawn.
     skipped: Option<String>,
+    /// Terminal: a 100% line is on screen; later 100% reports are not drawn.
+    done_drawn: bool,
 }
 
 impl<W: Write, C: Fn() -> Duration> Renderer<W, C> {
@@ -104,6 +107,7 @@ impl<W: Write, C: Fn() -> Duration> Renderer<W, C> {
             last_tenth: 0,
             drawn_len: 0,
             skipped: None,
+            done_drawn: false,
         }
     }
 
@@ -115,11 +119,17 @@ impl<W: Write, C: Fn() -> Duration> Renderer<W, C> {
         let line = line(sent, total, now, first);
         match self.mode {
             Mode::Terminal => {
+                let done = sent >= total;
                 let due = since_line.is_none_or(|d| d >= Duration::from_millis(250));
-                if due || sent >= total {
+                if done && self.done_drawn {
+                    // 100% is on screen already: no second redraw.
+                    return;
+                }
+                if due || done {
                     self.draw(&line);
                     self.last_line_at = Some(now);
                     self.skipped = None;
+                    self.done_drawn = done;
                 } else {
                     self.skipped = Some(line);
                 }
@@ -428,6 +438,25 @@ mod tests {
             "\rupload 0 B / 100.0 MiB (0%) --/s ETA --\
              \rupload 20.0 MiB / 100.0 MiB (20%) 66.7 MiB/s ETA 2s\
              \rupload 100.0 MiB / 100.0 MiB (100%) 322.6 MiB/s ETA 0s\n"
+        );
+    }
+
+    #[test]
+    fn terminal_draws_100_percent_once() {
+        // baidupcs reports 100% from its progress line, then once more when
+        // the upload is shared.
+        let t = FakeClock::default();
+        let mut r = Renderer::new(Vec::new(), t.clock(), Mode::Terminal);
+        r.report(0, 100 * MIB);
+        t.set_ms(1_000);
+        r.report(100 * MIB, 100 * MIB);
+        t.set_ms(1_100);
+        r.report(100 * MIB, 100 * MIB);
+        r.finish();
+        assert_eq!(
+            text(r),
+            "\rupload 0 B / 100.0 MiB (0%) --/s ETA --\
+             \rupload 100.0 MiB / 100.0 MiB (100%) 100.0 MiB/s ETA 0s\n"
         );
     }
 
