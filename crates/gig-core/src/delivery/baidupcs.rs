@@ -459,6 +459,73 @@ mod tests {
         }
     }
 
+    /// Uploads one small synthetic file to `<remote_root>/_live/<stamp>/`
+    /// on the real account, checks it and shares it for one day, then
+    /// cancels the share and deletes that directory (to the netdisk recycle
+    /// bin). Run with
+    /// `GIG_LIVE_BAIDUPCS=1 cargo test -p gig-core live_baidupcs -- --ignored`.
+    #[test]
+    #[ignore = "uses the real baidupcs-go account; set GIG_LIVE_BAIDUPCS=1"]
+    fn live_baidupcs_uploads_shares_and_cleans_up() {
+        if std::env::var("GIG_LIVE_BAIDUPCS").as_deref() != Ok("1") {
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let local = dir.path().join("c.txt");
+        let body = b"gig live baidupcs test, no client data\n";
+        std::fs::write(&local, body).unwrap();
+        let mut delivery = Delivery::default();
+        if let Ok(bin) = std::env::var("GIG_DELIVERY_BAIDUPCS_BIN") {
+            delivery.baidupcs.bin = bin;
+        }
+        if let Ok(root) = std::env::var("GIG_DELIVERY_BAIDUPCS_REMOTE_ROOT") {
+            delivery.baidupcs.remote_root = root;
+        }
+        delivery.link_ttl_seconds = 86_400;
+        let stamp = OffsetDateTime::now_utc().unix_timestamp();
+        let reports = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = reports.clone();
+        let opts = UploadOpts {
+            object_key: Some(format!("_live/{stamp}/c.txt")),
+            progress: Some(std::sync::Arc::new(move |a, b| {
+                sink.lock().unwrap().push((a, b))
+            })),
+        };
+        let uploader = BaiduPcsUploader::new(&delivery);
+        let remote = uploader.remote(&local, &opts).unwrap();
+        assert!(
+            remote.dir.ends_with(&format!("/_live/{stamp}")),
+            "{}",
+            remote.dir
+        );
+
+        let outcome = uploader.run(&local, &opts);
+
+        // Clean up first, whatever happened, then judge.
+        let call = |args: &[&str]| {
+            let out = subprocess::run(&delivery.baidupcs.bin, args, Some(CALL_TIMEOUT))
+                .unwrap_or_else(|e| panic!("baidupcs-go {args:?}: {}", e.message()));
+            format!("{}{}", out.stdout, out.stderr)
+        };
+        let cancelled = outcome
+            .as_ref()
+            .ok()
+            .map(|(_, share)| call(&["share", "cancel", &share.id]));
+        let removed = call(&["rm", &remote.dir]);
+        let (r, _) = outcome.unwrap();
+        assert!(
+            cancelled.as_deref().unwrap_or_default().contains("成功"),
+            "{cancelled:?}"
+        );
+        assert!(removed.contains("操作成功"), "{removed}");
+        assert!(r.url.starts_with("https://pan.baidu.com/"), "{}", r.url);
+        assert!(r.url.contains("pwd="), "{}", r.url);
+        assert_eq!(r.file_size, body.len() as u64);
+        assert_eq!(r.provider, "baidupcs");
+        let size = body.len() as u64;
+        assert_eq!(reports.lock().unwrap().last(), Some(&(size, size)));
+    }
+
     #[cfg(unix)]
     mod with_fake_bin {
         use super::super::fake::{self, FakeBaiduPcs, Reply};
