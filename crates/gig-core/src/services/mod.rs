@@ -93,6 +93,27 @@ pub fn require_yes(yes: bool, what: &str) -> Result<()> {
     }
 }
 
+/// `git` that finds its repository from the directory it works in (scaffold
+/// and archive run it). A git hook exports `GIT_DIR` and `GIT_INDEX_FILE`
+/// (the pre-commit hook runs the tests, and gig may run from a hook);
+/// inherited, they would point `git init`, `git checkout` and `git status`
+/// at the repository that runs the hook.
+fn git() -> std::process::Command {
+    let mut cmd = std::process::Command::new("git");
+    for var in [
+        "GIT_DIR",
+        "GIT_WORK_TREE",
+        "GIT_INDEX_FILE",
+        "GIT_COMMON_DIR",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        "GIT_PREFIX",
+    ] {
+        cmd.env_remove(var);
+    }
+    cmd
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

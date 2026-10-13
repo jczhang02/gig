@@ -197,7 +197,7 @@ fn copy_dir(src: &Path, dst: &Path) -> Result<()> {
 }
 
 fn git_status(dir: &Path) -> Vec<String> {
-    let out = super::scaffold::git()
+    let out = super::git()
         .args(["-C", &dir.to_string_lossy(), "status", "--porcelain"])
         .output();
     match out {

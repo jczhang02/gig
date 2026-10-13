@@ -1,11 +1,11 @@
 //! Day-zero project files, rendered from the templates directory.
 
+use super::git;
 use crate::config::Config;
 use crate::models::Order;
 use crate::templates;
 use crate::{clock, Error, Result};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 pub struct Scaffolded {
     pub created: Vec<PathBuf>,
@@ -126,26 +126,6 @@ pub fn create(config: &Config, order: &Order, draft_notes: Option<&str>) -> Resu
         )),
     }
     Ok(Scaffolded { created, warnings })
-}
-
-/// `git` that finds its repository from the directory it works in. A git
-/// hook exports `GIT_DIR` and `GIT_INDEX_FILE` (the pre-commit hook runs
-/// the tests, and gig may run from a hook); inherited, they would point
-/// `git init` and `git checkout` at the repository that runs the hook.
-pub(crate) fn git() -> Command {
-    let mut cmd = Command::new("git");
-    for var in [
-        "GIT_DIR",
-        "GIT_WORK_TREE",
-        "GIT_INDEX_FILE",
-        "GIT_COMMON_DIR",
-        "GIT_OBJECT_DIRECTORY",
-        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-        "GIT_PREFIX",
-    ] {
-        cmd.env_remove(var);
-    }
-    cmd
 }
 
 /// Files that should exist in an adopted project.
