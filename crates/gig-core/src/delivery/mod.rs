@@ -4,6 +4,7 @@
 
 pub mod bdpan;
 pub mod s3;
+mod subprocess;
 
 pub use bdpan::BdpanUploader;
 pub use s3::S3Uploader;
