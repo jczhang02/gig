@@ -7,7 +7,6 @@ use crate::services::{require_yes, Ctx};
 use crate::{clock, Error, Result};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 const LARGE_FILE_BYTES: u64 = 50 * 1024 * 1024;
 
@@ -198,7 +197,7 @@ fn copy_dir(src: &Path, dst: &Path) -> Result<()> {
 }
 
 fn git_status(dir: &Path) -> Vec<String> {
-    let out = Command::new("git")
+    let out = super::scaffold::git()
         .args(["-C", &dir.to_string_lossy(), "status", "--porcelain"])
         .output();
     match out {

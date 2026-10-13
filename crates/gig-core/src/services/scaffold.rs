@@ -104,14 +104,9 @@ pub fn create(config: &Config, order: &Order, draft_notes: Option<&str>) -> Resu
         created.push(p);
     }
     let mut warnings = Vec::new();
-    match Command::new("git")
-        .arg("init")
-        .arg("-q")
-        .current_dir(&dev_path)
-        .output()
-    {
+    match git().arg("init").arg("-q").current_dir(&dev_path).output() {
         Ok(out) if out.status.success() => {
-            let _ = Command::new("git")
+            let _ = git()
                 .args([
                     "-C",
                     &dev_path.to_string_lossy(),
@@ -131,6 +126,26 @@ pub fn create(config: &Config, order: &Order, draft_notes: Option<&str>) -> Resu
         )),
     }
     Ok(Scaffolded { created, warnings })
+}
+
+/// `git` that finds its repository from the directory it works in. A git
+/// hook exports `GIT_DIR` and `GIT_INDEX_FILE` (the pre-commit hook runs
+/// the tests, and gig may run from a hook); inherited, they would point
+/// `git init` and `git checkout` at the repository that runs the hook.
+pub(crate) fn git() -> Command {
+    let mut cmd = Command::new("git");
+    for var in [
+        "GIT_DIR",
+        "GIT_WORK_TREE",
+        "GIT_INDEX_FILE",
+        "GIT_COMMON_DIR",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        "GIT_PREFIX",
+    ] {
+        cmd.env_remove(var);
+    }
+    cmd
 }
 
 /// Files that should exist in an adopted project.
