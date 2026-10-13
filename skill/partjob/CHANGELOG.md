@@ -2,6 +2,7 @@
 
 One line per change made through `/partjob rule`: date (source), one sentence.
 
+- 2026-10-13 (baidupcs-uploader): pan uploads use `--uploader baidupcs` (baidupcs-go) in place of bdpan, with the `! baidupcs-go login -bduss=<BDUSS> -stoken=<STOKEN>` hint; uploads print progress on stderr, and a package over 1 GB is uploaded in the background with its progress reported to JC.
 - 2026-10-12 (chat): payment follows the platform's escrow: start records the escrow in QUOTE.md only, `paid` records the client's confirmation (warranty from then, or `--warranty-start`), `paid --received` records the platform's payout; status lists orders awaiting confirmation or payout.
 - 2026-10-12 (chat): setup or service orders are `custom`; pack and preview get "Setup jobs" items (install manual, clean-environment install check, screenshots only in previews).
 - 2026-10-12 (retro): later requests in a session re-read the command file; the Skill tool cannot load partjob; `~/dev/partjobs/AGENTS.md` and every AGENTS template point sessions started without `/partjob` to the skill.

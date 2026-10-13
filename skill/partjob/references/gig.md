@@ -9,7 +9,7 @@ The full spec is `docs/v2/SPEC.md` in the gig repository (`~/Documents/dev-tools
 - Irreversible or outward commands need `--yes`; without it they only rehearse (`"dry_run": true`): `draft drop`, `package upload`, `package sent`, `package drop`, `artifact upload`, `archive`, `cancel`, `delete`.
 - Money is a decimal in major units, at most two fractional digits (`800`, `800.50`). Dates are `YYYY-MM-DD`. `--cut-ratio` is JC's share of the price after the platform's cut (0.6 means 480 of 800).
 - Error codes: `not_found`, `invalid_state`, `invalid_input`, `unsafe_package`, `needs_check`, `needs_yes`, `config`, `secrets`, `upload`, `legacy_db`, `io`, `db`.
-- Uploads: `--uploader` overrides `delivery.uploader` for one upload. `bdpan` uploads to Baidu Netdisk and records channel `pan`; its `url` is the share link with the extraction code in it (`?pwd=`), `pwd` repeats the code, there is no `short_url`, and a `secrets` error means JC must run `! bdpan login` (an `upload` error from `whoami` carries bdpan's own message). A dry run already refuses with `config` an unknown uploader name or a bdpan binary that does not resolve (the fix is `delivery.bdpan.bin`). `s3:<name>` uploads to object storage, records channel `oss` and shortens the link when short links are on.
+- Uploads: `--uploader` overrides `delivery.uploader` for one upload. `baidupcs` uploads to Baidu Netdisk through baidupcs-go and records channel `pan`; its `url` is the share link with the extraction code in it (`?pwd=`), `pwd` repeats the code, there is no `short_url`, and a `secrets` error means JC must run `! baidupcs-go login -bduss=<BDUSS> -stoken=<STOKEN>` (no account, or no STOKEN; an `upload` error carries baidupcs-go's own words and the remote path). A dry run already refuses with `config` an unknown uploader name or a baidupcs-go binary that does not resolve (the fix is `delivery.baidupcs.bin`). `s3:<name>` uploads to object storage, records channel `oss` and shortens the link when short links are on. With `--yes`, both print progress on stderr (`upload <sent> / <total> (<pct>%) <rate>/s ETA <eta>`, a line per 10% or per minute when stderr is not a terminal); stdout stays the one JSON document.
 - States: `queued -> in_progress -> delivered -> paid -> archived`, plus `cancelled`. `paid` means the client confirmed on the platform; the platform's payout is `received_at` (`--received`, also on a `paid` or `archived` order), and `awaiting_payout` in `ls` and `show` flags confirmed orders still waiting for it. A preview changes no state. Packages may still be sent during the warranty (`paid`).
 
 ## Commands
@@ -35,12 +35,12 @@ gig cd [--order <slug>]
 
 gig package build <package-id> [--order <slug>] [--kind full|preview] [--write-manifest [--client-named results/]...]
 gig package check <package-id> [--order <slug>]
-gig package upload <package-id> [--order <slug>] [--uploader bdpan|s3:<name>] [--yes]
+gig package upload <package-id> [--order <slug>] [--uploader baidupcs|s3:<name>] [--yes]
 gig package sent <package-id> [--order <slug>] --channel phone|other [--note TEXT] [--yes]
 gig package drop <package-id> [--order <slug>] [--yes]  removes an unsent package: row, delivery/<id>/, manifest, zip; a sent one is invalid_state
 gig package ls [--order <slug>]              data is an array of packages (gig show has them under data.packages)
 
-gig artifact upload <FILE> [--order <slug>] [--uploader bdpan|s3:<name>] [--yes]
+gig artifact upload <FILE> [--order <slug>] [--uploader baidupcs|s3:<name>] [--yes]
 gig artifact ls [--order <slug>]
 
 gig delete <slug> --yes                      removes the row only, never files; for registration mistakes

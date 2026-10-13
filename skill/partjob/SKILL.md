@@ -30,7 +30,7 @@ Later in the same session, a request that maps to a subcommand ("make a preview"
 | `preview [version]` | delivery | Show JC a preview candidate, then build and check the package |
 | `build [targets] [--via actions\|codebuild\|vm]` | delivery | Executables, only for orders whose decisions call for them; the local Windows VM by default, CodeBuild when the VM cannot be used, GitHub Actions only when JC decides it (for example macOS) |
 | `pack [version]` | delivery | Build the full package, run the reproduction check, validate |
-| `send <package-id> [--via pan\|oss\|phone]` | delivery | Upload to Baidu Netdisk (default) or object storage, or send to the phone, after JC approves |
+| `send <package-id> [--via pan\|oss\|phone]` | delivery | Upload to Baidu Netdisk (`--uploader baidupcs`, the default) or object storage, or send to the phone, after JC approves |
 | `revise` | delivery / warranty | Client feedback: rework or scope change |
 | `paid [date] [amount]` | warranty | The client confirmed on the platform (warranty starts), or the platform paid out |
 | `archive` | warranty | Scorecard, report the dirty state, archive after approval |

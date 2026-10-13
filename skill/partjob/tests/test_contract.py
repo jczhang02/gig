@@ -129,16 +129,27 @@ class SkillShape(unittest.TestCase):
         send = (COMMANDS_DIR / "send.md").read_text(encoding="utf-8")
         self.assertIn("--via pan|oss|phone", send.splitlines()[0])
         self.assertIn("`网盘, OSS, or phone?`", send)
-        self.assertIn("--uploader bdpan --yes", send)
+        self.assertIn("--uploader baidupcs --yes", send)
         self.assertIn("--uploader s3:", send)
         self.assertIn("`pwd`", send)
-        self.assertIn("! bdpan login", send)
         self.assertIn(r"`send <package-id> [--via pan\|oss\|phone]`", SKILL)
         self.assertIn(r"`send <id> [--via pan\|oss\|phone]`", WORKFLOW)
 
+    def test_pan_uploads_name_the_login_hint_and_progress(self):
+        send = (COMMANDS_DIR / "send.md").read_text(encoding="utf-8")
+        hint = "! baidupcs-go login -bduss=<BDUSS> -stoken=<STOKEN>"
+        for doc in (send, GIG_REF):
+            self.assertIn(hint, doc)
+            self.assertIn("stderr", doc)
+        # Over 1 GB the upload runs in the background and the agent relays progress.
+        self.assertIn("over 1 GB", send)
+        self.assertIn("background", send)
+        self.assertIn("--uploader baidupcs", SKILL)
+        self.assertIn("--uploader baidupcs", WORKFLOW)
+
     def test_gig_reference_names_the_uploader_override(self):
-        for cmd in ("gig package upload <package-id> [--order <slug>] [--uploader bdpan|s3:<name>] [--yes]",
-                    "gig artifact upload <FILE> [--order <slug>] [--uploader bdpan|s3:<name>] [--yes]"):
+        for cmd in ("gig package upload <package-id> [--order <slug>] [--uploader baidupcs|s3:<name>] [--yes]",
+                    "gig artifact upload <FILE> [--order <slug>] [--uploader baidupcs|s3:<name>] [--yes]"):
             self.assertIn(cmd, GIG_REF)
         self.assertIn("`pwd`", GIG_REF)
 

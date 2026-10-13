@@ -232,7 +232,7 @@ Project-specific (in the project's AGENTS.md, drafted per type and then complete
 | `preview` | delivery | A candidate in `.scratch/preview/` for JC first; then builds `<slug>-vX.Y.Z-preview/` from the type's default list, writes the manifest, runs `gig package check` |
 | `build [targets] [--via actions\|codebuild\|vm]` | delivery | Executables for orders whose decisions call for them: the local Windows VM (windows) by default, AWS CodeBuild (windows) when the VM cannot be used, GitHub Actions (windows, linux, macos) only when JC decides it; records commit and run id, build id or VM log time |
 | `pack [id]` | delivery | Builds the full package with manifest and check; the reproduction check happens here |
-| `send <id> [--via pan\|oss\|phone]` | delivery | After JC's approval, `gig package upload --uploader bdpan` (default), `--uploader s3:<name>` or gsconnect; reports the Pan Share with its code, the short link, or delivery |
+| `send <id> [--via pan\|oss\|phone]` | delivery | After JC's approval, `gig package upload --uploader baidupcs` (default), `--uploader s3:<name>` or gsconnect; reports the Pan Share with its code, the short link, or delivery |
 | `revise` | delivery / warranty | Compares client feedback with the decisions: rework or scope change; rework adds decisions, scope changes run `gig change` |
 | `paid [date]` | warranty | `gig paid`, updates QUOTE.md, computes the warranty end |
 | `archive` | warranty | After the warranty: reports the dirty state and deletion list, then `gig archive` after approval |
