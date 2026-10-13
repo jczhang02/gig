@@ -24,12 +24,15 @@ exists all exit 0); upload progress comes as `\r`-separated
   <days> -f <file>`. The remote directory is `<remote_root>/<dir part of the
   object key>` under a full-netdisk `remote_root` (default `/gig`).
 - Every step is judged by its text output, with the checks the PRD lists:
-  `who` must name an account (`当前帐号 uid:`, uid not 0); an existing directory
+  `who` must name an account (`当前帐号 uid:`); an existing directory
   is fine; the upload needs exit 0 and the `上传文件成功, 保存到网盘路径:` line;
   `meta`'s `文件大小` must equal the local size; the share reply must carry a
   `https://pan.baidu.com/` link with `pwd=<code>`. Output naming `STOKEN`, or
   a `who` without an account, is `secrets` with the hint
   `! baidupcs-go login -bduss=<BDUSS> -stoken=<STOKEN>`.
+- gig adds one rule of its own beyond the PRD: the uid in `who` must also be
+  non-zero. baidupcs-go prints `当前帐号 uid: 0` when it is logged out, so the
+  `当前帐号 uid:` text alone does not show a login.
 - The upload's progress lines are parsed and reported, so the CLI (stderr) and
   the TUI (progress bar) show real bytes. The upload has no timeout; the other
   calls time out after 60 s.
@@ -53,7 +56,8 @@ exists all exit 0); upload progress comes as `\r`-separated
   upload, as `secrets` with the login hint.
 - Paths are full netdisk paths (`/gig/...`), not under an app root. Remote
   files accumulate under `<remote_root>/`; every upload gets a new timestamped
-  directory and gig never deletes remote files.
+  directory and the upload path never deletes remote files. Only the opt-in
+  live test deletes, and only its own `<remote_root>/_live/<stamp>` directory.
 - Baidu's per-file size limit depends on the account's membership. gig does no
   size pre-check and passes baidupcs-go's error through.
 - The old uploader's config table is now an unknown field and makes the
