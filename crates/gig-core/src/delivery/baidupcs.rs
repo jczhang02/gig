@@ -144,7 +144,7 @@ impl BaidupcsUploader {
         let what = format!("mkdir {dir}");
         let out = subprocess::run(&self.bin, &["mkdir", dir], Some(self.call_timeout))
             .map_err(|e| self.call_error(e, &what))?;
-        let text = format!("{}\n{}", out.stdout, out.stderr);
+        let text = out.text();
         let exists = text.contains("已存在") || text.contains("31061");
         let failed = text.contains("失败") || text.contains("代码:");
         if out.status.success() && (exists || !failed) {
@@ -172,23 +172,25 @@ impl BaidupcsUploader {
         }
         let status =
             subprocess::wait(&mut child, None).map_err(|e| self.call_error(e, "upload"))?;
-        let stderr = stderr.join().unwrap_or_default();
-        let stdout = lines.join("\n");
         if status.success() && lines.iter().any(|l| l.contains(UPLOADED)) {
             return Ok(());
         }
-        if stdout.contains("STOKEN") || stderr.contains("STOKEN") {
+        // stdout last, so its last line is the detail: stderr only says how
+        // many files failed.
+        let text = format!(
+            "{}\n{}",
+            stderr.join().unwrap_or_default(),
+            lines.join("\n")
+        );
+        if text.contains("STOKEN") {
             return Err(Error::Secrets(format!(
                 "baidupcs-go cannot upload without the STOKEN in its login; {LOGIN_HINT}"
             )));
         }
-        let detail = last_line(&stdout)
-            .or_else(|| last_line(&stderr))
-            .map(redact)
-            .unwrap_or_else(|| exit_text(status));
         Err(Error::Upload(format!(
-            "baidupcs-go upload to {} failed: {detail}",
-            remote.file
+            "baidupcs-go upload to {} failed: {}",
+            remote.file,
+            detail(status, &text)
         )))
     }
 
@@ -203,7 +205,7 @@ impl BaidupcsUploader {
             ))),
             None => Err(Error::Upload(format!(
                 "uploaded {file} but baidupcs-go meta gave no size: {}",
-                detail(out.status, &format!("{}\n{}", out.stdout, out.stderr))
+                detail(out.status, &out.text())
             ))),
         }
     }
@@ -220,7 +222,7 @@ impl BaidupcsUploader {
         parse_share(&out.stdout).ok_or_else(|| {
             Error::Upload(format!(
                 "uploaded {file} but sharing it failed, no https://pan.baidu.com/ link with pwd=<code>: {}",
-                detail(out.status, &format!("{}\n{}", out.stdout, out.stderr))
+                detail(out.status, &out.text())
             ))
         })
     }
@@ -508,7 +510,7 @@ mod tests {
         let call = |args: &[&str]| {
             let out = subprocess::run(&delivery.baidupcs.bin, args, Some(CALL_TIMEOUT))
                 .unwrap_or_else(|e| panic!("baidupcs-go {args:?}: {}", e.message()));
-            format!("{}{}", out.stdout, out.stderr)
+            out.text()
         };
         let cancelled = outcome
             .as_ref()
@@ -544,6 +546,13 @@ mod tests {
             uploader: BaidupcsUploader,
         }
 
+        /// Default delivery settings that run `fake`.
+        fn delivery(fake: &FakeBaidupcs) -> Delivery {
+            let mut delivery = Delivery::default();
+            delivery.baidupcs.bin = fake.bin().to_string_lossy().into_owned();
+            delivery
+        }
+
         /// A fake bin and a local `p-1.zip` of [`fake::SIZE`] bytes (sparse).
         fn setup() -> Setup {
             let dir = tempfile::tempdir().unwrap();
@@ -553,9 +562,7 @@ mod tests {
                 .unwrap()
                 .set_len(fake::SIZE)
                 .unwrap();
-            let mut delivery = Delivery::default();
-            delivery.baidupcs.bin = fake.bin().to_string_lossy().into_owned();
-            let uploader = BaidupcsUploader::new(&delivery);
+            let uploader = BaidupcsUploader::new(&delivery(&fake));
             Setup {
                 _dir: dir,
                 fake,
@@ -762,8 +769,7 @@ mod tests {
                 ("", None, "/"),
             ] {
                 let s = setup();
-                let mut delivery = Delivery::default();
-                delivery.baidupcs.bin = s.fake.bin().to_string_lossy().into_owned();
+                let mut delivery = delivery(&s.fake);
                 delivery.baidupcs.remote_root = root.into();
                 let opts = UploadOpts {
                     object_key: key.map(str::to_string),
@@ -782,8 +788,7 @@ mod tests {
         #[test]
         fn the_share_period_follows_link_ttl_seconds() {
             let s = setup();
-            let mut delivery = Delivery::default();
-            delivery.baidupcs.bin = s.fake.bin().to_string_lossy().into_owned();
+            let mut delivery = delivery(&s.fake);
             delivery.link_ttl_seconds = 86_401;
             let before = time::OffsetDateTime::now_utc().unix_timestamp();
             let r = BaidupcsUploader::new(&delivery)

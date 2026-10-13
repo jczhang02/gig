@@ -71,6 +71,13 @@ pub(crate) struct Output {
     pub stderr: String,
 }
 
+impl Output {
+    /// stdout, then stderr, as one text.
+    pub(crate) fn text(&self) -> String {
+        format!("{}\n{}", self.stdout, self.stderr)
+    }
+}
+
 /// Start `bin args` with stdin closed and stdout and stderr piped.
 pub(crate) fn spawn(bin: &str, args: &[&str]) -> Result<Child, CallError> {
     Command::new(bin)
