@@ -1,6 +1,7 @@
 //! Dispatch: one clap command -> one service call -> one JSON value.
 
 use crate::cli::*;
+use crate::progress;
 use clap::CommandFactory;
 use gig_core::delivery::{self, DryRunUploader};
 use gig_core::models::Channel;
@@ -273,13 +274,9 @@ fn run_with_db(ctx: &Ctx, cmd: Command) -> Result<Output> {
                 }
                 packages::preflight(ctx, a.order.as_deref(), &a.package_id)?;
                 let uploader = delivery::uploader_by_name(&ctx.config, &ctx.paths, name)?;
-                let r = packages::upload(
-                    ctx,
-                    a.order.as_deref(),
-                    &a.package_id,
-                    true,
-                    uploader.as_ref(),
-                )?;
+                let r = progress::to_stderr(uploader.as_ref(), |uploader| {
+                    packages::upload(ctx, a.order.as_deref(), &a.package_id, true, uploader)
+                })?;
                 let w = r.warnings.clone();
                 out_with(r, w)
             }
@@ -321,13 +318,9 @@ fn run_with_db(ctx: &Ctx, cmd: Command) -> Result<Output> {
                     )?);
                 }
                 let uploader = delivery::uploader_by_name(&ctx.config, &ctx.paths, name)?;
-                out(artifacts::upload(
-                    ctx,
-                    a.order.as_deref(),
-                    &file,
-                    true,
-                    uploader.as_ref(),
-                )?)
+                out(progress::to_stderr(uploader.as_ref(), |uploader| {
+                    artifacts::upload(ctx, a.order.as_deref(), &file, true, uploader)
+                })?)
             }
             ArtifactCmd::Ls(a) => out(artifacts::list(ctx, a.get())?),
         },

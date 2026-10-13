@@ -4,11 +4,13 @@
 
 pub mod baidupcs;
 pub mod bdpan;
+pub mod progress;
 pub mod s3;
 mod subprocess;
 
 pub use baidupcs::BaiduPcsUploader;
 pub use bdpan::BdpanUploader;
+pub use progress::WithProgress;
 pub use s3::S3Uploader;
 
 use crate::config::{Config, Delivery, Paths};

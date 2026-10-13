@@ -1,6 +1,7 @@
 //! `gig`: one JSON document per invocation. See docs/v2/SPEC.md.
 
 mod cli;
+mod progress;
 mod run;
 
 use clap::Parser;

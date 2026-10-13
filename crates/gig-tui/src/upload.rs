@@ -3,13 +3,11 @@
 //! that feeds a progress bar.
 //!
 //! The service functions build their own `UploadOpts`, so the progress
-//! callback rides in on a decorating `Uploader` instead of a new argument.
+//! callback rides in on gig-core's decorating `WithProgress` uploader.
 
 use crate::data::OrderRow;
 use gig_core::config::Delivery;
-use gig_core::delivery::{
-    uploader_choices, Progress, UploadOpts, UploadResult, Uploader, UploaderName,
-};
+use gig_core::delivery::{uploader_choices, Progress, Uploader, UploaderName, WithProgress};
 use gig_core::models::{OrderStatus, Package, PackageKind, PackageStatus};
 use gig_core::services::{artifacts, packages, Ctx};
 use gig_core::{Error, Result};
@@ -228,24 +226,6 @@ impl Meter {
     }
 }
 
-/// Puts a progress callback into the options the service builds.
-struct WithProgress<'a> {
-    inner: &'a dyn Uploader,
-    progress: Progress,
-}
-
-impl Uploader for WithProgress<'_> {
-    fn name(&self) -> &str {
-        self.inner.name()
-    }
-
-    fn upload(&self, local: &Path, opts: &UploadOpts) -> Result<UploadResult> {
-        let mut opts = opts.clone();
-        opts.progress = Some(Arc::clone(&self.progress));
-        self.inner.upload(local, &opts)
-    }
-}
-
 /// Run `job` on this thread through the same service call as the CLI.
 pub fn run_job(
     ctx: &Ctx,
@@ -256,10 +236,7 @@ pub fn run_job(
     let wrapped;
     let uploader: &dyn Uploader = match progress {
         Some(progress) => {
-            wrapped = WithProgress {
-                inner: uploader,
-                progress,
-            };
+            wrapped = WithProgress::new(uploader, progress);
             &wrapped
         }
         None => uploader,
