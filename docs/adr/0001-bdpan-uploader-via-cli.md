@@ -1,6 +1,6 @@
 # 0001 bdpan uploader drives the official CLI
 
-Status: accepted, 2026-10-08
+Status: superseded by 0002, 2026-10-13 (accepted 2026-10-08)
 
 ## Context
 

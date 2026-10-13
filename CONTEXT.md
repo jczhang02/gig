@@ -50,4 +50,4 @@ _Avoid_: short link, 网盘链接 without code
 
 - "package" should mean **Client Package** when discussing the canonical final bundle; use **Delivery Artifact** for extra one-off files.
 - "short link" should mean a redirecting **Short Link**, not a storage endpoint, CDN hostname, or proxy download service.
-- A **Pan Share** is not a **Short Link**: Baidu hosts and expires it, and gig does not redirect it. bdpan also returns its own `short_url` field; gig ignores it, so do not call a Pan Share a short link because of that field.
+- A **Pan Share** is not a **Short Link**: Baidu hosts and expires it, and gig does not redirect it. Its `?pwd=` link is the share itself, not a redirect.
