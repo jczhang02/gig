@@ -712,6 +712,91 @@ fn artifact_upload_picks_the_uploader() {
         .any(|c| c.contains("upload") && c.contains("gig/up/artifacts/")));
 }
 
+/// stdout as exactly one JSON document, and stderr.
+fn json_and_stderr(env: &Env, args: &[&str]) -> (Value, String) {
+    let out = Command::new(env!("CARGO_BIN_EXE_gig"))
+        .args(args)
+        .env("GIG_HOME", env.root.path())
+        .current_dir(env.root.path())
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    let stderr = String::from_utf8(out.stderr).unwrap();
+    // from_str refuses anything after the first document.
+    let v: Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|e| panic!("not one JSON document ({e}): {stdout}\nstderr: {stderr}"));
+    assert_eq!(v["ok"], true, "{v}\nstderr: {stderr}");
+    (v, stderr)
+}
+
+/// Uploads print progress on stderr (plain lines: stderr is a pipe here);
+/// dry runs print none. The fake bdpan reports once, at the end.
+#[cfg(unix)]
+#[test]
+fn uploads_print_progress_on_stderr() {
+    let env = Env::new();
+    let (_bin_dir, _bdpan) = order_with_fake_bdpan(&env);
+    let file = env.root.path().join("demo.mp4");
+    fs::write(&file, "video").unwrap();
+    let file = file.to_string_lossy().into_owned();
+
+    let (dry, stderr) = json_and_stderr(&env, &["package", "upload", "up-v1", "--order", "up"]);
+    assert_eq!(dry["data"]["dry_run"], true);
+    assert_eq!(stderr, "");
+    let (_, stderr) = json_and_stderr(
+        &env,
+        &[
+            "artifact",
+            "upload",
+            "--order",
+            "up",
+            "--uploader",
+            "bdpan",
+            &file,
+        ],
+    );
+    assert_eq!(stderr, "");
+
+    let (sent, stderr) = json_and_stderr(
+        &env,
+        &[
+            "package",
+            "upload",
+            "up-v1",
+            "--order",
+            "up",
+            "--uploader",
+            "bdpan",
+            "--yes",
+        ],
+    );
+    assert_eq!(sent["data"]["package"]["status"], "sent");
+    let lines: Vec<&str> = stderr.lines().collect();
+    assert_eq!(lines.len(), 1, "{stderr}");
+    assert!(lines[0].starts_with("upload "), "{stderr}");
+    assert!(lines[0].contains(" (100%) "), "{stderr}");
+    assert!(lines[0].ends_with(" ETA 0s"), "{stderr}");
+    assert!(!stderr.contains('\r'), "{stderr:?}");
+
+    let (_, stderr) = json_and_stderr(
+        &env,
+        &[
+            "artifact",
+            "upload",
+            "--order",
+            "up",
+            "--uploader",
+            "bdpan",
+            "--yes",
+            &file,
+        ],
+    );
+    // The rate depends on the wall clock.
+    assert!(stderr.starts_with("upload 5 B / 5 B (100%) "), "{stderr}");
+    assert!(stderr.ends_with("/s ETA 0s\n"), "{stderr}");
+    assert_eq!(stderr.lines().count(), 1, "{stderr}");
+}
+
 /// Dry runs check the uploader name as a real run does, and build or run
 /// nothing: an unknown name, or an S3 name without its table, is `config`.
 #[cfg(unix)]
