@@ -649,8 +649,8 @@ fn confirm_text(h: &Harness) -> String {
     }
 }
 
-/// S3 tables `a` and `b` with `s3:a` as the default, and `[delivery.bdpan]`
-/// pointing at `bin`.
+/// S3 tables `a` and `b` with `s3:a` as the default, and
+/// `[delivery.baidupcs]` pointing at `bin`.
 fn with_uploaders(h: &mut Harness, bin: &Path) {
     let d = &mut h.ctx.config.delivery;
     d.uploader = "s3:a".into();
@@ -665,7 +665,7 @@ fn with_uploaders(h: &mut Harness, bin: &Path) {
             },
         );
     }
-    d.bdpan.bin = bin.to_string_lossy().into_owned();
+    d.baidupcs.bin = bin.to_string_lossy().into_owned();
 }
 
 /// The uploader line of the open confirmation.
@@ -680,13 +680,13 @@ fn uploader_shown(h: &Harness) -> String {
 #[test]
 fn tab_switches_the_uploader_of_an_upload_confirm() {
     let mut h = Harness::new();
-    let bin = h._dir.path().join("no-bdpan-here");
+    let bin = h._dir.path().join("no-baidupcs-go-here");
     with_uploaders(&mut h, &bin);
     let (_, pkg) = with_checked_package(&mut h, "tk-tab", PackageKind::Full);
 
     h.key(KeyCode::Char('u'));
     h.key(KeyCode::Enter);
-    // The default from the config first; Tab visits bdpan, then each S3
+    // The default from the config first; Tab visits baidupcs, then each S3
     // table, and wraps.
     assert_eq!(uploader_shown(&h), "s3:a");
     let mut seen = Vec::new();
@@ -694,12 +694,12 @@ fn tab_switches_the_uploader_of_an_upload_confirm() {
         h.key(KeyCode::Tab);
         seen.push(uploader_shown(&h));
     }
-    assert_eq!(seen, ["s3:b", "bdpan", "s3:a", "s3:b"]);
+    assert_eq!(seen, ["s3:b", "baidupcs", "s3:a", "s3:b"]);
     h.key(KeyCode::Tab);
     h.key(KeyCode::Char('y'));
     match h.effects.pop() {
         Some(Effect::Upload(job)) => {
-            assert_eq!(job.uploader, "bdpan");
+            assert_eq!(job.uploader, "baidupcs");
             assert_eq!(
                 job.kind,
                 UploadKind::Package {
@@ -727,21 +727,32 @@ fn tab_switches_the_uploader_of_an_upload_confirm() {
 }
 
 /// The chosen uploader is the one `App::upload` builds and runs: here a fake
-/// bdpan binary, so the package goes out as a Pan Share.
+/// baidupcs-go, so the package goes out as a Pan Share, and the progress
+/// popup gets the bytes baidupcs-go reports while it uploads.
 #[cfg(unix)]
 #[test]
 fn the_job_runs_with_the_chosen_uploader_and_shows_the_pwd() {
-    use gig_core::delivery::bdpan::fake::{self, FakeBdpan};
+    use gig_core::delivery::baidupcs::fake::{self, FakeBaiduPcs, Reply};
     let mut h = Harness::new();
-    let fake = FakeBdpan::install(h._dir.path()).unwrap();
+    let fake = FakeBaiduPcs::install(h._dir.path()).unwrap();
     with_uploaders(&mut h, &fake.bin());
     let (id, pkg) = with_checked_package(&mut h, "tk-pan", PackageKind::Full);
+    let zip = gig_core::repo::packages::find(&h.ctx.conn, id, &pkg)
+        .unwrap()
+        .unwrap()
+        .zip_path;
+    let size = std::fs::metadata(&zip).unwrap().len();
+    fake.reply("meta", Reply::meta(size)).unwrap();
+    // The upload prints its progress, then waits for the gate before it
+    // succeeds: the popup must see the progress while the upload runs.
+    let gate = h._dir.path().join("progress-seen");
+    fake.hold_upload(&gate).unwrap();
 
     h.key(KeyCode::Char('u'));
     h.key(KeyCode::Enter);
     h.key(KeyCode::Tab);
     h.key(KeyCode::Tab);
-    assert_eq!(uploader_shown(&h), "bdpan");
+    assert_eq!(uploader_shown(&h), "baidupcs");
     h.key(KeyCode::Char('y'));
     let job = match h.effects.pop() {
         Some(Effect::Upload(job)) => job,
@@ -749,24 +760,28 @@ fn the_job_runs_with_the_chosen_uploader_and_shows_the_pwd() {
     };
 
     let uploader = uploader_by_name(&h.ctx.config, &h.ctx.paths, &job.uploader).unwrap();
-    assert_eq!(uploader.name(), "bdpan");
+    assert_eq!(uploader.name(), "baidupcs");
     let mut ticks = Vec::new();
     let done = upload::run_on_worker(&mut h.ctx, &job, uploader.as_ref(), |sent, total| {
+        if total > 0 && !gate.exists() {
+            std::fs::write(&gate, "").unwrap();
+        }
         ticks.push((sent, total));
         std::thread::sleep(Duration::from_millis(1));
     })
     .unwrap();
     h.refresh();
 
-    // bdpan reports once, at the end: until then the popup spins.
+    // The fake's progress lines describe 50 MiB: those are the bytes the
+    // popup showed before the upload finished.
     assert!(
         ticks
             .iter()
-            .all(|&(sent, total)| total == 0 || sent == total),
+            .any(|&(sent, total)| total == fake::SIZE && sent > 0),
         "{ticks:?}"
     );
     assert!(
-        fake.calls().iter().any(|c| c.contains(" upload ")),
+        fake.calls().iter().any(|c| c.starts_with("upload ")),
         "{:?}",
         fake.calls()
     );
@@ -784,14 +799,14 @@ fn the_job_runs_with_the_chosen_uploader_and_shows_the_pwd() {
     let row = h.ui.data.order(id).unwrap();
     let p = row.packages.iter().find(|p| p.package_id == pkg).unwrap();
     assert_eq!(p.channel, Some(Channel::Pan));
-    assert_eq!(p.uploader.as_deref(), Some("bdpan"));
+    assert_eq!(p.uploader.as_deref(), Some("baidupcs"));
     assert_eq!(p.short_url, None);
 }
 
 #[test]
 fn an_unset_default_shows_none_and_tab_reaches_the_configured_uploaders() {
     let mut h = Harness::new();
-    let bin = h._dir.path().join("no-bdpan-here");
+    let bin = h._dir.path().join("no-baidupcs-go-here");
     with_uploaders(&mut h, &bin);
     h.ctx.config.delivery.uploader = String::new();
     with_checked_package(&mut h, "tk-none", PackageKind::Full);
@@ -804,7 +819,7 @@ fn an_unset_default_shows_none_and_tab_reaches_the_configured_uploaders() {
         h.key(KeyCode::Tab);
         seen.push(uploader_shown(&h));
     }
-    assert_eq!(seen, ["bdpan", "s3:a", "s3:b", "bdpan"]);
+    assert_eq!(seen, ["baidupcs", "s3:a", "s3:b", "baidupcs"]);
     assert!(h.effects.is_empty());
 }
 

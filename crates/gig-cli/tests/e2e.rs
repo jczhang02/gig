@@ -853,6 +853,88 @@ fn config_set_accepts_the_bdpan_uploader() {
 }
 
 #[cfg(unix)]
+mod doctor_baidupcs {
+    use super::Env;
+    use gig_core::delivery::baidupcs::fake::{FakeBaiduPcs, Reply};
+    use serde_json::Value;
+    use std::fs;
+    use std::path::Path;
+
+    /// Make `bin` the configured baidupcs-go and baidupcs the default
+    /// uploader.
+    fn use_baidupcs(env: &Env, bin: &Path) {
+        let cfg = env.root.path().join("config/config.toml");
+        let mut text = fs::read_to_string(&cfg).unwrap();
+        text.push_str(&format!(
+            "[delivery]\nuploader = \"baidupcs\"\n[delivery.baidupcs]\nbin = {bin:?}\n"
+        ));
+        fs::write(&cfg, text).unwrap();
+    }
+
+    /// `scope: message` for each entry of `data.<key>` in a doctor report.
+    fn entries(report: &Value, key: &str) -> Vec<String> {
+        report[key]
+            .as_array()
+            .unwrap_or_else(|| panic!("no {key} in {report}"))
+            .iter()
+            .map(|p| {
+                format!(
+                    "{}: {}",
+                    p["scope"].as_str().unwrap(),
+                    p["message"].as_str().unwrap()
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_logged_in_baidupcs_is_healthy_and_doctor_only_asks_who() {
+        let env = Env::new();
+        let fake = FakeBaiduPcs::install(env.root.path()).unwrap();
+        use_baidupcs(&env, &fake.bin());
+
+        let r = env.ok(&["doctor"]);
+
+        assert!(entries(&r, "problems").is_empty(), "{r}");
+        assert!(entries(&r, "warnings").is_empty(), "{r}");
+        assert_eq!(fake.calls(), vec!["who"]);
+    }
+
+    #[test]
+    fn a_missing_baidupcs_binary_is_a_problem() {
+        let env = Env::new();
+        use_baidupcs(&env, &env.root.path().join("no-such-baidupcs-go"));
+
+        let r = env.ok(&["doctor"]);
+
+        let problems = entries(&r, "problems");
+        assert_eq!(problems.len(), 1, "{r}");
+        assert!(problems[0].starts_with("baidupcs: "), "{r}");
+        assert!(problems[0].contains("not found"), "{r}");
+        assert!(problems[0].contains("delivery.baidupcs.bin"), "{r}");
+    }
+
+    #[test]
+    fn a_logged_out_baidupcs_is_a_problem_with_the_login_hint() {
+        let env = Env::new();
+        let fake = FakeBaiduPcs::install(env.root.path()).unwrap();
+        fake.reply("who", Reply::who_logged_out()).unwrap();
+        use_baidupcs(&env, &fake.bin());
+
+        let r = env.ok(&["doctor"]);
+
+        let problems = entries(&r, "problems");
+        assert_eq!(problems.len(), 1, "{r}");
+        assert!(problems[0].starts_with("baidupcs: "), "{r}");
+        assert!(
+            problems[0].contains("! baidupcs-go login -bduss=<BDUSS> -stoken=<STOKEN>"),
+            "{r}"
+        );
+        assert!(!problems[0].contains("upload failed"), "{r}");
+    }
+}
+
+#[cfg(unix)]
 mod doctor_bdpan {
     use super::Env;
     use gig_core::delivery::bdpan::fake::{self, FakeBdpan, Reply};

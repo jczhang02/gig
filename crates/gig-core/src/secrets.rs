@@ -159,8 +159,10 @@ pub fn availability(config: &Config, paths: &Paths) -> Vec<String> {
             problems.push(e.to_string());
         }
     }
-    // Short links wrap S3 only; a bdpan default never needs the token.
-    if UploaderName::parse(&config.delivery.uploader).ok() != Some(UploaderName::Bdpan) {
+    // Short links wrap S3 only; a Pan Share default never needs the token.
+    let pan = UploaderName::parse(&config.delivery.uploader)
+        .is_ok_and(|u| u.channel() == crate::models::Channel::Pan);
+    if !pan {
         if let Err(e) = resolve_short_link_token(config, paths) {
             problems.push(e.to_string());
         }
@@ -233,6 +235,21 @@ mod tests {
         assert_eq!(availability(&cfg, &paths).len(), 1);
         cfg.delivery.uploader = "bdpan".into();
         assert!(availability(&cfg, &paths).is_empty());
+    }
+
+    #[test]
+    fn availability_skips_short_link_token_for_baidupcs() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::under_root(dir.path());
+        let mut cfg = Config::default();
+        cfg.delivery.short_link.enabled = true;
+        cfg.delivery.uploader = "baidupcs".into();
+        assert!(availability(&cfg, &paths).is_empty());
+        // An S3 default still needs it.
+        cfg.delivery.uploader = "s3:hk".into();
+        assert!(availability(&cfg, &paths)
+            .iter()
+            .any(|m| m.contains("short link")));
     }
 
     #[test]

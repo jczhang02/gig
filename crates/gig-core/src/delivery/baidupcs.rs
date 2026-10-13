@@ -98,8 +98,11 @@ impl BaiduPcsUploader {
         self
     }
 
-    /// Check that baidupcs-go is logged in: `who` must name an account.
-    fn who(&self) -> Result<()> {
+    /// Check that baidupcs-go is logged in: `who` must name an account
+    /// (`gig doctor` and the first step of an upload). A binary that does
+    /// not resolve is a config error, no account a secrets error with the
+    /// login hint. The STOKEN is not checked.
+    pub(crate) fn who(&self) -> Result<()> {
         let out = subprocess::run(&self.bin, &["who"], Some(self.call_timeout))
             .map_err(|e| self.call_error(e, "who"))?;
         if has_account(&out.stdout) {

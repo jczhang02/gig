@@ -32,8 +32,10 @@ pub type Progress = Arc<dyn Fn(u64, u64) + Send + Sync>;
 pub struct UploadOpts {
     /// Backend object key; the local basename when None.
     pub object_key: Option<String>,
-    /// Called by the uploader as bytes go out: after each multipart part, and
-    /// once when a single PUT has finished. The CLI passes None.
+    /// Called by the uploader as bytes go out: S3 after each multipart part,
+    /// or once when a single PUT has finished; baidupcs at each progress
+    /// line of baidupcs-go and at the end. The CLI and the TUI pass one for
+    /// every real upload.
     pub progress: Option<Progress>,
 }
 
@@ -261,6 +263,11 @@ impl DryRunUploader {
         if parsed == UploaderName::Bdpan && !bdpan::bin_resolves(&config.delivery.bdpan.bin) {
             return Err(bdpan::not_found(&config.delivery.bdpan.bin));
         }
+        if parsed == UploaderName::Baidupcs
+            && !subprocess::bin_resolves(&config.delivery.baidupcs.bin)
+        {
+            return Err(baidupcs::not_found(&config.delivery.baidupcs.bin));
+        }
         Ok(Self {
             name: parsed.to_string(),
         })
@@ -309,11 +316,11 @@ pub fn uploader_by_name(config: &Config, paths: &Paths, name: &str) -> Result<Bo
 }
 
 /// The uploaders an upload can switch between (the TUI's `Tab`), in that
-/// order: `bdpan` when `delivery.uploader` names it, `[delivery.bdpan]`
-/// changes its defaults, or its binary resolves; then `s3:<name>` for each
-/// `[delivery.s3.<name>]` table.
+/// order: `baidupcs` when `delivery.uploader` names it,
+/// `[delivery.baidupcs]` changes its defaults, or its binary resolves; then
+/// `s3:<name>` for each `[delivery.s3.<name>]` table.
 pub fn uploader_choices(delivery: &Delivery) -> Vec<UploaderName> {
-    uploader_choices_with(delivery, bdpan::bin_resolves)
+    uploader_choices_with(delivery, subprocess::bin_resolves)
 }
 
 /// [`uploader_choices`] with the binary lookup passed in.
@@ -321,11 +328,11 @@ fn uploader_choices_with(
     delivery: &Delivery,
     resolves: impl Fn(&str) -> bool,
 ) -> Vec<UploaderName> {
-    let bdpan = UploaderName::parse(&delivery.uploader).ok() == Some(UploaderName::Bdpan)
-        || delivery.bdpan != crate::config::Bdpan::default()
-        || resolves(&delivery.bdpan.bin);
-    bdpan
-        .then_some(UploaderName::Bdpan)
+    let baidupcs = UploaderName::parse(&delivery.uploader).ok() == Some(UploaderName::Baidupcs)
+        || delivery.baidupcs != crate::config::Baidupcs::default()
+        || resolves(&delivery.baidupcs.bin);
+    baidupcs
+        .then_some(UploaderName::Baidupcs)
         .into_iter()
         .chain(delivery.s3.keys().cloned().map(UploaderName::S3))
         .collect()
@@ -510,6 +517,21 @@ mod tests {
     }
 
     #[test]
+    fn dry_run_needs_the_baidupcs_binary_to_resolve() {
+        let mut cfg = Config::default();
+        cfg.delivery.baidupcs.bin = "/nonexistent-gig-dir/baidupcs-go".into();
+        let err = DryRunUploader::new(&cfg, "baidupcs").unwrap_err();
+        assert_eq!(err.code(), "config");
+        assert!(err.to_string().contains("not found"), "{err}");
+        assert!(err.to_string().contains("delivery.baidupcs.bin"), "{err}");
+        cfg.delivery.baidupcs.bin = "sh".into();
+        assert_eq!(
+            DryRunUploader::new(&cfg, "baidupcs").unwrap().name(),
+            "baidupcs"
+        );
+    }
+
+    #[test]
     fn bdpan_is_built_without_short_link_secrets() {
         let dir = tempfile::tempdir().unwrap();
         // Short links on, but no token and no S3 keys anywhere.
@@ -562,7 +584,7 @@ mod tests {
     }
 
     #[test]
-    fn uploader_choices_list_bdpan_when_named_or_found_then_each_s3_table() {
+    fn uploader_choices_list_baidupcs_when_named_or_found_then_each_s3_table() {
         let dir = tempfile::tempdir().unwrap();
         let (cfg, _) = config_with_s3_and_short_links(dir.path());
         let found = |_: &str| true;
@@ -574,34 +596,34 @@ mod tests {
                 .map(ToString::to_string)
                 .collect()
         }
-        // Default bdpan settings, binary not found, not the default: S3 only.
+        // Default baidupcs settings, binary not found, not the default: S3 only.
         assert_eq!(
             uploader_choices_with(&cfg.delivery, missing),
             ["s3:default", "s3:hk"]
         );
-        // Found on PATH (or as the configured path): bdpan comes first.
+        // Found on PATH (or as the configured path): baidupcs comes first.
         assert_eq!(
             uploader_choices_with(&cfg.delivery, found),
-            ["bdpan", "s3:default", "s3:hk"]
+            ["baidupcs", "s3:default", "s3:hk"]
         );
-        // Named as the default, or configured in [delivery.bdpan]: offered
-        // even when not found, so the upload says why it fails.
+        // Named as the default, or configured in [delivery.baidupcs]:
+        // offered even when not found, so the upload says why it fails.
         let mut named = cfg.delivery.clone();
-        named.uploader = "bdpan".into();
+        named.uploader = "baidupcs".into();
         assert_eq!(
             uploader_choices_with(&named, missing),
-            ["bdpan", "s3:default", "s3:hk"]
+            ["baidupcs", "s3:default", "s3:hk"]
         );
         let mut table = cfg.delivery.clone();
-        table.bdpan.bin = "/opt/bdpan/bin/bdpan".into();
-        assert_eq!(uploader_choices_with(&table, missing)[0], "bdpan");
+        table.baidupcs.remote_root = "/deliveries".into();
+        assert_eq!(uploader_choices_with(&table, missing)[0], "baidupcs");
         // The lookup is asked about the configured binary name.
         let asked = std::cell::RefCell::new(Vec::new());
         uploader_choices_with(&cfg.delivery, |b: &str| {
             asked.borrow_mut().push(b.to_string());
             false
         });
-        assert_eq!(asked.into_inner(), ["bdpan"]);
+        assert_eq!(asked.into_inner(), ["baidupcs-go"]);
         // Nothing configured, nothing found.
         assert!(uploader_choices_with(&Config::default().delivery, missing).is_empty());
     }

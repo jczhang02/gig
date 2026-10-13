@@ -2,7 +2,7 @@
 
 use crate::config::Delivery;
 use crate::delivery::bdpan::{BdpanUploader, LoginStatus, LOGIN_HINT, NOT_LOGGED_IN};
-use crate::delivery::UploaderName;
+use crate::delivery::{BaiduPcsUploader, UploaderName};
 use crate::models::{OrderStatus, PackageStatus};
 use crate::package::validate::gitignore_covers_delivery;
 use crate::repo::{orders as repo_orders, packages};
@@ -165,8 +165,8 @@ pub fn run(ctx: &Ctx, fix: bool) -> Result<Report> {
     let uploader = ctx.config.delivery.uploader.as_str();
     match UploaderName::parse(uploader) {
         Ok(UploaderName::Bdpan) => check_bdpan(&ctx.config.delivery, &mut problems, &mut warnings),
-        // The baidupcs check comes with the removal of bdpan.
-        Ok(UploaderName::Baidupcs | UploaderName::S3(_)) => {}
+        Ok(UploaderName::Baidupcs) => check_baidupcs(&ctx.config.delivery, &mut problems),
+        Ok(UploaderName::S3(_)) => {}
         // No default uploader: uploads are off, which is allowed.
         Err(_) if uploader.is_empty() => {}
         Err(e) => problem(
@@ -219,6 +219,14 @@ fn check_bdpan(delivery: &Delivery, problems: &mut Vec<Problem>, warnings: &mut 
             format!("the login token expires on {}; {LOGIN_HINT}", t.date()),
         ),
         Ok(_) => {}
+    }
+}
+
+/// baidupcs-go owns its login: ask `who` and report, never fix. The STOKEN
+/// cannot be checked without reading credentials, so it is not.
+fn check_baidupcs(delivery: &Delivery, problems: &mut Vec<Problem>) {
+    if let Err(e) = BaiduPcsUploader::new(delivery).who() {
+        problem(problems, "baidupcs", message(e));
     }
 }
 
