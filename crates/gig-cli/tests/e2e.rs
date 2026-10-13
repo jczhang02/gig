@@ -920,6 +920,23 @@ mod doctor_baidupcs {
     }
 
     #[test]
+    fn a_baidupcs_binary_that_is_not_executable_is_a_problem() {
+        use std::os::unix::fs::PermissionsExt;
+        let env = Env::new();
+        let fake = FakeBaiduPcs::install(env.root.path()).unwrap();
+        fs::set_permissions(fake.bin(), fs::Permissions::from_mode(0o644)).unwrap();
+        use_baidupcs(&env, &fake.bin());
+
+        let r = env.ok(&["doctor"]);
+
+        let problems = entries(&r, "problems");
+        assert_eq!(problems.len(), 1, "{r}");
+        assert!(problems[0].starts_with("baidupcs: "), "{r}");
+        assert!(problems[0].contains("not executable"), "{r}");
+        assert!(problems[0].contains("delivery.baidupcs.bin"), "{r}");
+    }
+
+    #[test]
     fn a_logged_out_baidupcs_is_a_problem_with_the_login_hint() {
         let env = Env::new();
         let fake = FakeBaiduPcs::install(env.root.path()).unwrap();
