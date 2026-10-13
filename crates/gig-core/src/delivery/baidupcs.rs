@@ -91,9 +91,9 @@ impl BaidupcsUploader {
         }
     }
 
-    /// Override the 60 s timeout of `who`, `mkdir`, `meta` and `share`
-    /// (tests).
-    pub fn with_call_timeout(mut self, timeout: Duration) -> Self {
+    /// Override the 60 s timeout of `who`, `mkdir`, `meta` and `share`.
+    #[cfg(test)]
+    fn with_call_timeout(mut self, timeout: Duration) -> Self {
         self.call_timeout = timeout;
         self
     }

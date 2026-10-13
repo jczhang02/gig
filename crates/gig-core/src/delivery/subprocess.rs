@@ -1,6 +1,6 @@
-//! Running an uploader's CLI as a subprocess: finding the binary, spawning
-//! it, waiting with an optional timeout, and redacting token-like values
-//! from what it printed. Shared by the CLI-driven uploaders.
+//! Running an uploader's CLI as a subprocess (baidupcs-go): finding the
+//! binary, spawning it, waiting with an optional timeout, and redacting
+//! token-like values from what it printed.
 
 use std::ffi::OsString;
 use std::io::{self, Read};
@@ -135,9 +135,9 @@ pub(crate) fn wait(child: &mut Child, timeout: Option<Duration>) -> Result<ExitS
     }
 }
 
-/// Blank token-like values, as `redact()` in the verification script does:
-/// `(access_token|refresh_token|authorization|bduss|stoken)[=":\s]+` then the
-/// value up to whitespace or one of `&,"<>`.
+/// Blank token-like values: a key matching
+/// `(access_token|refresh_token|authorization|bduss|stoken)` (any case), then
+/// `[=":\s]+`, then the value up to whitespace or one of `&,"<>`.
 pub(crate) fn redact(text: &str) -> String {
     const KEYS: [&str; 5] = [
         "access_token",
@@ -209,8 +209,7 @@ mod tests {
     }
 
     #[test]
-    fn redact_matches_the_verification_script() {
-        // Expected values from verify.py's redact() on the same inputs.
+    fn redact_blanks_token_like_values() {
         for (input, want) in [
             ("BDUSS=abc123&x=1 ok", "BDUSS=<REDACTED>&x=1 ok"),
             (
