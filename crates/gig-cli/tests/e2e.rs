@@ -1,5 +1,7 @@
 //! End-to-end: run the `gig` binary in a temporary GIG_HOME through a whole order.
 
+#[cfg(unix)]
+use gig_core::delivery::baidupcs::fake::{self, FakeBaiduPcs, Reply};
 use serde_json::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -609,21 +611,16 @@ fn bare_gig_without_a_terminal_still_requires_a_command() {
 
 /// An in-progress order `up` with a checked package `up-v1`, the default
 /// uploader `s3:hk` (no keys), short links enabled (no token), and
-/// `delivery.bdpan.bin` pointing at a fake bdpan.
+/// `delivery.baidupcs.bin` pointing at a fake baidupcs-go.
 #[cfg(unix)]
-fn order_with_fake_bdpan(
-    env: &Env,
-) -> (
-    tempfile::TempDir,
-    gig_core::delivery::bdpan::fake::FakeBdpan,
-) {
+fn order_with_fake_baidupcs(env: &Env) -> (tempfile::TempDir, FakeBaiduPcs) {
     let bin_dir = tempfile::tempdir().unwrap();
-    let bdpan = gig_core::delivery::bdpan::fake::FakeBdpan::install(bin_dir.path()).unwrap();
+    let fake = FakeBaiduPcs::install(bin_dir.path()).unwrap();
     let cfg = env.root.path().join("config/config.toml");
     let mut text = fs::read_to_string(&cfg).unwrap();
     text.push_str(&format!(
-        "[delivery]\nuploader = \"s3:hk\"\n[delivery.s3.hk]\nbucket = \"b\"\nregion = \"r\"\nendpoint = \"https://s3.example.test\"\n[delivery.short_link]\nenabled = true\nendpoint = \"https://go.example.test/api\"\n[delivery.bdpan]\nbin = {:?}\n",
-        bdpan.bin()
+        "[delivery]\nuploader = \"s3:hk\"\n[delivery.s3.hk]\nbucket = \"b\"\nregion = \"r\"\nendpoint = \"https://s3.example.test\"\n[delivery.short_link]\nenabled = true\nendpoint = \"https://go.example.test/api\"\n[delivery.baidupcs]\nbin = {:?}\n",
+        fake.bin()
     ));
     fs::write(&cfg, text).unwrap();
     env.ok(&["new", "up", "--title", "Up"]);
@@ -639,55 +636,62 @@ fn order_with_fake_bdpan(
         "up",
         "--write-manifest",
     ]);
-    (bin_dir, bdpan)
+    (bin_dir, fake)
+}
+
+/// Make the fake's `meta` report the size a dry run of `args` names, so
+/// the uploader's remote size check passes.
+#[cfg(unix)]
+fn meta_matches(env: &Env, fake: &FakeBaiduPcs, args: &[&str]) {
+    let size = env.ok(args)["size"].as_u64().unwrap();
+    fake.reply("meta", Reply::meta(size)).unwrap();
 }
 
 #[cfg(unix)]
 #[test]
 fn package_upload_picks_the_uploader() {
-    use gig_core::delivery::bdpan::fake;
     let env = Env::new();
-    let (_bin_dir, bdpan) = order_with_fake_bdpan(&env);
+    let (_bin_dir, pcs) = order_with_fake_baidupcs(&env);
     let up = ["package", "upload", "up-v1", "--order", "up"];
     let with = |extra: &[&'static str]| [&up[..], extra].concat();
 
     // Dry runs name the uploader and run nothing.
     assert_eq!(env.ok(&up)["uploader"], "s3:hk");
-    let dry = env.ok(&with(&["--uploader", "bdpan"]));
-    assert_eq!(dry["uploader"], "bdpan");
+    let dry = env.ok(&with(&["--uploader", "baidupcs"]));
+    assert_eq!(dry["uploader"], "baidupcs");
     assert_eq!(dry["dry_run"], true);
-    assert!(bdpan.calls().is_empty());
+    assert!(pcs.calls().is_empty());
 
     // Unknown names are config errors; the S3 default still needs its keys.
     assert_eq!(env.err(&with(&["--uploader", "nope", "--yes"])), "config");
     assert_eq!(env.err(&with(&["--yes"])), "secrets");
 
-    // bdpan: channel pan, no short link even with short links enabled.
-    let sent = env.ok(&with(&["--uploader", "bdpan", "--yes"]));
+    // baidupcs: channel pan, no short link even with short links enabled.
+    meta_matches(&env, &pcs, &up);
+    let sent = env.ok(&with(&["--uploader", "baidupcs", "--yes"]));
     assert_eq!(sent["package"]["status"], "sent");
     assert_eq!(sent["package"]["channel"], "pan");
-    assert_eq!(sent["package"]["uploader"], "bdpan");
+    assert_eq!(sent["package"]["uploader"], "baidupcs");
     assert_eq!(sent["package"]["short_url"], Value::Null);
     assert_eq!(sent["short_url"], Value::Null);
-    assert_eq!(sent["uploader"], "bdpan");
+    assert_eq!(sent["uploader"], "baidupcs");
     assert_eq!(sent["pwd"], fake::PWD);
     assert_eq!(
         sent["url"].as_str().unwrap(),
         format!("{}?pwd={}", fake::LINK, fake::PWD)
     );
     assert_eq!(sent["order_status"], "delivered");
-    assert!(bdpan
+    assert!(pcs
         .calls()
         .iter()
-        .any(|c| c.contains("upload") && c.contains("gig/up/up-v1/")));
+        .any(|c| c.starts_with("upload ") && c.contains(" /gig/up/up-v1/")));
 }
 
 #[cfg(unix)]
 #[test]
 fn artifact_upload_picks_the_uploader() {
-    use gig_core::delivery::bdpan::fake;
     let env = Env::new();
-    let (_bin_dir, bdpan) = order_with_fake_bdpan(&env);
+    let (_bin_dir, pcs) = order_with_fake_baidupcs(&env);
     let file = env.root.path().join("demo.mp4");
     fs::write(&file, "video").unwrap();
     let file = file.to_string_lossy().into_owned();
@@ -695,21 +699,25 @@ fn artifact_upload_picks_the_uploader() {
     let with = |extra: &[&'static str]| [&up[..], extra].concat();
 
     assert_eq!(env.ok(&up)["uploader"], "s3:hk");
-    assert_eq!(env.ok(&with(&["--uploader", "bdpan"]))["uploader"], "bdpan");
-    assert!(bdpan.calls().is_empty());
+    assert_eq!(
+        env.ok(&with(&["--uploader", "baidupcs"]))["uploader"],
+        "baidupcs"
+    );
+    assert!(pcs.calls().is_empty());
     assert_eq!(env.err(&with(&["--uploader", "nope", "--yes"])), "config");
     assert_eq!(env.err(&with(&["--yes"])), "secrets");
 
-    let d = env.ok(&with(&["--uploader", "bdpan", "--yes"]));
-    assert_eq!(d["artifact"]["uploader"], "bdpan");
+    meta_matches(&env, &pcs, &up);
+    let d = env.ok(&with(&["--uploader", "baidupcs", "--yes"]));
+    assert_eq!(d["artifact"]["uploader"], "baidupcs");
     assert_eq!(d["artifact"]["short_url"], Value::Null);
     assert_eq!(d["short_url"], Value::Null);
-    assert_eq!(d["uploader"], "bdpan");
+    assert_eq!(d["uploader"], "baidupcs");
     assert_eq!(d["pwd"], fake::PWD);
-    assert!(bdpan
+    assert!(pcs
         .calls()
         .iter()
-        .any(|c| c.contains("upload") && c.contains("gig/up/artifacts/")));
+        .any(|c| c.starts_with("upload ") && c.contains(" /gig/up/artifacts/")));
 }
 
 /// stdout as exactly one JSON document, and stderr.
@@ -730,71 +738,54 @@ fn json_and_stderr(env: &Env, args: &[&str]) -> (Value, String) {
 }
 
 /// Uploads print progress on stderr (plain lines: stderr is a pipe here);
-/// dry runs print none. The fake bdpan reports once, at the end.
+/// dry runs print none. The fake baidupcs-go reports three times (55%, 86%
+/// and 100% of 50 MiB), so a plain line comes for each.
 #[cfg(unix)]
 #[test]
 fn uploads_print_progress_on_stderr() {
     let env = Env::new();
-    let (_bin_dir, _bdpan) = order_with_fake_bdpan(&env);
+    let (_bin_dir, pcs) = order_with_fake_baidupcs(&env);
     let file = env.root.path().join("demo.mp4");
     fs::write(&file, "video").unwrap();
     let file = file.to_string_lossy().into_owned();
+    let package = ["package", "upload", "up-v1", "--order", "up"];
+    let artifact = ["artifact", "upload", "--order", "up", file.as_str()];
+    fn with<'a>(up: &[&'a str], extra: &[&'a str]) -> Vec<&'a str> {
+        [up, extra].concat()
+    }
 
-    let (dry, stderr) = json_and_stderr(&env, &["package", "upload", "up-v1", "--order", "up"]);
+    let (dry, stderr) = json_and_stderr(&env, &package);
     assert_eq!(dry["data"]["dry_run"], true);
     assert_eq!(stderr, "");
-    let (_, stderr) = json_and_stderr(
-        &env,
-        &[
-            "artifact",
-            "upload",
-            "--order",
-            "up",
-            "--uploader",
-            "bdpan",
-            &file,
-        ],
-    );
+    let (_, stderr) = json_and_stderr(&env, &with(&artifact, &["--uploader", "baidupcs"]));
     assert_eq!(stderr, "");
+    assert!(pcs.calls().is_empty());
 
-    let (sent, stderr) = json_and_stderr(
-        &env,
-        &[
-            "package",
-            "upload",
-            "up-v1",
-            "--order",
-            "up",
-            "--uploader",
-            "bdpan",
-            "--yes",
-        ],
-    );
+    meta_matches(&env, &pcs, &package);
+    let (sent, stderr) =
+        json_and_stderr(&env, &with(&package, &["--uploader", "baidupcs", "--yes"]));
     assert_eq!(sent["data"]["package"]["status"], "sent");
     let lines: Vec<&str> = stderr.lines().collect();
-    assert_eq!(lines.len(), 1, "{stderr}");
-    assert!(lines[0].starts_with("upload "), "{stderr}");
-    assert!(lines[0].contains(" (100%) "), "{stderr}");
-    assert!(lines[0].ends_with(" ETA 0s"), "{stderr}");
+    assert_eq!(lines.len(), 3, "{stderr}");
+    assert!(
+        lines[0].starts_with("upload 27.5 MiB / 50.0 MiB (55%) "),
+        "{stderr}"
+    );
+    assert!(
+        lines[1].starts_with("upload 43.4 MiB / 50.0 MiB (86%) "),
+        "{stderr}"
+    );
+    assert!(
+        lines[2].starts_with("upload 50.0 MiB / 50.0 MiB (100%) "),
+        "{stderr}"
+    );
+    assert!(lines[2].ends_with(" ETA 0s"), "{stderr}");
     assert!(!stderr.contains('\r'), "{stderr:?}");
 
-    let (_, stderr) = json_and_stderr(
-        &env,
-        &[
-            "artifact",
-            "upload",
-            "--order",
-            "up",
-            "--uploader",
-            "bdpan",
-            "--yes",
-            &file,
-        ],
-    );
-    // The rate depends on the wall clock.
-    assert!(stderr.starts_with("upload 5 B / 5 B (100%) "), "{stderr}");
-    assert!(stderr.ends_with("/s ETA 0s\n"), "{stderr}");
-    assert_eq!(stderr.lines().count(), 1, "{stderr}");
+    meta_matches(&env, &pcs, &artifact);
+    let (_, stderr) = json_and_stderr(&env, &with(&artifact, &["--uploader", "baidupcs", "--yes"]));
+    assert_eq!(stderr.lines().count(), 3, "{stderr}");
+    assert!(stderr.ends_with(" ETA 0s\n"), "{stderr}");
 }
 
 /// Dry runs check the uploader name as a real run does, and build or run
@@ -803,14 +794,14 @@ fn uploads_print_progress_on_stderr() {
 #[test]
 fn a_dry_run_refuses_an_unknown_uploader() {
     let env = Env::new();
-    let (_bin_dir, bdpan) = order_with_fake_bdpan(&env);
+    let (_bin_dir, pcs) = order_with_fake_baidupcs(&env);
     let file = env.root.path().join("demo.mp4");
     fs::write(&file, "video").unwrap();
     let file = file.to_string_lossy().into_owned();
     let package = ["package", "upload", "up-v1", "--order", "up"];
     let artifact = ["artifact", "upload", "--order", "up", file.as_str()];
     for up in [&package[..], &artifact[..]] {
-        for bad in ["nope", "s3:missing", "bdpan:work"] {
+        for bad in ["nope", "s3:missing", "baidupcs:work"] {
             let (ok, v) = env.run(&[up, &["--uploader", bad]].concat());
             assert!(!ok, "{bad}: {v}");
             assert_eq!(v["error"]["code"], "config", "{bad}: {v}");
@@ -838,17 +829,31 @@ fn a_dry_run_refuses_an_unknown_uploader() {
     fs::write(&cfg, text).unwrap();
     assert_eq!(env.ok(&package).get("uploader"), None);
     assert_eq!(env.ok(&artifact).get("uploader"), None);
-    assert!(bdpan.calls().is_empty(), "{:?}", bdpan.calls());
+    // A baidupcs-go that does not resolve is the same config error a real
+    // run gives, and nothing runs.
+    let text = fs::read_to_string(&cfg).unwrap().replace(
+        &format!("bin = {:?}", pcs.bin()),
+        "bin = \"/nonexistent-gig-dir/baidupcs-go\"",
+    );
+    fs::write(&cfg, text).unwrap();
+    for up in [&package[..], &artifact[..]] {
+        let (ok, v) = env.run(&[up, &["--uploader", "baidupcs"]].concat());
+        assert!(!ok, "{v}");
+        assert_eq!(v["error"]["code"], "config", "{v}");
+        let message = v["error"]["message"].as_str().unwrap();
+        assert!(message.contains("delivery.baidupcs.bin"), "{v}");
+    }
+    assert!(pcs.calls().is_empty(), "{:?}", pcs.calls());
 }
 
 #[test]
-fn config_set_accepts_the_bdpan_uploader() {
+fn config_set_accepts_the_baidupcs_uploader() {
     let env = Env::new();
-    let v = env.ok(&["config", "set", "delivery.uploader", "bdpan"]);
-    assert_eq!(v["value"], "bdpan");
+    let v = env.ok(&["config", "set", "delivery.uploader", "baidupcs"]);
+    assert_eq!(v["value"], "baidupcs");
     assert_eq!(
         env.ok(&["config", "get", "delivery.uploader"])["value"],
-        "bdpan"
+        "baidupcs"
     );
 }
 
@@ -931,158 +936,5 @@ mod doctor_baidupcs {
             "{r}"
         );
         assert!(!problems[0].contains("upload failed"), "{r}");
-    }
-}
-
-#[cfg(unix)]
-mod doctor_bdpan {
-    use super::Env;
-    use gig_core::delivery::bdpan::fake::{self, FakeBdpan, Reply};
-    use serde_json::Value;
-    use std::fs;
-    use std::path::Path;
-
-    /// Make `bin` the configured bdpan and the default uploader.
-    fn use_bdpan(env: &Env, bin: &Path) {
-        let cfg = env.root.path().join("config/config.toml");
-        let mut text = fs::read_to_string(&cfg).unwrap();
-        text.push_str(&format!(
-            "[delivery]\nuploader = \"bdpan\"\n[delivery.bdpan]\nbin = {bin:?}\n"
-        ));
-        fs::write(&cfg, text).unwrap();
-    }
-
-    /// `scope: message` for each entry of `data.<key>` in a doctor report.
-    fn entries(report: &Value, key: &str) -> Vec<String> {
-        report[key]
-            .as_array()
-            .unwrap_or_else(|| panic!("no {key} in {report}"))
-            .iter()
-            .map(|p| {
-                format!(
-                    "{}: {}",
-                    p["scope"].as_str().unwrap(),
-                    p["message"].as_str().unwrap()
-                )
-            })
-            .collect()
-    }
-
-    #[test]
-    fn a_logged_in_bdpan_is_healthy_and_doctor_only_asks_whoami() {
-        let env = Env::new();
-        let fake = FakeBdpan::install(env.root.path()).unwrap();
-        use_bdpan(&env, &fake.bin());
-
-        let r = env.ok(&["doctor"]);
-
-        assert!(entries(&r, "problems").is_empty(), "{r}");
-        assert!(entries(&r, "warnings").is_empty(), "{r}");
-        assert_eq!(fake.calls(), vec!["--json --no-check-update whoami"]);
-    }
-
-    #[test]
-    fn a_missing_bdpan_binary_is_a_problem() {
-        let env = Env::new();
-        use_bdpan(&env, &env.root.path().join("no-such-bdpan"));
-
-        let r = env.ok(&["doctor"]);
-
-        let problems = entries(&r, "problems");
-        assert_eq!(problems.len(), 1, "{r}");
-        assert!(problems[0].contains("not found"), "{r}");
-        assert!(problems[0].contains("delivery.bdpan.bin"), "{r}");
-    }
-
-    #[test]
-    fn a_bdpan_binary_that_is_not_executable_is_a_problem() {
-        use std::os::unix::fs::PermissionsExt;
-        let env = Env::new();
-        let fake = FakeBdpan::install(env.root.path()).unwrap();
-        fs::set_permissions(fake.bin(), fs::Permissions::from_mode(0o644)).unwrap();
-        use_bdpan(&env, &fake.bin());
-
-        let r = env.ok(&["doctor"]);
-
-        let problems = entries(&r, "problems");
-        assert_eq!(problems.len(), 1, "{r}");
-        assert!(problems[0].contains("not executable"), "{r}");
-        assert!(problems[0].contains("delivery.bdpan.bin"), "{r}");
-    }
-
-    #[test]
-    fn a_logged_out_or_expired_bdpan_is_a_problem_that_says_bdpan_login() {
-        for reply in [
-            Reply::whoami(false, false, "2099-01-01T00:00:00Z"),
-            Reply::whoami(true, false, "2099-01-01T00:00:00Z"),
-        ] {
-            let env = Env::new();
-            let fake = FakeBdpan::install(env.root.path()).unwrap();
-            fake.reply("whoami", reply).unwrap();
-            use_bdpan(&env, &fake.bin());
-
-            let r = env.ok(&["doctor"]);
-
-            let problems = entries(&r, "problems");
-            assert_eq!(problems.len(), 1, "{r}");
-            assert!(problems[0].contains("! bdpan login"), "{r}");
-        }
-    }
-
-    #[test]
-    fn a_whoami_that_fails_is_a_problem_in_bdpan_s_words() {
-        let env = Env::new();
-        let fake = FakeBdpan::install(env.root.path()).unwrap();
-        fake.reply("whoami", Reply::fail(1, "Error: 网络连接失败\nUsage:\n"))
-            .unwrap();
-        use_bdpan(&env, &fake.bin());
-
-        let r = env.ok(&["doctor"]);
-
-        let problems = entries(&r, "problems");
-        assert_eq!(problems.len(), 1, "{r}");
-        assert!(
-            problems[0].starts_with("bdpan: bdpan whoami failed: 网络连接失败"),
-            "{r}"
-        );
-        assert!(!problems[0].contains("upload failed"), "{r}");
-    }
-
-    #[test]
-    fn a_token_that_expires_within_7_days_is_a_warning_with_the_date() {
-        let env = Env::new();
-        let fake = FakeBdpan::install(env.root.path()).unwrap();
-        let expires_at = fake::days_from_now(3);
-        fake.reply("whoami", Reply::whoami(true, true, &expires_at))
-            .unwrap();
-        use_bdpan(&env, &fake.bin());
-
-        let (ok, v) = env.run(&["doctor"]);
-
-        assert!(ok, "{v}");
-        assert!(entries(&v["data"], "problems").is_empty(), "{v}");
-        let warnings = entries(&v["data"], "warnings");
-        assert_eq!(warnings.len(), 1, "{v}");
-        assert!(warnings[0].contains(&expires_at[..10]), "{v}");
-        assert!(warnings[0].contains("! bdpan login"), "{v}");
-        assert!(v["warnings"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|w| w.as_str().unwrap().contains(&expires_at[..10])));
-    }
-
-    #[test]
-    fn a_token_valid_for_8_days_or_more_is_fine() {
-        let env = Env::new();
-        let fake = FakeBdpan::install(env.root.path()).unwrap();
-        fake.reply("whoami", Reply::whoami(true, true, &fake::days_from_now(8)))
-            .unwrap();
-        use_bdpan(&env, &fake.bin());
-
-        let r = env.ok(&["doctor"]);
-
-        assert!(entries(&r, "problems").is_empty(), "{r}");
-        assert!(entries(&r, "warnings").is_empty(), "{r}");
     }
 }

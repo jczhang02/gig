@@ -313,8 +313,10 @@ pub enum Popup {
     /// keys, so it never closes by key.
     Progress {
         title: String,
-        /// Bytes sent and total; total 0 means the uploader has not reported
-        /// (a single PUT reports only at the end): show a spinner.
+        /// Bytes sent and total, as the uploader reports them (S3 per part,
+        /// baidupcs per baidupcs-go progress line); total 0 means it has
+        /// not reported yet (a single PUT reports only at the end): show a
+        /// spinner.
         sent: u64,
         total: u64,
         /// Spinner frame counter.
@@ -1124,7 +1126,7 @@ const PARTS: [&str; 7] = [
 ];
 
 /// The fill on its track, the percentage and the sizes; or the spinner
-/// while the uploader has not reported (single PUT).
+/// while the uploader has not reported yet.
 fn progress_lines(
     sent: u64,
     total: u64,

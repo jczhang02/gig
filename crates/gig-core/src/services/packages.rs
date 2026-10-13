@@ -638,14 +638,14 @@ mod tests {
     struct PanUploader;
     impl Uploader for PanUploader {
         fn name(&self) -> &str {
-            "bdpan"
+            "baidupcs"
         }
         fn upload(&self, _local: &Path, _opts: &UploadOpts) -> Result<UploadResult> {
             Ok(UploadResult {
                 url: "https://pan.example.test/s/1x?pwd=ab12".into(),
                 short_url: None,
                 expires_at: Some(1_900_000_000),
-                provider: "bdpan".into(),
+                provider: "baidupcs".into(),
                 file_size: 3,
                 pwd: Some("ab12".into()),
             })
@@ -653,17 +653,17 @@ mod tests {
     }
 
     #[test]
-    fn bdpan_upload_records_channel_pan_and_returns_pwd() {
+    fn baidupcs_upload_records_channel_pan_and_returns_pwd() {
         let root = tempfile::tempdir().unwrap();
         let ctx = Ctx::for_test(root.path());
         with_package(&ctx, "pan", "pan-v1");
         build_package(&ctx, Some("pan"), "pan-v1", PackageKind::Full, true, &[]).unwrap();
         let dry = upload(&ctx, Some("pan"), "pan-v1", false, &PanUploader).unwrap();
-        assert_eq!(dry.uploader.as_deref(), Some("bdpan"));
+        assert_eq!(dry.uploader.as_deref(), Some("baidupcs"));
         let s = upload(&ctx, Some("pan"), "pan-v1", true, &PanUploader).unwrap();
         assert_eq!(s.package.channel, Some(Channel::Pan));
-        assert_eq!(s.package.uploader.as_deref(), Some("bdpan"));
-        assert_eq!(s.uploader.as_deref(), Some("bdpan"));
+        assert_eq!(s.package.uploader.as_deref(), Some("baidupcs"));
+        assert_eq!(s.uploader.as_deref(), Some("baidupcs"));
         assert_eq!(s.pwd.as_deref(), Some("ab12"));
         assert_eq!(s.short_url, None);
     }

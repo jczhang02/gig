@@ -1,15 +1,13 @@
 //! Uploader trait, short links, and the backends: S3 (ported from v1;
-//! credentials arrive through `secrets::ResolvedS3`), and baidupcs and
-//! bdpan (Baidu Netdisk CLIs as subprocesses).
+//! credentials arrive through `secrets::ResolvedS3`), and baidupcs (the
+//! baidupcs-go Baidu Netdisk CLI as a subprocess).
 
 pub mod baidupcs;
-pub mod bdpan;
 pub mod progress;
 pub mod s3;
 mod subprocess;
 
 pub use baidupcs::BaiduPcsUploader;
-pub use bdpan::BdpanUploader;
 pub use progress::WithProgress;
 pub use s3::S3Uploader;
 
@@ -181,13 +179,13 @@ pub fn configured_uploader(config: &Config, paths: &Paths) -> Result<Box<dyn Upl
     uploader_by_name(config, paths, &config.delivery.uploader)
 }
 
-/// An uploader's name. Its text form (`baidupcs`, `bdpan`, or `s3:<name>` for a
-/// `[delivery.s3.<name>]` table) is what `delivery.uploader`, `--uploader`
-/// and the database hold.
+/// An uploader's name. Its text form (`baidupcs`, or `s3:<name>` for a
+/// `[delivery.s3.<name>]` table) is what `delivery.uploader` and
+/// `--uploader` hold. The database column is text, so rows written by
+/// earlier uploaders (`bdpan`) stay readable.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UploaderName {
     Baidupcs,
-    Bdpan,
     S3(String),
 }
 
@@ -197,16 +195,12 @@ impl UploaderName {
         if name == baidupcs::NAME {
             return Ok(Self::Baidupcs);
         }
-        if name == bdpan::NAME {
-            return Ok(Self::Bdpan);
-        }
         match name.strip_prefix("s3:") {
             Some(s3) if !s3.is_empty() => Ok(Self::S3(s3.to_string())),
             _ => Err(Error::Config(if name.is_empty() {
-                "no uploader is set (delivery.uploader is empty); use baidupcs, bdpan or s3:<name>"
-                    .into()
+                "no uploader is set (delivery.uploader is empty); use baidupcs or s3:<name>".into()
             } else {
-                format!("unknown uploader {name:?}; use baidupcs, bdpan or s3:<name>")
+                format!("unknown uploader {name:?}; use baidupcs or s3:<name>")
             })),
         }
     }
@@ -214,7 +208,7 @@ impl UploaderName {
     /// The channel an upload through this uploader records.
     pub fn channel(&self) -> Channel {
         match self {
-            Self::Baidupcs | Self::Bdpan => Channel::Pan,
+            Self::Baidupcs => Channel::Pan,
             Self::S3(_) => Channel::Oss,
         }
     }
@@ -224,7 +218,6 @@ impl fmt::Display for UploaderName {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Baidupcs => f.write_str(baidupcs::NAME),
-            Self::Bdpan => f.write_str(bdpan::NAME),
             Self::S3(name) => write!(f, "s3:{name}"),
         }
     }
@@ -253,16 +246,14 @@ pub struct DryRunUploader {
 impl DryRunUploader {
     /// The dry run of an upload through `name` (`--uploader`, else
     /// `delivery.uploader`), checked as a real run checks it
-    /// ([`check_uploader_name`]); "" names no uploader. A bdpan binary that
-    /// does not resolve is the same config error a real run gives.
+    /// ([`check_uploader_name`]); "" names no uploader. A baidupcs-go
+    /// binary that does not resolve is the same config error a real run
+    /// gives.
     pub fn new(config: &Config, name: &str) -> Result<Self> {
         if name.is_empty() {
             return Ok(Self::default());
         }
         let parsed = check_uploader_name(config, name)?;
-        if parsed == UploaderName::Bdpan && !bdpan::bin_resolves(&config.delivery.bdpan.bin) {
-            return Err(bdpan::not_found(&config.delivery.bdpan.bin));
-        }
         if parsed == UploaderName::Baidupcs
             && !subprocess::bin_resolves(&config.delivery.baidupcs.bin)
         {
@@ -298,7 +289,6 @@ pub(crate) fn output_name(uploader: &dyn Uploader) -> Option<String> {
 pub fn uploader_by_name(config: &Config, paths: &Paths, name: &str) -> Result<Box<dyn Uploader>> {
     let s3_name = match check_uploader_name(config, name)? {
         UploaderName::Baidupcs => return Ok(Box::new(BaiduPcsUploader::new(&config.delivery))),
-        UploaderName::Bdpan => return Ok(Box::new(BdpanUploader::new(&config.delivery))),
         UploaderName::S3(s3) => s3,
     };
     let resolved = secrets::resolve_s3_named(config, paths, &s3_name)?;
@@ -506,17 +496,6 @@ mod tests {
     }
 
     #[test]
-    fn dry_run_needs_the_bdpan_binary_to_resolve() {
-        let mut cfg = Config::default();
-        cfg.delivery.bdpan.bin = "/nonexistent-gig-dir/bdpan".into();
-        let err = DryRunUploader::new(&cfg, "bdpan").unwrap_err();
-        assert_eq!(err.code(), "config");
-        assert!(err.to_string().contains("not found"), "{err}");
-        cfg.delivery.bdpan.bin = "sh".into();
-        assert_eq!(DryRunUploader::new(&cfg, "bdpan").unwrap().name(), "bdpan");
-    }
-
-    #[test]
     fn dry_run_needs_the_baidupcs_binary_to_resolve() {
         let mut cfg = Config::default();
         cfg.delivery.baidupcs.bin = "/nonexistent-gig-dir/baidupcs-go".into();
@@ -529,15 +508,6 @@ mod tests {
             DryRunUploader::new(&cfg, "baidupcs").unwrap().name(),
             "baidupcs"
         );
-    }
-
-    #[test]
-    fn bdpan_is_built_without_short_link_secrets() {
-        let dir = tempfile::tempdir().unwrap();
-        // Short links on, but no token and no S3 keys anywhere.
-        let (cfg, paths) = config_with_s3_and_short_links(dir.path());
-        let u = uploader_by_name(&cfg, &paths, "bdpan").unwrap();
-        assert_eq!(u.name(), "bdpan");
     }
 
     #[test]
@@ -631,7 +601,6 @@ mod tests {
     #[test]
     fn uploader_names_round_trip_and_pick_the_channel() {
         for (text, name, channel) in [
-            ("bdpan", UploaderName::Bdpan, Channel::Pan),
             ("baidupcs", UploaderName::Baidupcs, Channel::Pan),
             (
                 "s3:aliyun-bj",
@@ -647,15 +616,15 @@ mod tests {
             "",
             "s3:",
             "nope",
-            "bdpan:x",
-            "BDPAN",
+            "baidupcs:x",
+            "BAIDUPCS",
             "baidupcs-go",
             "Baidupcs",
         ] {
             let err = UploaderName::parse(text).unwrap_err();
             assert_eq!(err.code(), "config", "{text}");
             assert!(
-                err.to_string().contains("use baidupcs, bdpan or s3:<name>"),
+                err.to_string().contains("use baidupcs or s3:<name>"),
                 "{err}"
             );
         }
@@ -665,12 +634,12 @@ mod tests {
     fn unknown_uploader_names_are_config_errors() {
         let dir = tempfile::tempdir().unwrap();
         let (cfg, paths) = config_with_s3_and_short_links(dir.path());
-        for name in ["", "nope", "s3:", "s3:missing", "bdpan:work", "BDPAN"] {
+        for name in ["", "nope", "s3:", "s3:missing", "baidupcs:work", "BAIDUPCS"] {
             assert_eq!(by_name_err(&cfg, &paths, name).code(), "config", "{name}");
         }
         assert!(by_name_err(&cfg, &paths, "nope")
             .to_string()
-            .contains("baidupcs, bdpan or s3:<name>"));
+            .contains("baidupcs or s3:<name>"));
     }
 
     #[test]

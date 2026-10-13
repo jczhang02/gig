@@ -160,11 +160,10 @@ impl General {
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(default, deny_unknown_fields)]
 pub struct Delivery {
-    /// "s3:<name>", "baidupcs", "bdpan", or "" for no uploader.
+    /// "s3:<name>", "baidupcs", or "" for no uploader.
     pub uploader: String,
     pub link_ttl_seconds: u32,
     pub short_link: ShortLink,
-    pub bdpan: Bdpan,
     pub baidupcs: Baidupcs,
     pub s3: BTreeMap<String, S3>,
 }
@@ -175,7 +174,6 @@ impl Default for Delivery {
             uploader: String::new(),
             link_ttl_seconds: 604_800,
             short_link: ShortLink::default(),
-            bdpan: Bdpan::default(),
             baidupcs: Baidupcs::default(),
             s3: BTreeMap::new(),
         }
@@ -187,26 +185,6 @@ impl Default for Delivery {
 pub struct ShortLink {
     pub enabled: bool,
     pub endpoint: String,
-}
-
-/// `[delivery.bdpan]`: the Baidu Netdisk CLI. bdpan owns its own login;
-/// gig never reads or stores Baidu credentials.
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
-#[serde(default, deny_unknown_fields)]
-pub struct Bdpan {
-    /// The `bdpan` executable, resolved on PATH when not a path.
-    pub bin: String,
-    /// Remote folder under the bdpan app root (`/apps/bdpan/`).
-    pub remote_root: String,
-}
-
-impl Default for Bdpan {
-    fn default() -> Self {
-        Self {
-            bin: "bdpan".into(),
-            remote_root: "gig".into(),
-        }
-    }
 }
 
 /// `[delivery.baidupcs]`: the baidupcs-go CLI. baidupcs-go owns its own
@@ -374,12 +352,6 @@ impl Config {
             self.delivery.link_ttl_seconds = v.parse().map_err(|_| {
                 Error::Config("GIG_DELIVERY_LINK_TTL_SECONDS must be an integer".into())
             })?;
-        }
-        if let Some(v) = env("GIG_DELIVERY_BDPAN_BIN") {
-            self.delivery.bdpan.bin = v;
-        }
-        if let Some(v) = env("GIG_DELIVERY_BDPAN_REMOTE_ROOT") {
-            self.delivery.bdpan.remote_root = v;
         }
         if let Some(v) = env("GIG_DELIVERY_BAIDUPCS_BIN") {
             self.delivery.baidupcs.bin = v;
@@ -577,36 +549,6 @@ endpoint = "https://x"
         assert_eq!(cfg.general.warranty_days, 10);
         assert_eq!(cfg.s3_uploader_name(), Some("bj"));
         assert_eq!(cfg.general.drafts_dir(), PathBuf::from("/tmp/p/.drafts"));
-    }
-
-    #[test]
-    fn bdpan_section_defaults_parses_and_refuses_unknown_fields() {
-        let cfg = Config::default();
-        assert_eq!(cfg.delivery.bdpan.bin, "bdpan");
-        assert_eq!(cfg.delivery.bdpan.remote_root, "gig");
-        assert_eq!(cfg.delivery.uploader, "");
-
-        let text = "[delivery]\nuploader = \"bdpan\"\n[delivery.bdpan]\nbin = \"/opt/bdpan\"\n";
-        let cfg = Config::parse(text).unwrap();
-        assert_eq!(cfg.delivery.uploader, "bdpan");
-        assert_eq!(cfg.delivery.bdpan.bin, "/opt/bdpan");
-        assert_eq!(cfg.delivery.bdpan.remote_root, "gig");
-        assert_eq!(cfg.s3_uploader_name(), None);
-
-        assert!(Config::parse("[delivery.bdpan]\naccount = \"x\"\n").is_err());
-    }
-
-    #[test]
-    fn bdpan_env_overrides() {
-        let mut cfg = Config::default();
-        cfg.apply_overrides(|k| match k {
-            "GIG_DELIVERY_BDPAN_BIN" => Some("/tmp/fake-bdpan".into()),
-            "GIG_DELIVERY_BDPAN_REMOTE_ROOT" => Some("deliveries".into()),
-            _ => None,
-        })
-        .unwrap();
-        assert_eq!(cfg.delivery.bdpan.bin, "/tmp/fake-bdpan");
-        assert_eq!(cfg.delivery.bdpan.remote_root, "deliveries");
     }
 
     #[test]

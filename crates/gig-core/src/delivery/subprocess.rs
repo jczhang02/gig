@@ -188,7 +188,7 @@ mod tests {
     fn the_bin_is_found_as_a_path_or_on_path() {
         use std::os::unix::fs::PermissionsExt;
         let dir = tempfile::tempdir().unwrap();
-        let exe = dir.path().join("bdpan");
+        let exe = dir.path().join("baidupcs-go");
         std::fs::write(&exe, "#!/bin/sh\n").unwrap();
         std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
         let plain = dir.path().join("plain");
@@ -196,14 +196,14 @@ mod tests {
         let path =
             Some(std::env::join_paths(["/nonexistent-gig-dir".as_ref(), dir.path()]).unwrap());
 
-        assert_eq!(find_bin("bdpan", path.clone()), Some(exe.clone()));
+        assert_eq!(find_bin("baidupcs-go", path.clone()), Some(exe.clone()));
         assert_eq!(find_bin(exe.to_str().unwrap(), None), Some(exe.clone()));
         // Not executable, missing, empty, or no PATH at all: not found.
         assert_eq!(find_bin("plain", path.clone()), None);
         assert_eq!(find_bin(plain.to_str().unwrap(), path.clone()), None);
         assert_eq!(find_bin("nope", path.clone()), None);
         assert_eq!(find_bin("", path), None);
-        assert_eq!(find_bin("bdpan", None), None);
+        assert_eq!(find_bin("baidupcs-go", None), None);
         // A directory of that name is not the binary.
         assert_eq!(find_bin(dir.path().to_str().unwrap(), None), None);
     }

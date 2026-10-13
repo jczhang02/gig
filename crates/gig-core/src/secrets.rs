@@ -226,23 +226,13 @@ mod tests {
     }
 
     #[test]
-    fn availability_skips_short_link_token_for_bdpan() {
+    fn availability_skips_short_link_token_for_baidupcs() {
         let dir = tempfile::tempdir().unwrap();
         let paths = Paths::under_root(dir.path());
         let mut cfg = Config::default();
         cfg.delivery.short_link.enabled = true;
         // Unchanged: no uploader set, short links on, no token -> reported.
         assert_eq!(availability(&cfg, &paths).len(), 1);
-        cfg.delivery.uploader = "bdpan".into();
-        assert!(availability(&cfg, &paths).is_empty());
-    }
-
-    #[test]
-    fn availability_skips_short_link_token_for_baidupcs() {
-        let dir = tempfile::tempdir().unwrap();
-        let paths = Paths::under_root(dir.path());
-        let mut cfg = Config::default();
-        cfg.delivery.short_link.enabled = true;
         cfg.delivery.uploader = "baidupcs".into();
         assert!(availability(&cfg, &paths).is_empty());
         // An S3 default still needs it.
