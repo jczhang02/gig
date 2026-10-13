@@ -165,7 +165,8 @@ pub fn run(ctx: &Ctx, fix: bool) -> Result<Report> {
     let uploader = ctx.config.delivery.uploader.as_str();
     match UploaderName::parse(uploader) {
         Ok(UploaderName::Bdpan) => check_bdpan(&ctx.config.delivery, &mut problems, &mut warnings),
-        Ok(UploaderName::S3(_)) => {}
+        // The baidupcs check comes with the removal of bdpan.
+        Ok(UploaderName::Baidupcs | UploaderName::S3(_)) => {}
         // No default uploader: uploads are off, which is allowed.
         Err(_) if uploader.is_empty() => {}
         Err(e) => problem(

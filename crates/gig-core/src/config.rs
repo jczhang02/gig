@@ -160,11 +160,12 @@ impl General {
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(default, deny_unknown_fields)]
 pub struct Delivery {
-    /// "s3:<name>", "bdpan", or "" for no uploader.
+    /// "s3:<name>", "baidupcs", "bdpan", or "" for no uploader.
     pub uploader: String,
     pub link_ttl_seconds: u32,
     pub short_link: ShortLink,
     pub bdpan: Bdpan,
+    pub baidupcs: Baidupcs,
     pub s3: BTreeMap<String, S3>,
 }
 
@@ -175,6 +176,7 @@ impl Default for Delivery {
             link_ttl_seconds: 604_800,
             short_link: ShortLink::default(),
             bdpan: Bdpan::default(),
+            baidupcs: Baidupcs::default(),
             s3: BTreeMap::new(),
         }
     }
@@ -203,6 +205,26 @@ impl Default for Bdpan {
         Self {
             bin: "bdpan".into(),
             remote_root: "gig".into(),
+        }
+    }
+}
+
+/// `[delivery.baidupcs]`: the baidupcs-go CLI. baidupcs-go owns its own
+/// login (BDUSS + STOKEN); gig never reads or stores Baidu credentials.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(default, deny_unknown_fields)]
+pub struct Baidupcs {
+    /// The `baidupcs-go` executable, resolved on PATH when not a path.
+    pub bin: String,
+    /// Absolute netdisk folder that uploads go under.
+    pub remote_root: String,
+}
+
+impl Default for Baidupcs {
+    fn default() -> Self {
+        Self {
+            bin: "baidupcs-go".into(),
+            remote_root: "/gig".into(),
         }
     }
 }
@@ -358,6 +380,12 @@ impl Config {
         }
         if let Some(v) = env("GIG_DELIVERY_BDPAN_REMOTE_ROOT") {
             self.delivery.bdpan.remote_root = v;
+        }
+        if let Some(v) = env("GIG_DELIVERY_BAIDUPCS_BIN") {
+            self.delivery.baidupcs.bin = v;
+        }
+        if let Some(v) = env("GIG_DELIVERY_BAIDUPCS_REMOTE_ROOT") {
+            self.delivery.baidupcs.remote_root = v;
         }
         // `GIG_TUI_*` is applied by `gig tui` only (gig_tui::resolve_settings),
         // so a malformed TUI variable cannot break the JSON commands.
@@ -579,6 +607,34 @@ endpoint = "https://x"
         .unwrap();
         assert_eq!(cfg.delivery.bdpan.bin, "/tmp/fake-bdpan");
         assert_eq!(cfg.delivery.bdpan.remote_root, "deliveries");
+    }
+
+    #[test]
+    fn baidupcs_section_defaults_parses_and_refuses_unknown_fields() {
+        let cfg = Config::default();
+        assert_eq!(cfg.delivery.baidupcs.bin, "baidupcs-go");
+        assert_eq!(cfg.delivery.baidupcs.remote_root, "/gig");
+
+        let text = "[delivery]\nuploader = \"baidupcs\"\n[delivery.baidupcs]\nbin = \"/opt/baidupcs-go\"\n";
+        let cfg = Config::parse(text).unwrap();
+        assert_eq!(cfg.delivery.uploader, "baidupcs");
+        assert_eq!(cfg.delivery.baidupcs.bin, "/opt/baidupcs-go");
+        assert_eq!(cfg.delivery.baidupcs.remote_root, "/gig");
+
+        assert!(Config::parse("[delivery.baidupcs]\nbduss = \"x\"\n").is_err());
+    }
+
+    #[test]
+    fn baidupcs_env_overrides() {
+        let mut cfg = Config::default();
+        cfg.apply_overrides(|k| match k {
+            "GIG_DELIVERY_BAIDUPCS_BIN" => Some("/tmp/fake-baidupcs".into()),
+            "GIG_DELIVERY_BAIDUPCS_REMOTE_ROOT" => Some("/deliveries".into()),
+            _ => None,
+        })
+        .unwrap();
+        assert_eq!(cfg.delivery.baidupcs.bin, "/tmp/fake-baidupcs");
+        assert_eq!(cfg.delivery.baidupcs.remote_root, "/deliveries");
     }
 
     #[test]
