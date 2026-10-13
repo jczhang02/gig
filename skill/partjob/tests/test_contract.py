@@ -14,6 +14,8 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+# The gig checkout this skill lives in, so a worktree tests the gig it built.
+REPO_ROOT = ROOT.parents[1]
 SKILL = (ROOT / "SKILL.md").read_text(encoding="utf-8")
 COMMANDS_DIR = ROOT / "commands"
 TEMPLATES = ROOT / "templates"
@@ -177,7 +179,7 @@ class SkillShape(unittest.TestCase):
 
 
 def gig_bin():
-    candidate = Path(os.environ.get("GIG_BIN", Path.home() / "Documents/dev-tools/gig/target/debug/gig"))
+    candidate = Path(os.environ.get("GIG_BIN", REPO_ROOT / "target/debug/gig"))
     if not candidate.is_file():
         raise AssertionError(f"gig binary not found at {candidate}; build gig v2 or set GIG_BIN")
     return candidate

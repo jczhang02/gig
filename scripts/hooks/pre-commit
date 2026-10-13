@@ -12,5 +12,6 @@ if [ -n "$code" ]; then
 fi
 if [ -n "$code$skill" ]; then
   cargo build --quiet
-  python3 -I -m unittest discover -s skill/partjob/tests
+  # The binary this checkout just built, also when it is a worktree.
+  GIG_BIN="$PWD/target/debug/gig" python3 -I -m unittest discover -s skill/partjob/tests
 fi
