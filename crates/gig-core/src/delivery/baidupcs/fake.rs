@@ -2,7 +2,7 @@
 //! replies shaped like the live baidupcs-go v4.0.2-dev text output
 //! (including the `\r`-separated upload progress). Point
 //! `delivery.baidupcs.bin` (or `GIG_DELIVERY_BAIDUPCS_BIN`) at
-//! [`FakeBaiduPcs::bin`].
+//! [`FakeBaidupcs::bin`].
 //!
 //! Available to this crate's tests and, through the `test-util` feature, to
 //! other crates' tests. All values are synthetic.
@@ -28,7 +28,7 @@ pub const PWD: &str = "gk42";
 /// The share id the fake returns by default.
 pub const SHARE_ID: &str = "13082948151";
 
-/// The line the upload prints before its success line; [`FakeBaiduPcs::hold_upload`]
+/// The line the upload prints before its success line; [`FakeBaidupcs::hold_upload`]
 /// stops the reply there.
 const SUCCESS_MARK: &str = "[1] 上传文件成功";
 
@@ -193,11 +193,11 @@ fn upload_transcript(result: &str) -> String {
 /// A fake `baidupcs-go` installed in a directory the caller owns (a
 /// tempdir).
 #[derive(Debug, Clone)]
-pub struct FakeBaiduPcs {
+pub struct FakeBaidupcs {
     dir: PathBuf,
 }
 
-impl FakeBaiduPcs {
+impl FakeBaidupcs {
     /// Write the script to `<dir>/baidupcs-go`. By default the account is
     /// logged in, and `mkdir`, `upload`, `meta` ([`SIZE`]) and `share` succeed.
     pub fn install(dir: &Path) -> io::Result<Self> {

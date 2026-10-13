@@ -1,7 +1,7 @@
 //! Consistency checks over paths, packages, project files, config and secrets.
 
 use crate::config::Delivery;
-use crate::delivery::{BaiduPcsUploader, UploaderName};
+use crate::delivery::{BaidupcsUploader, UploaderName};
 use crate::models::{OrderStatus, PackageStatus};
 use crate::package::validate::gitignore_covers_delivery;
 use crate::repo::{orders as repo_orders, packages};
@@ -203,7 +203,7 @@ fn message(e: Error) -> String {
 /// baidupcs-go owns its login: ask `who` and report, never fix. The STOKEN
 /// cannot be checked without reading credentials, so it is not.
 fn check_baidupcs(delivery: &Delivery, problems: &mut Vec<Problem>) {
-    if let Err(e) = BaiduPcsUploader::new(delivery).who() {
+    if let Err(e) = BaidupcsUploader::new(delivery).who() {
         problem(problems, "baidupcs", message(e));
     }
 }

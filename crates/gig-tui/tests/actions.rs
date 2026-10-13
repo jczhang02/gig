@@ -732,9 +732,9 @@ fn tab_switches_the_uploader_of_an_upload_confirm() {
 #[cfg(unix)]
 #[test]
 fn the_job_runs_with_the_chosen_uploader_and_shows_the_pwd() {
-    use gig_core::delivery::baidupcs::fake::{self, FakeBaiduPcs, Reply};
+    use gig_core::delivery::baidupcs::fake::{self, FakeBaidupcs, Reply};
     let mut h = Harness::new();
-    let fake = FakeBaiduPcs::install(h._dir.path()).unwrap();
+    let fake = FakeBaidupcs::install(h._dir.path()).unwrap();
     with_uploaders(&mut h, &fake.bin());
     let (id, pkg) = with_checked_package(&mut h, "tk-pan", PackageKind::Full);
     let zip = gig_core::repo::packages::find(&h.ctx.conn, id, &pkg)

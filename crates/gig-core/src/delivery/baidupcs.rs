@@ -74,14 +74,14 @@ pub(crate) fn not_found(bin: &str) -> Error {
 
 /// Uploads through `baidupcs-go` into `<remote_root>/<dir part of the
 /// object key>/<local basename>` and shares the file.
-pub struct BaiduPcsUploader {
+pub struct BaidupcsUploader {
     bin: String,
     remote_root: String,
     link_ttl_seconds: u32,
     call_timeout: Duration,
 }
 
-impl BaiduPcsUploader {
+impl BaidupcsUploader {
     pub fn new(delivery: &Delivery) -> Self {
         Self {
             bin: delivery.baidupcs.bin.clone(),
@@ -265,7 +265,7 @@ impl BaiduPcsUploader {
     }
 }
 
-impl Uploader for BaiduPcsUploader {
+impl Uploader for BaidupcsUploader {
     fn name(&self) -> &str {
         NAME
     }
@@ -494,7 +494,7 @@ mod tests {
                 sink.lock().unwrap().push((a, b))
             })),
         };
-        let uploader = BaiduPcsUploader::new(&delivery);
+        let uploader = BaidupcsUploader::new(&delivery);
         let remote = uploader.remote(&local, &opts).unwrap();
         assert!(
             remote.dir.ends_with(&format!("/_live/{stamp}")),
@@ -531,7 +531,7 @@ mod tests {
 
     #[cfg(unix)]
     mod with_fake_bin {
-        use super::super::fake::{self, FakeBaiduPcs, Reply};
+        use super::super::fake::{self, FakeBaidupcs, Reply};
         use super::super::*;
         use std::path::PathBuf;
         use std::sync::{Arc, Mutex};
@@ -539,15 +539,15 @@ mod tests {
 
         struct Setup {
             _dir: TempDir,
-            fake: FakeBaiduPcs,
+            fake: FakeBaidupcs,
             local: PathBuf,
-            uploader: BaiduPcsUploader,
+            uploader: BaidupcsUploader,
         }
 
         /// A fake bin and a local `p-1.zip` of [`fake::SIZE`] bytes (sparse).
         fn setup() -> Setup {
             let dir = tempfile::tempdir().unwrap();
-            let fake = FakeBaiduPcs::install(dir.path()).unwrap();
+            let fake = FakeBaidupcs::install(dir.path()).unwrap();
             let local = dir.path().join("p-1.zip");
             std::fs::File::create(&local)
                 .unwrap()
@@ -555,7 +555,7 @@ mod tests {
                 .unwrap();
             let mut delivery = Delivery::default();
             delivery.baidupcs.bin = fake.bin().to_string_lossy().into_owned();
-            let uploader = BaiduPcsUploader::new(&delivery);
+            let uploader = BaidupcsUploader::new(&delivery);
             Setup {
                 _dir: dir,
                 fake,
@@ -575,7 +575,7 @@ mod tests {
         type Seen = Arc<Mutex<Vec<(u64, u64)>>>;
 
         /// Options for `key` whose callback records each report and, after
-        /// the third, creates `gate` (see [`FakeBaiduPcs::hold_upload`]).
+        /// the third, creates `gate` (see [`FakeBaidupcs::hold_upload`]).
         fn opts_with_progress(key: &str, gate: PathBuf) -> (UploadOpts, Seen) {
             let seen = Seen::default();
             let sink = seen.clone();
@@ -769,7 +769,7 @@ mod tests {
                     object_key: key.map(str::to_string),
                     progress: None,
                 };
-                BaiduPcsUploader::new(&delivery)
+                BaidupcsUploader::new(&delivery)
                     .upload(&s.local, &opts)
                     .unwrap();
                 let calls = s.fake.calls();
@@ -786,7 +786,7 @@ mod tests {
             delivery.baidupcs.bin = s.fake.bin().to_string_lossy().into_owned();
             delivery.link_ttl_seconds = 86_401;
             let before = time::OffsetDateTime::now_utc().unix_timestamp();
-            let r = BaiduPcsUploader::new(&delivery)
+            let r = BaidupcsUploader::new(&delivery)
                 .upload(&s.local, &opts("a/p-1.zip"))
                 .unwrap();
             assert!(s.fake.calls()[4].starts_with("share set --period 2 -f "));

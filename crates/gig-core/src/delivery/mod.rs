@@ -7,7 +7,7 @@ pub mod progress;
 pub mod s3;
 mod subprocess;
 
-pub use baidupcs::BaiduPcsUploader;
+pub use baidupcs::BaidupcsUploader;
 pub use progress::WithProgress;
 pub use s3::S3Uploader;
 
@@ -288,7 +288,7 @@ pub(crate) fn output_name(uploader: &dyn Uploader) -> Option<String> {
 /// Share is never shortened.
 pub fn uploader_by_name(config: &Config, paths: &Paths, name: &str) -> Result<Box<dyn Uploader>> {
     let s3_name = match check_uploader_name(config, name)? {
-        UploaderName::Baidupcs => return Ok(Box::new(BaiduPcsUploader::new(&config.delivery))),
+        UploaderName::Baidupcs => return Ok(Box::new(BaidupcsUploader::new(&config.delivery))),
         UploaderName::S3(s3) => s3,
     };
     let resolved = secrets::resolve_s3_named(config, paths, &s3_name)?;

@@ -1,7 +1,7 @@
 //! End-to-end: run the `gig` binary in a temporary GIG_HOME through a whole order.
 
 #[cfg(unix)]
-use gig_core::delivery::baidupcs::fake::{self, FakeBaiduPcs, Reply};
+use gig_core::delivery::baidupcs::fake::{self, FakeBaidupcs, Reply};
 use serde_json::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -613,9 +613,9 @@ fn bare_gig_without_a_terminal_still_requires_a_command() {
 /// uploader `s3:hk` (no keys), short links enabled (no token), and
 /// `delivery.baidupcs.bin` pointing at a fake baidupcs-go.
 #[cfg(unix)]
-fn order_with_fake_baidupcs(env: &Env) -> (tempfile::TempDir, FakeBaiduPcs) {
+fn order_with_fake_baidupcs(env: &Env) -> (tempfile::TempDir, FakeBaidupcs) {
     let bin_dir = tempfile::tempdir().unwrap();
-    let fake = FakeBaiduPcs::install(bin_dir.path()).unwrap();
+    let fake = FakeBaidupcs::install(bin_dir.path()).unwrap();
     let cfg = env.root.path().join("config/config.toml");
     let mut text = fs::read_to_string(&cfg).unwrap();
     text.push_str(&format!(
@@ -642,7 +642,7 @@ fn order_with_fake_baidupcs(env: &Env) -> (tempfile::TempDir, FakeBaiduPcs) {
 /// Make the fake's `meta` report the size a dry run of `args` names, so
 /// the uploader's remote size check passes.
 #[cfg(unix)]
-fn meta_matches(env: &Env, fake: &FakeBaiduPcs, args: &[&str]) {
+fn meta_matches(env: &Env, fake: &FakeBaidupcs, args: &[&str]) {
     let size = env.ok(args)["size"].as_u64().unwrap();
     fake.reply("meta", Reply::meta(size)).unwrap();
 }
@@ -860,7 +860,7 @@ fn config_set_accepts_the_baidupcs_uploader() {
 #[cfg(unix)]
 mod doctor_baidupcs {
     use super::Env;
-    use gig_core::delivery::baidupcs::fake::{FakeBaiduPcs, Reply};
+    use gig_core::delivery::baidupcs::fake::{FakeBaidupcs, Reply};
     use serde_json::Value;
     use std::fs;
     use std::path::Path;
@@ -895,7 +895,7 @@ mod doctor_baidupcs {
     #[test]
     fn a_logged_in_baidupcs_is_healthy_and_doctor_only_asks_who() {
         let env = Env::new();
-        let fake = FakeBaiduPcs::install(env.root.path()).unwrap();
+        let fake = FakeBaidupcs::install(env.root.path()).unwrap();
         use_baidupcs(&env, &fake.bin());
 
         let r = env.ok(&["doctor"]);
@@ -923,7 +923,7 @@ mod doctor_baidupcs {
     fn a_baidupcs_binary_that_is_not_executable_is_a_problem() {
         use std::os::unix::fs::PermissionsExt;
         let env = Env::new();
-        let fake = FakeBaiduPcs::install(env.root.path()).unwrap();
+        let fake = FakeBaidupcs::install(env.root.path()).unwrap();
         fs::set_permissions(fake.bin(), fs::Permissions::from_mode(0o644)).unwrap();
         use_baidupcs(&env, &fake.bin());
 
@@ -939,7 +939,7 @@ mod doctor_baidupcs {
     #[test]
     fn a_logged_out_baidupcs_is_a_problem_with_the_login_hint() {
         let env = Env::new();
-        let fake = FakeBaiduPcs::install(env.root.path()).unwrap();
+        let fake = FakeBaidupcs::install(env.root.path()).unwrap();
         fake.reply("who", Reply::who_logged_out()).unwrap();
         use_baidupcs(&env, &fake.bin());
 
