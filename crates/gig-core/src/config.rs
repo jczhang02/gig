@@ -580,6 +580,16 @@ endpoint = "https://x"
     }
 
     #[test]
+    fn a_config_with_the_removed_bdpan_table_is_refused_naming_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "[delivery.bdpan]\nbin = \"bdpan\"\n").unwrap();
+        let err = Config::load(&path).unwrap_err();
+        assert_eq!(err.code(), "config", "{err}");
+        assert!(err.to_string().contains("unknown field `bdpan`"), "{err}");
+    }
+
+    #[test]
     fn unknown_fields_are_errors() {
         assert!(Config::parse("[general]\ndefault_uploader = \"x\"\n").is_err());
     }
